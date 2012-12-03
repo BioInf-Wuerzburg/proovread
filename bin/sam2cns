@@ -1,0 +1,302 @@
+#!/usr/bin/env perl
+use warnings;
+use strict;
+
+use Pod::Usage;
+use Getopt::Long;
+
+use FindBin qw($Bin);
+use lib "$Bin/../lib/";
+
+use Verbose;
+use Verbose::ProgressBar;
+
+use Sam::Parser;
+use Sam::Alignment ':flags';
+use Sam::Seq;
+
+use Fasta::Parser;
+use Fasta::Seq;
+
+use Fastq::Parser;
+use Fastq::Seq;
+
+our $Version  = '0.02';
+our ($Revision) = '$Revision: 580 $' =~ /(\d+)/;
+
+
+=head1 NAME
+
+sam2cns
+
+=cut
+
+=head1 DESCRIPTION
+
+Compute consensus sequences based on SAM file.
+
+=head1 SYNOPSIS
+
+  sam2cns <OPTIONS>
+
+=cut
+
+=head1 CHANGELOG
+
+=over
+
+=item 0.02
+
+Feature. Added C<--sticky-end-length> parameter.
+
+Change. Reduced sticky end length from 80 to 60.
+
+=item 0.01 [Thomas Hackl 2012-10-24]
+
+Initial script.
+
+=cut
+
+=back
+
+=cut
+
+
+my %opt;
+
+##------------------------------------------------------------------------##
+
+=head1 OPTIONS
+
+=cut
+
+=over 12
+
+=cut
+
+=item --prefix=<STRING>
+
+Prefix for output files.
+
+=cut 
+
+$opt{'prefix=s'} = \(my $opt_pre = '');
+
+=item --sam=<PATHNAME>
+
+A SAM file, sorted by reference, from which a consensus sequence for each reference sequence
+ is to be calculated.
+
+=cut
+
+$opt{'sam=s'} = \(my $opt_sam_file);
+
+=item [--sam-offset=<INT>]
+
+A byte offset at which to start running through the --sam-file.
+
+=cut
+
+$opt{'sam-offset=i'} = \(my $opt_sam_offset);
+
+=item [--ref=<PATHNAME>]
+
+Reference sequences in FASTA or FASTQ format. If FASTQ is provided, detects 
+ HCR tags in header description and inlcudes corresponding sequence 
+ information in the consensus computation.
+
+=cut
+
+$opt{'ref=s'} = \(my $opt_ref_pat);
+
+=item [--ref-offset=<INT>]
+
+A byte offset at which to start running through the --ref-in file.
+
+=cut
+
+$opt{'ref-offset=i'} = \(my $opt_ref_offset);
+
+=item [--max-reads=<INT>] [0]
+
+Maximum number of reads to correct. Default OFF.
+
+=cut
+
+$opt{'max-reads=s'} = \(my $opt_max_reads = 0);
+
+=item [--hcr-mask] [off]
+
+Compute HCR regions and mask their cores with "N"s in output FASTA. Append
+ HCR coordinates to header descriptions.
+
+=cut
+
+$opt{'hcr-mask'} = \(my $opt_hcr_mask);
+
+=item [--coverage=<INT>] [50]
+
+Estimated coverage.
+
+=cut
+
+$opt{'coverage=s'} = \(my $opt_cov = 50);
+
+=item [--qv-offset=<INT>] [33]
+
+Quality offset.
+
+=cut
+
+$opt{'qv-offset=s'} = \(my $opt_qv_offset = 33);
+
+=item [--sticky-end-length=<INT>] [80]
+
+Number of HCR terminal bases not to be masked.
+
+=cut
+
+$opt{'sticky-end-length=i'} = \(my $opt_sticky_end_length = 80);
+
+
+
+=back
+
+=cut
+
+
+
+
+##------------------------------------------------------------------------##
+
+=head1 MAIN
+
+=cut
+
+GetOptions(%opt) or pod2usage(1);
+$opt_sam_file || pod2usage(msg => 'SAM file required');
+
+
+my $v = Verbose->new();
+
+# init sam parser
+my $sp = Sam::Parser->new(
+	file => $opt_sam_file,
+);
+
+$Sam::Seq::BinMaxCoverage = 10;
+$Sam::Seq::BinSize = 20;
+
+
+# qual_lcs is used on cov seq to mask high cov regions, min cov 10
+Fastq::Seq->Qual_lcs_range(10, $opt_cov+20, $opt_qv_offset);  
+# 80 chars are cutoff at each side to keep overlaps => min length 160, better 200
+Fastq::Seq->Qual_lcs_min_length(int($opt_sticky_end_length + ($opt_sticky_end_length * 0.2))); 
+
+
+# use glob, to allow glob pattern instead of full filename (fa/fq is decided by parser)
+my ($opt_ref_file) = glob($opt_ref_pat);
+
+$v->exit("Reference file not found ($opt_ref_pat)") unless $opt_ref_file;
+
+# init fastq/fasta parser
+my $rpr = Fastq::Parser->new(file => $opt_ref_file)->check_format;
+$rpr = Fasta::Parser->new(file => $opt_ref_file)->check_format unless $rpr;
+$v->exit("Unknown format of reference file: $opt_ref_file") unless $rpr;
+
+# DEPRECATED
+# for old Fasta::Parser -> bad check_format
+#my $rpr = $opt_ref_file =~/q$/
+#	? Fastq::Parser->new(file => $opt_ref_file)
+#	: Fasta::Parser->new(file => $opt_ref_file);
+
+# output files
+
+my $fq_out = $opt_pre.'.fq';
+my $fa_out = $opt_pre.'.fa';
+my $fm_out = $opt_pre.'.fm';
+
+
+
+my $fqh;
+open($fqh, ">", $fq_out) || $v->exit("Can't open output read file: '$fq_out'");
+my $fah;
+open($fah, ">", $fa_out) || $v->exit("Can't open output read file: '$fa_out'");
+my $fmh;
+open($fmh, ">", $fm_out) || $v->exit("Can't open output read file: '$fm_out'");
+
+
+
+my %PB;
+
+
+# read fasta
+$rpr->seek($opt_ref_offset) if $opt_ref_offset;
+my $ref_c = 0;
+while(my $ref = $rpr->next_seq()){
+	$PB{$ref->id} = Sam::Seq->new(
+		ref => $ref,
+		len => length($ref->seq),
+		id => $ref->id
+	);
+	last if ++$ref_c >= $opt_max_reads;
+}
+# read sam
+$sp->seek($opt_sam_offset) if $opt_sam_offset;
+while(my $aln = $sp->next_aln()){
+	# try to add aln, if sufficient score, add to temporary sam file
+	last unless exists $PB{$aln->rname};
+	$PB{$aln->rname}->add_aln($aln);
+}
+
+# calculate consensus
+foreach my $pb_id(sort keys %PB){
+	my @hcrs = ();
+	if(my $hcrs = $PB{$pb_id}{ref}->desc){
+		while($hcrs =~ /HCR\d+:(\d+),(\d+)/g){
+			push @hcrs, [$1, $2];
+		}
+	};
+	
+	my $con = $PB{$pb_id}->consensus(@hcrs);
+	my $con_mask = $con->clone;
+	# undef state matrix to clear some memory
+	$PB{$pb_id}{_state_matrix} = {}; 
+	
+	# use cov seq instead of qual seq in Fastq::Seq, mask based on cov
+	$con_mask->{qual} = $con_mask->{cov};
+
+	if($opt_hcr_mask){
+		# compute high coverage regions 
+		my @hcrs = ($con_mask->qual_lcs());
+		if(@hcrs){
+			my $i = 0;
+			# create a description string of hcrs in seq
+			my @hcrs_string = map{"HCR".++$i.":".$_->[0].','.$_->[1]}@hcrs;
+			# add desc to header
+			$con->{seq_head}.= ' '.join(" ", @hcrs_string);
+			# mask hcrs minus overlap ends
+			# NOTE: this actually changes the values @hcrs!
+			$con_mask->mask_seq(map{$_->[0]+=$opt_sticky_end_length; $_->[1]-=$opt_sticky_end_length; $_}@hcrs);
+		}
+	
+		# write (masked) FASTA for next pass
+		printf $fmh (">%s\n%s\n", substr($con->seq_head, 1), $con_mask->seq);
+	}
+	
+	# write current fastq
+	print $fqh $con->string;
+	
+	# write current fasta
+	printf $fah (">%s\n%s\n", substr($con->seq_head, 1), $con->seq);
+	
+	
+}
+
+
+
+=head1 AUTHORS
+
+Thomas Hackl S<thomas.hackl@uni-wuerzburg.de>
+
+=cut

@@ -1,0 +1,972 @@
+#!/usr/bin/env perl
+
+##------------------------------------------------------------------------##
+# LICENCE
+#
+#
+# $Id$
+#
+##------------------------------------------------------------------------##
+
+use warnings;
+use strict;
+
+use Getopt::Long;
+use Pod::Usage;
+use List::Util qw(sum max);
+
+use File::Basename;
+use File::Path qw(make_path remove_tree);
+use File::Copy;
+use FindBin qw($Bin);
+
+use lib "$Bin/../lib/";
+
+use Verbose;
+use Verbose::ProgressBar;
+
+use Fastq::Parser;
+use Fastq::Seq;
+
+use Fasta::Parser;
+use Fasta::Seq;
+
+use Sam::Parser;
+use Sam::Alignment;
+use Sam::Seq;
+
+use Shrimp;
+
+
+our $Version  = '0.62';
+our ($Revision) = '$Revision: 580 $' =~ /(\d+)/;
+
+
+
+=head1 NAME
+
+proovread
+
+=cut
+
+=head1 DESCRIPTION
+
+Correct single molecule sequencing reads by iterative mapping of high
+ throughput sequencing reads.
+
+=cut
+
+=head1 CHANGELOG
+
+=over
+
+=item 0.62
+
+Renaming. "--reads" to "--short-reads" and "--ref" to "--long-reads"
+
+Change. C<--qv-offset> is now required without default. 
+
+Change. Rearranged parameter specs, removed parameter currently not working/under
+ development.
+
+Renaming. <reads> variables to <sr>, <ref> to <lr>.
+
+Change. Default C<--full-threshold> to 55%,35%.
+
+Change. Reduced gap extension costs for shrimp by one to prevent 
+ misalignments of Triplet/... insertions in variants and to account
+ for slight bias towards homopolymer errors.
+
+=item 0.61
+
+Bugfix. --reads did not recycle value, if only one set was given and 
+ multiple passes are run.
+
+=item 0.60
+
+Bugfix. --reads did not recycle value, if only one set was given and 
+ multiple passes are run.
+
+Refactoring. Versionized.
+
+=back
+
+=cut
+
+=head1 TODO
+
+=over
+
+=item hcr-masked and hcr-unmasked output
+
+=item masking stats -> FastaFilter
+
+=item 1-3 passes
+
+=back
+
+=cut
+
+##------------------------------------------------------------------------##
+
+my %opt;
+
+=head1 OPTIONS
+
+=cut
+
+=over
+
+=cut
+
+=item --long-reads=<PATHNAME>
+
+Pacbio reads to correct. FASTA format.
+
+=cut
+
+$opt{'long-reads=s'} = \(my $opt_lr_file);
+
+=item --short-reads=<PATHNAME>
+
+High confidence short reads used for correction in FASTQ format.
+ Either one set of reads for all passes or a comma separated list, 
+ one value for each pass.
+
+=cut
+
+$opt{'short-read=s'} = \(my $opt_sr_file);
+
+=item --qv-offset
+
+Short read quality offset, usually 64 or 33. Required
+
+=cut
+
+$opt{'qv-offset=i'} = \(my $opt_qv_offset);
+
+=item [--prefix=<STRING>]
+
+Prefix to output files. Defaults to <CWD>/<SHORTREADS#LONGREADS> or
+ <CWD>/<SAM>, respectively.
+
+=cut
+
+$opt{'prefix=s'} = \(my $opt_prefix);
+
+=item [--coverage=<INT>] [50]
+
+Coverage cutoff for highest scoring mappings at each location.
+
+=cut
+
+$opt{'coverage=s'} = \(my $opt_cov = 50);
+
+=item [--full-threshold=<STRING>] [55%,35%]
+
+Shrimp SW Full Hit Threshold. Comma separated, one value for each pass.
+
+=cut
+
+$opt{'full-threshold=s'} = \(my $opt_full_threshold = "55%,35%");
+
+
+=item [--threads] [1]
+
+Number of threads to use for mapping.
+
+=cut
+
+$opt{'threads=i'} = \(my $opt_threads = 1);
+
+=item [--chunk-size] [100]
+
+Number of reads to check out at once for individual correction 
+ process.
+
+NOTE: Affects correction, does not affect shrimp.
+
+=cut
+
+$opt{'chunk-size=i'} = \(my $opt_chunk_size = 125);
+
+=item [--ram-sam] [OFF]
+
+By default, while mapping, a temporary SAM file is created and an index to
+ this file is kept in store. This limits the memory requirement for one SMRT
+ cell (>100Mbp, 50X coverage) to less than 10Gb. 
+
+Specify '--ram-sam' to hold the SAM presentation entirely in memory. This is
+ faster and saves disk space, but might require up to 100GB per SMRT cell. 
+
+=cut
+
+$opt{'ram-sam'} = \(my $opt_ram_sam);
+
+=item [--raw-sam] [OFF]
+
+Do not process shrimp output on-the-fly, but create a raw sam file
+ and parse this file. Use this for small genomes, where one SMRT
+ Cell covers the genome more than 1X. Otherwise the mapper is 
+ thwarted by the parser.
+
+=cut
+
+$opt{'raw-sam'} = \(my $opt_raw_sam);
+
+=item [--sort-sam-by-coordinates] [OFF]
+
+Sort the filtered SAM files by coordinates in addition to the 
+ sorting of references. This has no effect on the pipeline, just 
+ a convenience if you need the files for something else.
+
+=cut
+
+$opt{'sort-sam-by-coordinates'} = \(my $opt_sort_sam_by_coords);
+
+
+
+=item [--keep|--keep-temporary-files] [OFF]
+
+Specify once, to keep temporary file of each pass, twice to also keep the
+ individual temporary file of each thread.
+
+=cut
+
+$opt{'keep-temporary-files+'} = \(my $opt_keep = 0);
+
+
+=item [--help]
+
+Show this help.
+
+=cut
+
+$opt{'help'} = \(my $opt_help);
+
+=back
+
+=cut
+
+
+##------------------------------------------------------------------------##
+
+=head1 DEVEL OPTIONS
+
+=cut
+
+=over
+
+=cut
+
+=item [--passes=<INT>] [2]
+
+Number of passes.
+
+=cut
+
+$opt{'passes=s'} = \(my $opt_passes = 2);
+
+=item [--sam=<SAM>]
+
+Use an already created SAM file to create corrected sequences instead of 
+ mapping reads to the raw pacbio reads.
+ 
+=cut
+
+$opt{'sam=s'} = \(my $opt_sam_file);
+
+=item [--coverage-tables] [FALSE]
+
+Calculate and output exact coverage by score tables.
+
+=cut
+
+$opt{'coverage-tables!'} = \(my $opt_cov_tables);
+
+=back
+
+=cut
+
+##------------------------------------------------------------------------##
+
+
+
+GetOptions(%opt) or pod2usage(1);
+$opt_help && pod2usage(1);
+$opt_sam_file || ($opt_lr_file && $opt_sr_file) || pod2usage(1);
+defined $opt_qv_offset || pod2usage(msg=>"--qv-offset required");
+
+
+
+##------------------------------------------------------------------------##
+
+# globals
+my %PB;
+my @PB_IDS;
+my $PASS;
+my $PG_line;
+my $PASS_0_suffix;
+
+# verbose
+my $v = Verbose->new(
+	format => "[{TIME_SHORT}] {MESSAGE}\n",
+);
+
+# verbose bash style
+my $vb = Verbose->new(
+	line_delim => "\\\n",
+	line_width => 80,
+	format => "{HLINE}{MESSAGE}\n",
+);
+
+
+
+##------------------------------------------------------------------------##
+
+$v->verbose("Running $0, $Version");
+my $params = "Parameter:";
+foreach(sort keys %opt){
+	$params.= sprintf("\n\t%s => %s", $_, defined(${$opt{$_}}) ? ${$opt{$_}} : 'undef' );
+}
+$v->verbose($params);
+
+# read files
+my @opt_sr_file = split(",", $opt_sr_file);
+
+# recycle
+if(@opt_sr_file == 1 and $opt_passes > 1){
+	@opt_sr_file = ($opt_sr_file[0]) x $opt_passes;
+}
+if(@opt_sr_file != $opt_passes){
+	pod2usage(
+		'-msg' => "number of '--sr' files (". scalar @opt_sr_file .") differs from number of --passes ($opt_passes)",
+		'-exitval' => 1
+	);
+}
+
+# lr file
+if($opt_lr_file){
+	$v->exit($opt_lr_file.": ".$!) unless -e $opt_lr_file;
+	foreach my $orf (@opt_sr_file){
+		$v->exit($orf.": ".$!) unless -e $orf;
+	}
+}elsif($opt_sam_file){
+	$v->exit($opt_sam_file.": ".$!) unless -e $opt_sam_file;
+}
+	
+
+
+# get prefix from input files, if none specified
+unless($opt_prefix){
+	if($opt_lr_file){
+		my ($pb_name, $pb_path, $pb_suffix) = fileparse($opt_lr_file, qw(.fasta .fa .fastq .fq));
+		my ($sr_name, $sr_path, $sr_suffix) = fileparse($opt_sr_file, qw(.fastq .fq));
+		$opt_prefix = $sr_name.'#'.$pb_name;
+	}else{
+		my ($prefix, $path, $suffix) = fileparse($opt_sam_file, qw(.sam));
+		$opt_prefix = $prefix;
+	}	
+}
+
+my $opt_sam_tmp = $opt_prefix.".tmp.sam";
+my $opt_log = $opt_prefix.".log";
+my $opt_fa_out = $opt_prefix.".fa";
+my $opt_fq_out = $opt_prefix.".fq";
+
+
+my @opt_full_threshold = split(",", $opt_full_threshold);
+
+# create tmp folders
+my @tmp_dirs = map{$opt_prefix."_p".$_}(0..$opt_passes);
+make_path(@tmp_dirs);
+
+# coverage settings
+# TODO: coverage from params
+# Coverage =~ Binsize/BinMaxCoverage * readlength/2
+# 100 =~ 20/10 * 100/2
+#$Sam::Seq::BinMaxCoverage = int($opt_cov/10);
+
+$Sam::Seq::BinMaxCoverage = 10;
+$Sam::Seq::BinSize = 20;
+
+# qual_lcs is used on cov seq to mask high cov regions, min cov 10
+Fastq::Seq->Qual_lcs_range(10, $opt_cov+20, $opt_qv_offset);  
+# 80 chars are cutoff at each side to keep overlaps, at least 40 should 
+# remain to mask => min length 80*2 + 40 = 200;
+Fastq::Seq->Qual_lcs_min_length(200); 
+
+
+
+##------------------------------------------------------------------------##
+
+=head1 MAIN
+
+=cut
+
+
+
+# reads sam or run shrimp
+if($opt_sam_file){
+	my $lr_idxs = prepare_lr();
+	read_sam();
+	@PB_IDS = sort keys %PB;
+	my $sam_idxs = create_sam();
+	correct_sr_mt($sam_idxs, $lr_idxs);
+}else{
+	# read and prepare lr
+	$PASS = 0;
+	my $lr_idxs = prepare_lr();
+	
+	# first pass
+	$PASS++;
+	# run shrimp
+	my $shrimp = run_shrimp();
+	# check if something went wrong with shrimp
+	$shrimp->status() eq 'canceled' &&	$v->exit("Shrimp terminated abnormally\n".$shrimp->log);
+	
+	@PB_IDS = sort keys %PB;
+	# create filtered sam
+	my $sam_idxs = create_sam();
+	# correct reads with filtered sam
+
+	$lr_idxs = correct_sr_mt($sam_idxs, $lr_idxs);
+	%PB = ();
+	
+	# second/final pass
+	$PASS++;
+
+	$shrimp = run_shrimp();
+	# check if something went wrong with shrimp
+	$shrimp->status() eq 'canceled' &&	$v->exit("Shrimp terminated abnormally\n".$shrimp->log);
+
+	$sam_idxs = create_sam();
+
+	correct_sr_mt($sam_idxs, $lr_idxs);
+
+	# create final output
+	copy(pass_file_name(".fa"), $opt_fa_out);
+	copy(pass_file_name(".fq"), $opt_fq_out);
+
+	remove_tree(@tmp_dirs) unless $opt_keep;
+	
+}
+
+
+
+# remove tmp
+$v->verbose("Cleaning up temporary files and memory");
+
+# unlink $opt_sam_tmp;
+
+%PB = ();
+
+# put in END to wait for memory to be cleaned
+END{
+	Verbose->new()->verbose("Done");
+}
+
+
+
+
+##------------------------------------------------------------------------##
+
+=head1 METHODS
+
+=cut
+
+
+
+=head2 read_sam
+
+
+
+=cut
+
+sub read_sam{
+		# init input stream parser
+	my $rsp = Sam::Parser->new(
+		file => $opt_sam_file
+	);
+	
+	# init input stream parser progess bar	
+	my $pg_rsp = Verbose::ProgressBar->new(
+		size => $rsp->fh
+	);
+	
+	# init temporary sam writer
+	my $tsp; 
+#	$tsp = Sam::Parser->new(
+#		file => pass_file_name("_tmp.sam"),
+#		overwrite => 1,
+#	);
+	
+	# read sam header
+	
+	while(my %h = $rsp->next_header_line('SQ|PG')){
+		$pg_rsp->update();
+		# @PG
+		if($h{tag} eq '@PG'){
+			$PG_line = $h{raw};
+			next;
+		}
+		$PB{$h{'SN'}} = Sam::Seq->new(
+			id => $h{SN}, 
+			len => $h{LN},
+			sam => $tsp,	# indexed sam file, containing aln data
+		);
+	}
+	
+	
+	# read sam file
+	my $rsp_c = 0;
+	if($opt_ram_sam){
+		while(my $aln = $rsp->next_aln()){
+			# try to add aln, if sufficient score, add to temporary sam file
+			$rsp_c++ if($PB{$aln->rname}->add_aln_by_score($aln));
+			$pg_rsp->update() unless $rsp_c%10000;
+		}
+	}else{
+		while(my $aln = $rsp->next_aln()){
+			# try to add aln, if sufficient score, add to temporary sam file
+			if($PB{$aln->rname}->add_aln_by_score($aln)){
+				$rsp_c++;
+				$tsp->append_aln($aln);
+			};
+			$pg_rsp->update() unless $rsp_c%10000;
+		}
+	}
+	$pg_rsp->finish();
+	
+}
+
+
+=head2 run_shrimp
+
+Run and process shrimp first pass
+
+=cut
+
+sub run_shrimp{
+	
+	$v->verbose("Run and process Shrimp pass $PASS output");
+	
+	my $shrimp;
+	
+	#-r 25% -w 120% -s w10
+	
+	# first (second last) pass
+	if($PASS == $opt_passes - 1){
+		# init shrimp handler
+		$shrimp = Shrimp->new(
+			verbose => 1,
+			'log' => pass_file_name("_shrimp.log"),
+			$opt_raw_sam ? ('out' => pass_file_name("_raw.sam")) : (),
+			'-ref' => pass_file_name('.fa', pass => $PASS-1),
+			'-1' => $opt_sr_file[$PASS-1],
+			'-s' => "w12",
+			'-h' => $opt_full_threshold[$PASS-1],
+			'--report' => 1000,
+			'--match' => 10,
+			'--mismatch' => -70,
+			'--open-r' => -8,
+			'--open-q' => -8,
+			'--ext-r' => -7,
+			'--ext-q' => -7,
+			'--threads' => $opt_threads,
+			'--qv-offset' => $opt_qv_offset,
+			'--progress' => 100000,
+		);
+	# final pass
+	}elsif($PASS == $opt_passes){
+		# init shrimp handler
+		$shrimp = Shrimp->new(
+			verbose => 1,
+			'log' => pass_file_name("_shrimp.log"),
+			$opt_raw_sam ? ('out' => pass_file_name("_raw.sam")) : (),
+			'-ref' => pass_file_name(".fm", pass => $PASS-1),
+			'-1' => $opt_sr_file[$PASS-1],
+			'-s' => "w10",
+			'-r' => "25%",
+			'-h' => $opt_full_threshold[$PASS-1],
+			'-w' => "120%",
+			'-H' => '',
+			'--trim-off' => '',
+			'--report' => 1000,
+			'--match' => 10,
+			'--mismatch' => -70,
+			'--open-r' => -8,
+			'--open-q' => -8,
+			'--ext-r' => -7,
+			'--ext-q' => -7,
+			'--threads' => $opt_threads,
+			'--qv-offset' => $opt_qv_offset,
+			'--progress' => 100000,
+		);
+	}else{
+		$v->exit("No shrimp config for $PASS");
+	}
+	
+	$vb->verbose($shrimp->command());
+	$vb->hline();
+	
+	# run shrimp
+	$shrimp->run;
+
+	# init input stream parser
+	my $rsp = Sam::Parser->new(
+		fh => $shrimp->oh
+	);
+	
+	# init input stream parser progess bar	
+	my $pg_rsp = Verbose::ProgressBar->new();
+	
+	# init temporary sam writer
+	my $tsp = $opt_ram_sam ? undef : Sam::Parser->new(
+		file => pass_file_name("_tmp.sam"),
+		mode => '+>',
+	);
+	
+	# read SAM header
+	while(my %h = $rsp->next_header_line('SQ|PG')){
+		$pg_rsp->update();
+		# @PG
+		if($h{tag} eq '@PG'){
+			$PG_line = $h{raw};
+			next;
+		}
+		$PB{$h{'SN'}} = Sam::Seq->new(
+			id => $h{SN}, 
+			len => $h{LN},
+			sam => $tsp,	# indexed sam file, containing aln data
+		);
+	}
+
+	$PG_line = '@PG ID:unknown' unless $PG_line;
+
+	# read SAM alignmetn section
+	my $rsp_c = 0;
+	my $add_c = 0;
+	
+	if($opt_ram_sam){
+		while(my $aln = $rsp->next_aln()){
+			# try to add aln, if sufficient score, add to temporary sam file
+			$add_c++ if($PB{$aln->rname}->add_aln_by_score($aln));
+			$pg_rsp->update($rsp_c) unless $rsp_c%100000;
+			$rsp_c++;
+		}
+	}else{ # create tmp sam
+		while(my $aln = $rsp->next_aln()){
+			# try to add aln, if sufficient score, add to temporary sam file
+			if($PB{$aln->rname}->add_aln_by_score($aln)){
+				$add_c++; 
+				$tsp->append_aln($aln);
+			};
+			$pg_rsp->update($rsp_c) unless $rsp_c%100000;
+			$rsp_c++;
+		}
+	}
+	
+	$pg_rsp->finish($rsp_c);
+	
+	# finish shrimp run
+	return $shrimp->finish;
+	
+	$vb->hline();
+}
+
+
+
+=head2 create_sam
+
+=cut
+
+sub create_sam{
+	my $opt_sam_out = pass_file_name(".sam");
+	
+	$v->verbose("Creating filtered sam ".$opt_sam_out);
+	$v->verbose("Writing ".keys (%PB)." pacbio read sam blocks");
+	
+	open(OUT, '>',$opt_sam_out) or $v->exit($!);
+	
+	# header section
+	printf OUT ("\@HD\tVN:%s\tSO:%s\n", "unknown", "unknown");
+	foreach my $pb_id (@PB_IDS){
+		printf OUT ("\@SQ\tSN:%s\tLN:%s\n", $pb_id, $PB{$pb_id}->len);
+	}
+	
+	# header @PG
+	print OUT $PG_line;
+	
+	# init input stream parser progess bar	
+	my $pgb = Verbose::ProgressBar->new(size => scalar @PB_IDS);
+	
+	my @chunk_idxs;
+	# alignment section
+	my $pb_c = 0;
+	foreach my $pb_id (@PB_IDS){
+		push @chunk_idxs, tell(OUT) unless $pb_c % $opt_chunk_size;
+		foreach my $aln($PB{$pb_id}->alns($opt_sort_sam_by_coords)){
+			print OUT $aln->raw;
+		}
+		$pgb->update($pb_c);
+		$pb_c++;
+	}
+	$pgb->finish($pb_c);
+	
+	close OUT;
+	
+	return \@chunk_idxs;
+}
+
+
+
+
+=head2 prepare_lr
+
+Read the pacbio long read file and create a new, indexed long read file,
+ ordered the same way as the sorted sam files.
+
+=cut
+
+sub prepare_lr{
+	my ($lrpr, $lrpw);
+	$lrpr = Fasta::Parser->new(file => $opt_lr_file)->check_format();
+	$lrpr = Fastq::Parser->new(file => $opt_lr_file)->check_format() unless $lrpr;
+	$lrpr || $v->exit("Unknown format in '--long-read' file: ".$opt_lr_file);
+
+	$lrpw = Fasta::Parser->new( file => pass_file_name(".fa", pass => $PASS), mode => '+>');
+	
+	# read fasta/fastq, write and sort by id
+	my %lr;
+	
+	if(ref $lrpr eq 'Fasta::Parser'){
+		while(my $lr = $lrpr->next_seq){
+			# convert FASTQ to FASTA
+			$lr->seq(lc($lr->seq()));
+			$lr{$lr->id} = $lr;
+		}
+	}else{
+		while(my $lr = $lrpr->next_seq){
+			# convert FASTQ to FASTA
+			$lr{$lr->id} = Fasta::Seq->new(
+				id => $lr->id,
+				desc => $lr->desc,
+				seq => lc($lr->seq),
+			);
+		}
+	}
+	
+	
+	# write sorted/indexed fq/fa lr file for pbc
+	my @lr_idxs;
+	my $lr_c = 0;
+	foreach(sort keys %lr){
+		my $pos = $lrpw->append_seq($lr{$_});
+		push @lr_idxs, $pos unless $lr_c % $opt_chunk_size;
+		$lr_c++;
+	}
+	return \@lr_idxs;
+}
+
+
+
+=head2 correct_sr_mt
+
+=cut
+
+sub correct_sr_mt{
+	my ($sam_idxs, $lr_idxs) = @_;
+	
+	$v->verbose("Correcting Sequences (".@$sam_idxs." batches)");
+	
+	# pbc_correct.pl 
+	my %pbc_default = (
+		'--sam' 		=> pass_file_name(".sam"),
+		'--sam-offset' 	=> undef,
+		'--ref' 		=> undef,
+		'--ref-offset'	=> undef,
+		'--max-reads'	=> $opt_chunk_size,
+		'--prefix'		=> undef,
+	);
+	
+	# mask hcrs unless final run
+	$pbc_default{'--hcr-mask'} = undef;# if $PASS < $opt_passes;
+	
+	my @pbc_keys = sort keys %pbc_default;
+	
+	my $pbc_cmds = '';
+	
+	# generate xargs statements foreach chunk
+	for(my $ci=0; $ci<@$sam_idxs; $ci++){
+		my %pbc_config = (
+			%pbc_default,
+			'--ref' 		=> $PASS == 1
+							 	 ? pass_file_name(".f[aq]", pass => $PASS-1)
+							 	 : pass_file_name(".fq", pass => $PASS-1),
+			'--sam-offset' 	=> $sam_idxs->[$ci],
+			'--ref-offset'	=> $lr_idxs->[$ci],
+			'--prefix'		=> pass_file_name(sprintf ".%010d", $ci),
+		);
+		
+		# params
+		my @pbc_cmd;
+		foreach my $k (@pbc_keys){
+			my $v = $pbc_config{$k};
+			# flag only is undef or '', NOT '0' !!!
+			push @pbc_cmd, (defined($v) && $v ne '') ? ($k, $v) : $k;
+		}
+		$pbc_cmds .= join(" ", @pbc_cmd)."\n";
+	}
+	
+	# write cmd file
+	
+	my $cfg_file = pass_file_name(".cfg");
+	open(CFG, '>', $cfg_file) or $v->exit($!);
+	print CFG $pbc_cmds;
+	close CFG;
+	
+	# xarg cmds, capture stderr;
+	my $xgr;
+	open($xgr, "(xargs --arg-file $cfg_file --max-procs $opt_threads -L 1 --verbose perl $Bin/sam2cns) 2>&1 |")
+		or $v->exit($!);
+	
+	# 
+	while(<$xgr>){
+		chomp();
+		$vb->verbose($_);
+		if(/xargs:.*255/){
+			$v->exit("sam2cns returned with error");
+		}
+	}
+	
+	$vb->hline();
+	
+	$v->verbose("Merging corrected output");
+	my $fq_file = pass_file_name(".fq");
+	my $fq_glob = pass_file_name(".[0-9]*.fq");
+	my $fa_file = pass_file_name(".fa");
+	my $fa_glob = pass_file_name(".[0-9]*.fa");
+	my $fm_file = pass_file_name(".fm");
+	my $fm_glob = pass_file_name(".[0-9]*.fm");
+	
+	my @fq_glob = glob $fq_glob;
+	my @fa_glob = glob $fa_glob;
+	my @fm_glob = glob $fm_glob;
+	
+	
+	# create offset idx for reference
+	my @ref_idxs = (0);
+	my $offset = 0;
+	# get fq indexes
+	foreach(@fq_glob){
+		$offset+= -s $_;
+		push @ref_idxs, $offset;   
+	}
+	
+	# remove last on, its just the eof
+	pop(@ref_idxs);
+	
+	qx(cat $fq_glob > $fq_file);
+	qx(cat $fa_glob > $fa_file);
+	qx(cat $fm_glob > $fm_file);
+	
+	unlink @fq_glob unless $opt_keep > 1;
+	unlink @fa_glob unless $opt_keep > 1;
+	unlink @fm_glob unless $opt_keep > 1;
+	
+	return \@ref_idxs;
+}
+
+
+=head2 file_name
+
+Create a file name depending on current $PASS and $opt_prefix
+
+  $PASS = 1;
+  $opt_prefix = "/foo";
+  pass_file_name(".suf");
+    # "/foo_p1.suf"
+  pass_file_name(".suf", prefix => "/foo/bar", pass => 2);
+    # "/foo/bar_p2.suf"
+
+=cut
+
+
+sub pass_file_name{
+	my $p = {
+		prefix => $opt_prefix,
+		pass => $PASS,
+		suffix => (@_%2 ? shift : ''),
+		@_
+	};
+	
+	return sprintf('%1$s_p%2$d/%1$s_p%2$d%3$s', $p->{prefix}, $p->{pass}, $p->{suffix});
+}
+
+
+=head2 coverage_tables
+
+=cut
+
+sub coverage_tables{
+	my $opt_fq_out = pass_file_name("fq");
+	
+	# progess bar	
+	my $pgp = Verbose::ProgressBar->new(
+		size => scalar keys %PB 
+	);
+
+	$v->verbose("Calculating exact coverage by score tables ".$opt_fq_out);
+
+	my $i=1;
+	while(my ($pb_id, $pb) = each %PB){
+		my @COV;
+		my $ofh;
+		if($opt_fq_out eq '-'){
+			$ofh = \*STDOUT;
+		}else{
+			open($ofh, '>', pass_file_name('_'.$i.'.tsv')) or $v->exit($!);
+		}
+		foreach my $score_co(1..1000){
+			$pb->is(sub{ 
+				my $score = $_[0]->opt('AS');
+				return $score == $score_co
+			});
+			# add to previous cov
+			push @COV, [$pb->coverage];
+		}
+		print $ofh join("\t", @$_)."\n" for @COV;
+		close $ofh if $opt_fq_out ne '-';
+		
+		$pgp->update($i++);
+	}
+	$pgp->finish($i);
+
+
+	#printf $ofh ("\@%s\n%s\n+\n%s\n", $pb->consensus);
+	#my @cov = $pb->coverage;
+	#my @cov1 = grep{defined($_) && $_>0}@cov;
+	#
+	#print "#"x30, "\n";
+	#printf "%-8s %6.1f\n", 'Score:', $score_co; 
+	#next unless @cov;
+	##printf join(" ", @cov), "\n";
+	#printf "%-8s %6.1f%%\n", 'Covered:', (@cov1/$pb->len)*100,
+	#printf "%-8s %6.1f\n", 'Mean:', sum(@cov)/@cov;
+	#printf "%-8s %6.1f\n", 'Max:', max(@cov);
+	#printf "%-8s %6.1f\n", 'Cols:', scalar @cov;
+
+}
+
+
+
+##------------------------------------------------------------------------##
+
+=head1 AUTHORS
+
+=over
+
+=item * Thomas Hackl, thomas.hackl@uni-wuerzburg.de
+
+=back
