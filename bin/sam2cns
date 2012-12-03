@@ -22,7 +22,7 @@ use Fastq::Parser;
 use Fastq::Seq;
 
 our $Version  = '0.02';
-our ($Revision) = '$Revision: 580 $' =~ /(\d+)/;
+our ($Revision) = '$Revision$' =~ /(\d+)/;
 
 
 =head1 NAME

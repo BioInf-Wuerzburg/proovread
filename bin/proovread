@@ -39,7 +39,7 @@ use Shrimp;
 
 
 our $Version  = '0.62';
-our ($Revision) = '$Revision: 580 $' =~ /(\d+)/;
+our ($Revision) = '$Revision$' =~ /(\d+)/;
 
 
 
