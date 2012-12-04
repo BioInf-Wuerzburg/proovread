@@ -224,8 +224,6 @@ Sort the filtered SAM files by coordinates in addition to the
 
 $opt{'sort-sam-by-coordinates'} = \(my $opt_sort_sam_by_coords);
 
-
-
 =item [--keep|--keep-temporary-files] [OFF]
 
 Specify once, to keep temporary file of each pass, twice to also keep the
@@ -294,9 +292,10 @@ $opt{'coverage-tables!'} = \(my $opt_cov_tables);
 
 GetOptions(%opt) or pod2usage(1);
 $opt_help && pod2usage(1);
-$opt_sam_file || ($opt_lr_file && $opt_sr_file) || pod2usage(1);
-defined $opt_qv_offset || pod2usage(msg=>"--qv-offset required");
-
+$opt_sam_file || ($opt_lr_file && $opt_sr_file) || pod2usage("Either --long-reads and --short-reads or --sam required");
+$opt_sam_file && ! -f $opt_sam_file && pod2usage("Cannot find $opt_sam_file");
+$opt_lr_file && ! -f $opt_lr_file && pod2usage("Cannot find $opt_lr_file");
+$opt_sr_file && ! -f $opt_lr_file && pod2usage("Cannot find $opt_lr_file");
 
 
 ##------------------------------------------------------------------------##
@@ -408,15 +407,15 @@ Fastq::Seq->Qual_lcs_min_length(200);
 
 # reads sam or run shrimp
 if($opt_sam_file){
-	my $lr_idxs = prepare_lr();
+	my $lr_chunk_offsets = prepare_lr();
 	read_sam();
 	@PB_IDS = sort keys %PB;
-	my $sam_idxs = create_sam();
-	correct_sr_mt($sam_idxs, $lr_idxs);
+	my $sam_chunk_offsets = create_sorted_sam();
+	correct_sr_mt($sam_chunk_offsets, $lr_chunk_offsets);
 }else{
 	# read and prepare lr
 	$PASS = 0;
-	my $lr_idxs = prepare_lr();
+	my $lr_chunk_offsets = prepare_lr();
 	
 	# first pass
 	$PASS++;
@@ -427,10 +426,10 @@ if($opt_sam_file){
 	
 	@PB_IDS = sort keys %PB;
 	# create filtered sam
-	my $sam_idxs = create_sam();
+	my $sam_chunk_offsets = create_sorted_sam();
 	# correct reads with filtered sam
 
-	$lr_idxs = correct_sr_mt($sam_idxs, $lr_idxs);
+	$lr_chunk_offsets = correct_sr_mt($sam_chunk_offsets, $lr_chunk_offsets);
 	%PB = ();
 	
 	# second/final pass
@@ -440,9 +439,9 @@ if($opt_sam_file){
 	# check if something went wrong with shrimp
 	$shrimp->status() eq 'canceled' &&	$v->exit("Shrimp terminated abnormally\n".$shrimp->log);
 
-	$sam_idxs = create_sam();
+	$sam_chunk_offsets = create_sorted_sam();
 
-	correct_sr_mt($sam_idxs, $lr_idxs);
+	correct_sr_mt($sam_chunk_offsets, $lr_chunk_offsets);
 
 	# create final output
 	copy(pass_file_name(".fa"), $opt_fa_out);
@@ -677,11 +676,11 @@ sub run_shrimp{
 
 
 
-=head2 create_sam
+=head2 create_sorted_sam
 
 =cut
 
-sub create_sam{
+sub create_sorted_sam{
 	my $opt_sam_out = pass_file_name(".sam");
 	
 	$v->verbose("Creating filtered sam ".$opt_sam_out);
@@ -735,7 +734,10 @@ sub prepare_lr{
 	$lrpr = Fastq::Parser->new(file => $opt_lr_file)->check_format() unless $lrpr;
 	$lrpr || $v->exit("Unknown format in '--long-read' file: ".$opt_lr_file);
 
-	$lrpw = Fasta::Parser->new( file => pass_file_name(".fa", pass => $PASS), mode => '+>');
+	$lrpw = Fasta::Parser->new( 
+		file => pass_file_name(".fa", pass => $PASS), 
+		mode => '+>'
+	);
 	
 	# read fasta/fastq, write and sort by id
 	my %lr;
@@ -776,9 +778,9 @@ sub prepare_lr{
 =cut
 
 sub correct_sr_mt{
-	my ($sam_idxs, $lr_idxs) = @_;
+	my ($sam_chunk_offsets, $lr_chunk_offsets) = @_;
 	
-	$v->verbose("Correcting Sequences (".@$sam_idxs." batches)");
+	$v->verbose("Correcting Sequences (".@$sam_chunk_offsets." batches)");
 	
 	# pbc_correct.pl 
 	my %pbc_default = (
@@ -798,14 +800,14 @@ sub correct_sr_mt{
 	my $pbc_cmds = '';
 	
 	# generate xargs statements foreach chunk
-	for(my $ci=0; $ci<@$sam_idxs; $ci++){
+	for(my $ci=0; $ci<@$sam_chunk_offsets; $ci++){
 		my %pbc_config = (
 			%pbc_default,
 			'--ref' 		=> $PASS == 1
 							 	 ? pass_file_name(".f[aq]", pass => $PASS-1)
 							 	 : pass_file_name(".fq", pass => $PASS-1),
-			'--sam-offset' 	=> $sam_idxs->[$ci],
-			'--ref-offset'	=> $lr_idxs->[$ci],
+			'--sam-offset' 	=> $sam_chunk_offsets->[$ci],
+			'--ref-offset'	=> $lr_chunk_offsets->[$ci],
 			'--prefix'		=> pass_file_name(sprintf ".%010d", $ci),
 		);
 		
