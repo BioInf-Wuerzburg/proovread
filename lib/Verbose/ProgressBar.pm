@@ -42,6 +42,8 @@ Collection of generic function for progress calculation and visualisation
 
 =item 0.07
 
+[BugFix] Update with undefined/null value created error.
+
 Bugfix. Initial bar was one space short.
 
 =item 0.06 [Thomas Hackl 2012-10-10]
@@ -139,6 +141,8 @@ sub update{
 	
 	if (!defined ($value) && defined($self->{_fh})){
 		$self->{value} = tell($self->{_fh});
+	}elsif(!$value){
+		$self->{value} = $value = 0;
 	}else{
 		$self->{value} = $value;
 	}

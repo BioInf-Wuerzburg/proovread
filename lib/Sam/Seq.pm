@@ -1,4 +1,4 @@
-package Sam::Seq_devel;
+package Sam::Seq;
 
 use warnings;
 use strict;

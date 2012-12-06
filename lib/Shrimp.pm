@@ -95,10 +95,15 @@ our $VB = Verbose->new(
 
 =head2 new
 
-'out' file argument to write data to. If specified, 
- the output can not be read on the fly and the run cannot be 
- canceled manually or by timeout. Still a filehandle to read
- the complete result is provided, after the run has finished.
+  out => 'FILE'    # file argument to write data to. If specified, 
+                   #  the output can not be read on the fly and the run cannot be 
+                   #  canceled manually or by timeout. Still a filehandle to read
+                   #  the complete result is provided, after the run has finished.
+  log => 'FILE'    # A file to write the log to, defaults to 'shrimpXXXXX.log', 
+                   #  with X being random numbers
+  verbose => BOOL  # Default TRUE
+  timeout => INT   # Number of seconds before canceling run by timeout
+  bin => 'gmapper-ls'
 
 =cut
 
@@ -112,6 +117,7 @@ sub new {
 		verbose => 1,
 		timeout => 0,
 		out => undef,
+		log => undef,
 		# overwrites
 		@_,
 		
@@ -326,11 +332,24 @@ sub command{
 
 =head2 log
 
-Get the log of the run as STRING.
+Get/Set the log file name.
 
 =cut
 
 sub log{
+	my ($self, $log) = @_;
+	$self->{'log'} = $log if $log;
+	return $self->{'log'};
+}
+
+
+=head2 log_string
+
+Get the log of the run as STRING.
+
+=cut
+
+sub log_string{
 	my ($self) = @_;
 	return $self->{_error};
 }

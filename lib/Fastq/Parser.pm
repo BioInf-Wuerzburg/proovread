@@ -1,10 +1,14 @@
 package Fastq::Parser;
 
+# $Id$
+
 use warnings;
 use strict;
 use Fastq::Seq 0.03;
 
-our $VERSION = '0.06';
+our $VERSION = '0.07';
+our ($REVISION) = '$Revision$' =~ /(\d+)/;
+our $MODIFIED = '$Date$' =~ /Date: (.+)/;
 
 =head1 NAME 
 
@@ -12,7 +16,14 @@ Fastq::Parser.pm
 
 =head1 DESCRIPTION
 
-Parser module for FASTQ format files.
+Parser module for FASTQ format data. Reads from files, STDIN or other 
+ perl filehandles, can be used to write FASTQ data as well. 
+ 
+Most methods work on any kind of input, some methods, like seek will fail 
+ on streams and work only on real files. 
+ 
+Main feature of the module is to sequentially run through the data and 
+ retrieve Fastq::Seq objects, one at a time for further processing.
 
 =head1 SYNOPSIS
 
@@ -22,34 +33,49 @@ TODO
 
 =head1 CHANGELOG
 
+=head2 0.07
+
 =over
 
-=item 0.06 [Thomas Hackl 2012-10-29]
+=item [BugFix] Splicing reads from buffer had error.
 
-Bugfix. << $fp->seek >> now clears _buffer.
+=item [Change] Added auto Id, Date and Revision on svn checkin
 
-=item 0.05 [Thomas Hackl 2012-10-28]
+=item [Feature] C<< $fp->guess_phred_offset >>
+
+=item [Feature] C<< $fp->guess_read_length >>
+
+=item [Feature] C<< $fp->guess_total_reads >>
+
+=item [Change] C<< $fp->check_format >> now stores a complete entry (4 lines)
+
+=back
+
+=head2 0.06
+
+[Bugfix] C<< $fp->seek >> now clears _buffer.
+
+=head2 0.05
 
 Added FASTQ write support, including byte offset indexing.
 
-=item 0.04 [Thomas Hackl 2012-10-01]
+=head2 0.04
 
 Added C<< $fp->check_format >>. Determines whether input looks like FASTQ.
 
-=item 0.03 [Thomas Hackl 2012-09-02]
+=head2 0.03
 
 Modified to use Fastq:Seq 0.03+
 
-=item 0.02 [Thomas Hackl]
+=head2 0.02
 
 Added C<next_raw_seq()>.
 
-=item 0.01 [Thomas Hackl]
+=head2 0.01
 
 Initial Parser module. Provides Constructor and generic accessor
  methods
 
-=back
 
 =cut
 
@@ -128,10 +154,20 @@ Loop through fastq file and return next 'Fastq::Seq' object.
 
 sub next_seq{
 	my ($self) = @_;
-	my $fh = $self->{fh};
 	
-	while(
-		defined(my $nh = @{$self->{_buffer}} ? shift @{$self->{_buffer}} : <$fh>) &&
+	use Data::Dumper;
+	
+	if(@{$self->{_buffer}}){
+		# return fastq seq object
+		return Fastq::Seq->new(
+			splice(@{$self->{_buffer}}, 0, 4),
+			phred_offset => $self->{phred_offset}
+		);
+	}
+	
+	my $fh = $self->{fh};
+	if(
+		defined(my $nh = <$fh>) &&
 		defined(my $ns = <$fh>) &&
 		defined(my $qh = <$fh>) &&
 		defined(my $qs = <$fh>)
@@ -142,19 +178,17 @@ sub next_seq{
 			phred_offset => $self->{phred_offset}
 		);
 	}
+	
+	return;
 }
 
 
 
-
-=head1 Object METHODS
-
-=cut
-
 =head2 check_format
 
-Check wether the format of the input looks like FASTQ (leading @). Returns
- the Parser object on success, undef on failure.
+Takes a peek at the next entry in the file and checks wether the format of 
+ the input looks like FASTQ (leading @). Returns the Parser object on success, 
+ undef on failure.
 
 =cut
 
@@ -162,7 +196,7 @@ sub check_format{
 	my $self = shift;
 	my $fh = $self->fh;
 	# read a line from/to the buffer
-	$self->{_buffer} = [scalar <$fh>] unless @{$self->{_buffer}};
+	$self->{_buffer} = [scalar <$fh>, scalar <$fh>, scalar <$fh>, scalar <$fh>] unless @{$self->{_buffer}};
 	my $l =	$self->{_buffer}[0];
 	return $l =~ /^\@/ ? $self : undef;
 }
@@ -178,15 +212,22 @@ sub next_raw_seq{
 	my ($self) = @_;
 	my $fh = $self->{fh};
 	
-	while(
-		defined(my $nh = @{$self->{_buffer}} ? shift @{$self->{_buffer}} : <$fh>) &&
+	if(@{$self->{_buffer}}){
+		# return fastq seq string
+		return join("",	splice(@{$self->{_buffer}}, 4));
+	}
+	
+	if(
+		defined(my $nh = <$fh>) &&
 		defined(my $ns = <$fh>) &&
 		defined(my $qh = <$fh>) &&
 		defined(my $qs = <$fh>)
 	){
-		# return fastq seq object
+		# return fastq seq string
 		return $nh.$ns.$qh.$qs;
 	}
+	
+	return;
 }
 
 =head2 seek
@@ -204,8 +245,6 @@ sub seek{
 	$self->{_buffer} = [];
 	return seek($self->fh, $offset, $whence);
 }
-
-
 
 =head2 append_seq
 
@@ -235,6 +274,125 @@ sub append_tell{
 	my ($self) = @_;
 	return tell($self->{fh});
 }
+
+=head2 guess_read_length
+
+Reads up to n reads from the current position of the FASTQ and returns either 
+ READLENGTH if all n reads had identical lengths or shortcuts if to reads
+ differ in length, returns undef. Provide n as the first parameter, default 
+ 100.
+
+=cut
+
+sub guess_read_length{
+	my ($self, $n) = (@_, 100);
+	my $fh = $self->fh;
+	my $i;
+	my $l;
+	# read a lines from buffer
+	for($i=0; $i<$n && $i < (@{$self->{_buffer}}-3)/4; $i++){
+		my $ns = $self->{_buffer}[($i*4) +1];
+		$l = length($ns)-1 unless $l; # unchomped
+		return 0 unless $l == length($ns)-1;
+	}
+	
+	# read new lines and add to buffer
+	while(
+		$i < $n && 
+		defined (my $nh = scalar <$fh>) &&
+		defined (my $ns = scalar <$fh>) &&
+		defined (my $qh = scalar <$fh>) &&
+		defined (my $qs = scalar <$fh>)
+	){
+		push @{$self->{_buffer}}, $nh, $ns, $qh, $qs;
+		$l = length($ns)-1 unless $l; # unchomped
+		return 0 unless $l == length($ns)-1;
+		$i++;		
+	}
+	return $l;
+}
+
+=head2 guess_phred_offset
+
+Reads up to n reads from the current position of the FASTQ and scans the quality 
+ sequence. If a numeric value of a quality character below 64 is found, 
+ returns 33, if a value above 33+43 (76) is found, returns 64. If neither
+ condition is met within n reads, returns undef. Provide n as the first 
+ parameter, default 100.
+
+=cut
+
+sub guess_phred_offset{
+	my ($self, $n) = (@_, 100);
+	my $fh = $self->fh;
+	my $i;
+	my $min;
+	my $max;
+	# read a lines from buffer
+	for($i=0; $i<$n && $i < (@{$self->{_buffer}}-3)/4; $i++){
+		my $qs = $self->{_buffer}[($i*4) +3];
+		foreach(split(//, $qs)){
+			return 33 if ord($_) < 64;
+			return 64 if ord($_) > 76;
+		}
+	}
+	
+	# read new lines and add to buffer
+	while(
+		$i < $n && 
+		defined (my $nh = scalar <$fh>) &&
+		defined (my $ns = scalar <$fh>) &&
+		defined (my $qh = scalar <$fh>) &&
+		defined (my $qs = scalar <$fh>)
+	){
+		push @{$self->{_buffer}}, $nh, $ns, $qh, $qs;
+		foreach(split(//, $qs)){
+			return 33 if ord($_) < 64;
+			return 64 if ord($_) > 76;
+		}
+		$i++;		
+	}
+}
+
+=head2 guess_total_reads
+
+Reads up to n reads from the current position of the FASTQ and estimates the
+ mean size in bytes per FASTQ entry. Extrapolates the read number match the 
+ file size and returns the thus approximated total number of reads. Returns
+ undef on STDIN.
+
+=cut
+
+sub guess_total_reads{
+	my ($self, $n) = (@_, 100);
+	my $fh = $self->fh;
+	my $i;
+	my $size;
+	my $file_size = -s $fh;
+	return unless $file_size; # 
+	# read a lines from buffer
+	for($i=0; $i<$n && $i < (@{$self->{_buffer}}-3)/4; $i++){
+		my @fq = @{$self->{_buffer}}[($i*4)..($i*4)+3];
+		$size+=length(join("", @fq));
+	}
+	
+	# read new lines and add to buffer
+	while(
+		$i < $n && 
+		defined (my $nh = scalar <$fh>) &&
+		defined (my $ns = scalar <$fh>) &&
+		defined (my $qh = scalar <$fh>) &&
+		defined (my $qs = scalar <$fh>)
+	){
+		push @{$self->{_buffer}}, $nh, $ns, $qh, $qs;
+		$size+=length(join("", $nh, $ns, $qh, $qs));
+		$i++;
+	}
+	
+	return int(($file_size/$size)*$i);
+	
+}
+
 
 =head1 Accessor METHODS
 
