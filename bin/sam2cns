@@ -184,8 +184,8 @@ my $sp = Sam::Parser->new(
 	file => $opt_sam_file,
 );
 
-$Sam::Seq::BinMaxCoverage = 10;
-$Sam::Seq::BinSize = 20;
+Sam::Seq->BinMaxCoverage = 10;
+Sam::Seq->BinSize = 20;
 
 
 # qual_lcs is used on cov seq to mask high cov regions, min cov 10

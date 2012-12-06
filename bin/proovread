@@ -496,10 +496,8 @@ make_path(@tmp_dirs);
 # 100 =~ 20/10 * 100/2
 #$Sam::Seq::BinMaxCoverage = int($opt_cov/10);
 
-$Sam::Seq::BinMaxCoverage = 10;
-$Sam::Seq::BinMaxCoverage = 10; # twice to prevent warnings
-$Sam::Seq::BinSize = 20;
-$Sam::Seq::BinSize = 20; # twice to prevent warnings
+Sam::Seq->BinMaxCoverage = 10;
+Sam::Seq->BinSize = 20;
 
 # qual_lcs is used on cov seq to mask high cov regions, min cov 10
 Fastq::Seq->Qual_lcs_range(10, $opt_cov+20, 33);  
