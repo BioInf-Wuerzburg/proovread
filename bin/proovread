@@ -40,7 +40,7 @@ use Sam::Seq;
 use Shrimp;
 
 
-our $VERSION = '0.70';
+our $VERSION = '0.71';
 our ($REVISION) = '$Revision$' =~ /(\d+)/;
 our ($MODIFIED) = '$Date$' =~ /Date: (\S+\s\S+)/;
 
