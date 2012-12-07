@@ -709,9 +709,9 @@ sub run_shrimp{
 	# init input stream parser
 	my $rsp = Sam::Parser->new(
 		fh => $shrimp->oh
+	# init temporary sam writer
 	);
 	
-	# init temporary sam writer
 	my $tsp = $opt_ram_sam ? undef : Sam::Parser->new(
 		file => pass_file_name("_tmp.sam"),
 		mode => '+>',

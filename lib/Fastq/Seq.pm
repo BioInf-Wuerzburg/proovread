@@ -1,11 +1,15 @@
 package Fastq::Seq;
 
+# $Id$
+
 use warnings;
 use strict;
 
 use Verbose;
 
-our $VERSION = '0.07';
+our $VERSION = '0.08';
+our ($REVISION) = '$Revision$' =~ /(\d+)/;
+our ($MODIFIED) = '$Date$' =~ /Date: (\S+\s\S+)/;
 
 
 ##------------------------------------------------------------------------##
@@ -24,6 +28,18 @@ Class for handling FASTQ sequences.
 
 
 =head1 CHANGELOG
+
+=head2 0.08
+
+=over
+
+=item [Change] Id and description parsing regexs carry C</o> flag.
+
+=item [Change] << $fq->new() >> now provides cloning functionality, if called on
+ object instead of Class. Using of << $fq->clone >> is DEPRECATED, but kept for 
+ backward compability, simply calling << $fq->new >>.
+
+=back
 
 =over 12
 
@@ -245,32 +261,47 @@ sub Qual_low_regex{
 Create a new FASTQ seq object. Either provide "seq_head", "seq", 
  "qual_head", and "qual" as first four parameter or the four lines as one 
  STRING. Additional parameter can be specified in key => value format. 
+ C<phred_offset> defaults to undef. 
 
-  Fastq::Seq->new(<4_line_fastq_string>, phred => 33);
+When used on a Fastq::Seq object, it acts as cloning method, also 
+ allowing for additional parameter in key => value format. Does not
+ perform deep copy, not required for this object.
+
+  # construct new object
+  $fq = Fastq::Seq->new(<4_line_fastq_string>, phred_offset => 33);
   # or
-  Fastq::Seq->new(
+  fq = Fastq::Seq->new(
   	<seq_head_string>,
   	<seq_string>,
   	<qual_head_string>,
     <qual_string>,
-  	phred => 33,
+  	phred_offset => 33,
   );
   
+  # clone object and set a new header at the same time
+  $fq_clone = $fq->new(seq_head => 'NEW_HEADER');
+
 =cut
 
 sub new{
-	my $class = shift;
-	my $self;
+	my $proto = shift;
 	
-	if(@_%2){ # input is string to split
+	# object method -> clone + overwrite
+	if(my $class = ref $proto){ 
+		return bless ({%$proto, @_}, ref $class);
+	}
+	
+	# class method -> construct + overwrite
+	my $self;
+	if(@_%2){ # create object from string
 		my %self;
-		@self{'seq_head','seq','qual_head','qual'} = split(/\n/, shift);
+		@self{'seq_head','seq','qual_head','qual'} = split(/\n/, shift, 4);
 		$self = {
 			%self,
-			phred_offset => 64,
+			phred_offset => undef,
 			@_	# overwrite defaults
 		};
-	}else{
+	}else{ # create object from array
 		$self = {
 			seq_head => $_[0],
 			seq => $_[1],
@@ -282,7 +313,7 @@ sub new{
 		chomp(%$self);	# make sure all seqs loose there trailing "\n"
 	}
 
-	return bless $self, $class;
+	return bless $self, $proto;
 }
 
 
@@ -296,6 +327,8 @@ sub new{
 
 =head2 clone
 
+DEPRECATED, use new as object method C<< $fq->new() >> instead.
+
 Create a clone of a seq object. Comes in handy of you want to modify the 
  object but still keep the original.
  
@@ -304,8 +337,7 @@ NOTE: This is not deep cloning but should work for this Class.
 =cut
 
 sub clone{
-	my $self = shift;
-	return bless ({%$self}, ref $self);
+	$_[0]->new();
 }
 
 =head2 trim2qual_lcs
@@ -560,7 +592,7 @@ sub id{
 	}
 	# parse id from head, cache id
 	unless ($self->{_id}){
-		($self->{_id}) = $self->{seq_head} =~ /^@(\S+)/;  
+		($self->{_id}) = $self->{seq_head} =~ /^@(\S+)/o;  
 	}
 	return $self->{_id};
 }
@@ -576,7 +608,7 @@ sub id_no_picard{
 	my ($self) = @_;
 	# parse id_no_picard from head, cache id_no_picard
 	unless ($self->{_id_no_picard}){
-		($self->{_id_no_picard}) = $self->{seq_head} =~ /^@(\S+?)(?:\/\d+)?(?:\s|$)/;  
+		($self->{_id_no_picard}) = $self->{seq_head} =~ /^@(\S+?)(?:\/\d+)?(?:\s|$)/o;  
 	}
 	return $self->{_id_no_picard};
 }
@@ -592,7 +624,7 @@ sub picard{
 	my ($self) = @_;
 	# parse picard from head, cache picard
 	unless ($self->{_picard}){
-		($self->{_picard}) = $self->{seq_head} =~ /^@(?:\S+?\/)(\d+)?(?:\s|$)/;  
+		($self->{_picard}) = $self->{seq_head} =~ /^@(?:\S+?\/)(\d+)?(?:\s|$)/o;  
 	}
 	return $self->{_picard};
 }
@@ -617,7 +649,7 @@ sub desc{
 					
 	}
 	unless (defined ($self->{_desc})){
-		($self->{_desc}) = $self->{seq_head} =~ /^\S+\s(.+)$/;  
+		($self->{_desc}) = $self->{seq_head} =~ /^\S+\s(.+)$/o;  
 	}
 	return $self->{_desc};
 }

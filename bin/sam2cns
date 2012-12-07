@@ -1,4 +1,13 @@
 #!/usr/bin/env perl
+
+##------------------------------------------------------------------------##
+# LICENCE
+#
+#
+# $Id$
+#
+##------------------------------------------------------------------------##
+
 use warnings;
 use strict;
 
@@ -19,10 +28,11 @@ use Fasta::Parser;
 use Fasta::Seq;
 
 use Fastq::Parser;
-use Fastq::Seq;
+use Fastq::Seq 0.08;
 
-our $Version  = '0.02';
-our ($Revision) = '$Revision$' =~ /(\d+)/;
+our $VERSION  = '0.02';
+our ($REVISION) = '$Revision$' =~ /(\d+)/;
+our ($MODIFIED) = '$Date$' =~ /Date: (\S+\s\S+)/;
 
 
 =head1 NAME
@@ -43,21 +53,23 @@ Compute consensus sequences based on SAM file.
 
 =head1 CHANGELOG
 
+=head2 0.02
+
 =over
 
-=item 0.02
+=item [Renaming] C<$Version> to C<$VERSION>. 
 
-Feature. Added C<--sticky-end-length> parameter.
+=item [Feature] Added C<$REVISION>.
 
-Change. Reduced sticky end length from 80 to 60.
+=item [Change] Requires Fastq::Seq 0.08, C<< fq->clone >> to C<< fq->new >>.
 
-=item 0.01 [Thomas Hackl 2012-10-24]
-
-Initial script.
-
-=cut
+=item [Feature] Added C<--sticky-end-length> parameter.
 
 =back
+
+=head2 0.01
+
+Initial script.
 
 =cut
 
@@ -259,8 +271,9 @@ foreach my $pb_id(sort keys %PB){
 	};
 	
 	my $con = $PB{$pb_id}->consensus(@hcrs);
-	my $con_mask = $con->clone;
-	# undef state matrix to clear some memory
+	# clone
+	my $con_mask = $con->new;
+	# undef state matrix to make memory availabe again
 	$PB{$pb_id}{_state_matrix} = {}; 
 	
 	# use cov seq instead of qual seq in Fastq::Seq, mask based on cov
