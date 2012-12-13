@@ -3,13 +3,25 @@ package Shrimp;
 use warnings;
 use strict;
 
+# $Id$
+
 use File::Temp;
+
+# preference libs in same folder over @INC
+use lib './';
 
 use Verbose;
 
-our $VERSION = '0.04';
+our $VERSION = '0.05';
+our ($REVISION) = '$Revision$' =~ /(\d+)/;
+our ($MODIFIED) = '$Date$' =~ /Date: (\S+\s\S+)/;
+
 
 $|++;
+
+
+
+##------------------------------------------------------------------------##
 
 =head1 NAME 
 
@@ -25,8 +37,17 @@ SHRiMP (2.2.0) gmapper interface.
 
 =cut
 
-
 =head1 CHANGELOG
+
+=head2 0.05
+
+=over
+
+=item [Change] Preference libs in same folder over @INC
+
+=item [Change] Added svn:keywords
+
+=back
 
 =over 12
 

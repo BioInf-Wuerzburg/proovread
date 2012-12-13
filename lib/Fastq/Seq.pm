@@ -26,7 +26,6 @@ Class for handling FASTQ sequences.
 
 =cut
 
-
 =head1 CHANGELOG
 
 =head2 0.08
@@ -81,7 +80,6 @@ Initial Alignment module. Provides Constructor and generic accessor
 =back
 
 =cut
-
 
 =head1 TODO
 
@@ -288,7 +286,7 @@ sub new{
 	
 	# object method -> clone + overwrite
 	if(my $class = ref $proto){ 
-		return bless ({%$proto, @_}, ref $class);
+		return bless ({%$proto, @_}, $class);
 	}
 	
 	# class method -> construct + overwrite

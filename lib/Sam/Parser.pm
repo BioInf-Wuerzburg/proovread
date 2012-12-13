@@ -2,10 +2,19 @@ package Sam::Parser;
 
 use warnings;
 use strict;
-use lib qw(../);
+
+# $Id$
+
+# preference libs in same folder over @INC
+use lib '../';
+
 use Sam::Alignment qw(:flags);
 
-our $VERSION = '0.10';
+
+our $VERSION = '0.11';
+our ($REVISION) = '$Revision$' =~ /(\d+)/;
+our ($MODIFIED) = '$Date$' =~ /Date: (\S+\s\S+)/;
+
 
 =head1 NAME 
 
@@ -65,7 +74,17 @@ Parser module for SAM format files.
 
 =over
 
-=item 0.09 [Thomas Hackl 2012-10-25]
+=head2 0.11
+
+=over
+
+=item [Change] Preference libs in same folder over @INC
+
+=item [Change] Added svn:keywords
+
+=back
+
+=item 0.10 [Thomas Hackl 2012-10-25]
 
 Renamed Method. C<< $sp->append_tell() >> is now simply C<< $sp->tell() >>.
 

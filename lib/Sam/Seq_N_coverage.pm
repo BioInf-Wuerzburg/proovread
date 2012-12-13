@@ -156,11 +156,11 @@ our $V = Verbose->new();
 
 our $BinSize = 20;
 
-=head2 $MaxCoverage [50]
+=head2 $BinMaxCoverage [10]
 
 =cut
 
-our $MaxCoverage = 50;
+our $BinMaxCoverage = 10;
 
 =head2 $PhredOffset [33]
 
@@ -184,16 +184,16 @@ sub BinSize{
 	return $BinSize;
 }
 
-=head2 MaxCoverage
+=head2 BinMaxCoverage
 
-Get/Set $Sam::Seq::MaxCoverage. Default 50.
+Get/Set $Sam::Seq::BinMaxCoverage. Default 10.
 
 =cut
 
-sub MaxCoverage{
+sub BinMaxCoverage{
 	my ($class, $cov) = @_;
-	$MaxCoverage = $cov if defined $cov;
-	return $MaxCoverage;
+	$BinMaxCoverage = $cov if defined $cov;
+	return $BinMaxCoverage;
 }
 
 =head2 PhredOffset
@@ -265,9 +265,8 @@ sub new{
 								#  this position
 								# default no file -> everything in ram, _aln 
 								#  contains real Sam::Alignment objects.
-		max_coverage => $MaxCoverage,
 		bin_size => $BinSize,
-		bin_max_bases => $BinSize * $MaxCoverage,
+		bin_max_coverage => $BinMaxCoverage,
 		phred_offset => $PhredOffset,
 		max_coverage => 50,
 		is => undef,
@@ -277,9 +276,7 @@ sub new{
 		_is => sub{return 1},	# don't set directly, use is()
 		_alns => {},			# reads or idx pos of reads in sam
 		_bin_alns => undef,		# position bins containing aln refs
-		_bin_scores => undef,	# position bins containing nscores of alns in _bin_alns
-		_bin_bases => undef,
-		_bin_lengths => undef,
+		_bin_scores => undef,	# position bins containing scores of alns in _bin_alns
 		_aln_idc => 0,			#
 		_state_matrix => [],	# consensus state matrix
 		_states => {			# consensus states
@@ -337,44 +334,31 @@ sub add_aln_by_score{
 	my ($self, $aln) = @_;
 	
 	my $bin = $self->bin($aln);
-	my $bases = length($aln->seq);
-	my $nscore = $aln->opt('AS') / $bases;
+	my $score = $aln->opt('AS');
 	
-	# if bin_bases are full, check if new nscore is good enough
-	if( $self->{_bin_bases}[$bin] > $self->{bin_max_bases} ){
+	# if score bin is full, check if new score is good enough
+	if ( @{$self->{_bin_scores}[$bin]} >= $self->{bin_max_coverage}){
 		# ignore scores, that are too low
-		if( $nscore <= $self->{_bin_scores}[$bin][-1] ){
-			return 0; 
-		}else{ # sufficient score
-			# remove lowest scoring aln before adding new one
-			#  from score bins
-			pop(@{$self->{_bin_scores}[$bin]});
-			#  from length bin
-			my $rm_bases = pop(@{$self->{_bin_lengths}[$bin]});
-			
-			# remove aln from global store 
-			delete($self->{_alns}{
-					# and remove aln id from aln bins
-					pop(@{$self->{_bin_alns}[$bin]})
-				});
-				
-			# adjust bin_bases by length length difference of new and old alignment
-			$self->{_bin_bases}[$bin] += ($bases - $rm_bases);
-		}
-	}else{
-		# new aln added w/o removal other aln -> add length to bin bases
-		$self->{_bin_bases}[$bin] += $bases;
+		return 0 if $score <= $self->{_bin_scores}[$bin][-1];
+		
+		# remove lowest score before adding new one
+		#  from score bins
+		pop(@{$self->{_bin_scores}[$bin]});
+		#  global store
+		delete $self->{_alns}{
+			# aln bins
+			pop(@{$self->{_bin_alns}[$bin]})
+		};
 	}
 
 	my $id = $self->add_aln($aln);
 	
 	# set score/id at the right place
 	my $i = @{$self->{_bin_scores}[$bin]} - 1;
-	$i-- while $i >= 0 && $nscore > $self->{_bin_scores}[$bin][$i];
+	$i-- while $i >= 0 && $score > $self->{_bin_scores}[$bin][$i];
 	# store new  score and _id of aln at correct position
-	splice(@{$self->{_bin_scores}[$bin]}, $i+1, 0, $nscore);
+	splice(@{$self->{_bin_scores}[$bin]}, $i+1, 0, $score);
 	splice(@{$self->{_bin_alns}[$bin]}, $i+1, 0, $id);
-	splice(@{$self->{_bin_lengths}[$bin]}, $i+1, 0, $bases);
 
 	return $id;
 }
@@ -695,7 +679,7 @@ sub alns{
 
 =head2 alns_by_bins
 
-Returns list of bins, each containing list of Sam::Alignments, decendingly 
+Returns list of bins, each containing list of Sam:.Alignments, decendingly 
  ordered by their score.
 
 =cut
@@ -783,8 +767,6 @@ sub _init_read_bins{
 	my $last_bin = int($self->len / $self->{bin_size});
 	$self->{_bin_scores} = [map{[]}(0..$last_bin)];
 	$self->{_bin_alns} = [map{[]}(0..$last_bin)];
-	$self->{_bin_lengths} = [map{[]}(0..$last_bin)];
-	$self->{_bin_bases} = [(0) x ($last_bin+1)];
 }
 
 =head2 _state_matrix

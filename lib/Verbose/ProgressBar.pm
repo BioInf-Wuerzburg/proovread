@@ -2,11 +2,23 @@ package Verbose::ProgressBar;
 
 use warnings;
 use strict;
+
+# $Id$
+
+# preference libs in same folder over @INC
+use lib '../';
+
 use Verbose;
 
-our $Version = '0.07';
+our $VERSION = '0.08';
+our ($REVISION) = '$Revision$' =~ /(\d+)/;
+our ($MODIFIED) = '$Date$' =~ /Date: (\S+\s\S+)/;
 
 $|++;
+
+
+
+##------------------------------------------------------------------------##
 
 =head1 NAME Progress
 
@@ -37,6 +49,16 @@ Collection of generic function for progress calculation and visualisation
 =cut
 
 =head1 CHANGELOG
+
+=head2 0.08
+
+=over
+
+=item [Change] Preference libs in same folder over @INC
+
+=item [Change] Added svn:keywords
+
+=back
 
 =over
 

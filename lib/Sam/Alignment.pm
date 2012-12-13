@@ -3,7 +3,16 @@ package Sam::Alignment;
 use warnings;
 use strict;
 
-our $VERSION = '0.05';
+# $Id$
+
+# preference libs in same folder over @INC
+use lib '../';
+
+
+our $VERSION = '0.06';
+our ($REVISION) = '$Revision$' =~ /(\d+)/;
+our ($MODIFIED) = '$Date$' =~ /Date: (\S+\s\S+)/;
+
 
 =head1 NAME 
 
@@ -48,6 +57,19 @@ Class for handling sam alignments.
 =cut
 
 =head1 CHANGELOG
+
+=head2 0.06
+
+=over
+
+=item [Change] SAM lines are now split at C<\t> instead of C<\s>. Faster and
+ more precise.
+
+=item [Change] Preference libs in same folder over @INC
+
+=item [Change] Added svn:keywords
+
+=back
 
 =over
 
@@ -114,7 +136,7 @@ sub new{
 		my $sam = $_[0];
 		chomp($sam);
 		my @opt = ();
-		(@$self{qw(qname flag rname pos mapq cigar rnext pnext tlen seq qual opt)}) = split(/\s/,$sam, 12); 
+		(@$self{qw(qname flag rname pos mapq cigar rnext pnext tlen seq qual opt)}) = split(/\t/,$sam, 12); 
 		$self->{raw} = $sam."\n";
 	}else{ # input is key -> hash structure
 		$self = {

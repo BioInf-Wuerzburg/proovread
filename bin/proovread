@@ -62,6 +62,8 @@ Correct single molecule sequencing reads by iterative mapping of high
 
 =head2 0.71
 
+=item [Feature] Test config file for existence before loading.
+
 =item [Feature] proovread now reads all parameter from a default core config
  (proovread.cfg). Additionally an optional, customized config file can be
  generated for user modification C<< --create-cfg >> and the modified config
@@ -192,6 +194,9 @@ for(my $i=0; $i<@ARGV; $i++){
 }
 
 if($cfg){
+	unless(-e $cfg){
+		$v->exit("Cannot find config file: $cfg");
+	}
 	$v->verbose("Reading custom config: $cfg");
 	%cfg = (%cfg, do "$cfg"); 
 }
@@ -496,8 +501,8 @@ make_path(@tmp_dirs);
 # 100 =~ 20/10 * 100/2
 #$Sam::Seq::BinMaxCoverage = int($opt_cov/10);
 
-Sam::Seq->BinMaxCoverage = 10;
-Sam::Seq->BinSize = 20;
+Sam::Seq->MaxCoverage($opt_cov);
+Sam::Seq->BinSize(20);
 
 # qual_lcs is used on cov seq to mask high cov regions, min cov 10
 Fastq::Seq->Qual_lcs_range(10, $opt_cov+20, 33);  
@@ -662,7 +667,7 @@ sub run_shrimp{
 	
 	# init input stream parser progess bar	
 	my $pg_rsp = Verbose::ProgressBar->new(size => $opt_sr_count);
-	my $pg_step = int($opt_sr_count/10);
+	my $pg_step = int($opt_sr_count/100);
 	
 	# shrimp
 	my $shrimp;
@@ -717,9 +722,9 @@ sub run_shrimp{
 		mode => '+>',
 	);
 	
+	$v->verbose("Indexing Long reads");
 	# read SAM header
 	while(my %h = $rsp->next_header_line('SQ|PG')){
-		$pg_rsp->update();
 		# @PG
 		if($h{tag} eq '@PG'){
 			$PG_line = $h{raw};
@@ -733,6 +738,8 @@ sub run_shrimp{
 	}
 
 	$PG_line = '@PG ID:unknown' unless $PG_line;
+
+	$v->verbose("Mapping short reads");
 
 	# read SAM alignmetn section
 	my $rsp_c = 0;
@@ -896,6 +903,7 @@ sub correct_sr_mt{
 		'--ref-offset'	=> undef,
 		'--max-reads'	=> $opt_chunk_size,
 		'--prefix'		=> undef,
+		'--coverage'	=> $opt_cov,
 	);
 	
 	# mask hcrs unless final run

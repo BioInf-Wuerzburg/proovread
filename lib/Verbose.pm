@@ -3,8 +3,18 @@ package Verbose;
 use warnings;
 use strict;
 
+# $Id$
 
-our $Version = '0.06';
+# preference libs in same folder over @INC
+use lib './';
+
+our ($REVISION) = '$Revision$' =~ /(\d+)/;
+our ($MODIFIED) = '$Date$' =~ /Date: (\S+\s\S+)/;
+our $VERSION = '0.07';
+
+
+
+##------------------------------------------------------------------------##
 
 =head1 NAME 
 
@@ -71,6 +81,16 @@ Collection of generic function to create verbose messages.
 =cut
 
 =head1 CHANGELOG
+
+=head2 0.07
+
+=over
+
+=item [Change] Preference libs in same folder over @INC
+
+=item [Change] Added svn:keywords
+
+=back
 
 =over
 

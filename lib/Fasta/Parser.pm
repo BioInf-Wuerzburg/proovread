@@ -2,11 +2,18 @@ package Fasta::Parser;
 
 use warnings;
 use strict;
+
+# $Id$
+
+# preference libs in same folder over @INC
+use lib '../';
+
 use Fasta::Seq 0.02;
 
-our $VERSION = '0.07';
 
-
+our $VERSION = '0.08';
+our ($REVISION) = '$Revision$' =~ /(\d+)/;
+our ($MODIFIED) = '$Date$' =~ /Date: (\S+\s\S+)/;
 
 
 
@@ -27,6 +34,16 @@ TODO
 =cut
 
 =head1 CHANGELOG
+
+=head2 0.08
+
+=over
+
+=item [Change] Preference libs in same folder over @INC
+
+=item [Change] Added svn:keywords
+
+=back
 
 =over
 
