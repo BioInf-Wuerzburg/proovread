@@ -137,14 +137,23 @@ Maximum number of reads to correct. Default OFF.
 
 $opt{'max-reads=s'} = \(my $opt_max_reads = 0);
 
-=item [--hcr-mask] [off]
+=item [--hcr-mask-length] [off]
 
 Compute HCR regions and mask their cores with "N"s in output FASTA. Append
  HCR coordinates to header descriptions.
 
 =cut
 
-$opt{'hcr-mask'} = \(my $opt_hcr_mask);
+$opt{'hcr-mask-length=i'} = \(my $opt_hcr_mask_length = 0);
+
+=item [--hcr-sticky-length=<INT>] [40]
+
+Required number of HCR bases left and right of --hcr-mask-length, which 
+ will not be masked.
+
+=cut
+
+$opt{'hcr-sticky-length=i'} = \(my $opt_hcr_sticky_length = 40);
 
 =item [--coverage=<INT>] [50]
 
@@ -162,13 +171,6 @@ Quality offset.
 
 $opt{'qv-offset=s'} = \(my $opt_qv_offset = 33);
 
-=item [--sticky-end-length=<INT>] [80]
-
-Number of HCR terminal bases not to be masked.
-
-=cut
-
-$opt{'sticky-end-length=i'} = \(my $opt_sticky_end_length = 80);
 
 
 
@@ -203,7 +205,7 @@ Sam::Seq->BinSize(20);
 # qual_lcs is used on cov seq to mask high cov regions, min cov 10
 Fastq::Seq->Qual_lcs_range(10, $opt_cov+20, $opt_qv_offset);  
 # 80 chars are cutoff at each side to keep overlaps => min length 160, better 200
-Fastq::Seq->Qual_lcs_min_length(int($opt_sticky_end_length + ($opt_sticky_end_length * 0.2))); 
+Fastq::Seq->Qual_lcs_min_length($opt_hcr_mask_length + (2 * $opt_hcr_sticky_length)); 
 
 
 # use glob, to allow glob pattern instead of full filename (fa/fq is decided by parser)
@@ -279,7 +281,7 @@ foreach my $pb_id(sort keys %PB){
 	# use cov seq instead of qual seq in Fastq::Seq, mask based on cov
 	$con_mask->{qual} = $con_mask->{cov};
 
-	if($opt_hcr_mask){
+	if($opt_hcr_mask_length){
 		# compute high coverage regions 
 		my @hcrs = ($con_mask->qual_lcs());
 		if(@hcrs){
@@ -290,7 +292,7 @@ foreach my $pb_id(sort keys %PB){
 			$con->{seq_head}.= ' '.join(" ", @hcrs_string);
 			# mask hcrs minus overlap ends
 			# NOTE: this actually changes the values @hcrs!
-			$con_mask->mask_seq(map{$_->[0]+=$opt_sticky_end_length; $_->[1]-=$opt_sticky_end_length; $_}@hcrs);
+			$con_mask->mask_seq(map{$_->[0]+=$opt_hcr_sticky_length; $_->[1]-=$opt_hcr_sticky_length; $_}@hcrs);
 		}
 	
 		# write (masked) FASTA for next pass

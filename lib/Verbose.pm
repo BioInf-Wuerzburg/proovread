@@ -388,6 +388,7 @@ sub verbose{
 		
 		# line width
 		if(my $lw = $p->{line_width}){
+			$lw -= length($p->{line_delim}) - 1;
 			my $ndl = length($p->{line_delim}) || 0;
 			$string = join ("\n", map{ 
 				my $o=-$ndl; 

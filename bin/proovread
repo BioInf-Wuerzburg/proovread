@@ -136,14 +136,14 @@ Correct single molecule sequencing reads by iterative mapping of high
 
 # verbose
 my $v = Verbose->new(
-	format => "[{TIME_SHORT}] {MESSAGE}\n",
+	format => "[{TIME_FULL}] {MESSAGE}\n",
 );
 
 # verbose bash style
 my $vb = Verbose->new(
 	line_delim => "\\\n",
 	line_width => 80,
-	format => "{HLINE}{MESSAGE}\n",
+	format => "{MESSAGE}\n",
 );
 
 $v->verbose("Running $0-$VERSION, rev$REVISION, $MODIFIED");
@@ -504,13 +504,6 @@ make_path(@tmp_dirs);
 Sam::Seq->MaxCoverage($opt_cov);
 Sam::Seq->BinSize(20);
 
-# qual_lcs is used on cov seq to mask high cov regions, min cov 10
-Fastq::Seq->Qual_lcs_range(10, $opt_cov+20, 33);  
-# 80 chars are cutoff at each side to keep overlaps, at least 40 should 
-# remain to mask => min length 80*2 + 40 = 200;
-Fastq::Seq->Qual_lcs_min_length(200); 
-
-
 
 ##------------------------------------------------------------------------##
 
@@ -704,7 +697,8 @@ sub run_shrimp{
 	}else{
 		$v->exit("No shrimp config for $PASS");
 	}
-	
+
+	$vb->hline();
 	$vb->verbose($shrimp->command());
 	$vb->hline();
 	
@@ -904,10 +898,9 @@ sub correct_sr_mt{
 		'--max-reads'	=> $opt_chunk_size,
 		'--prefix'		=> undef,
 		'--coverage'	=> $opt_cov,
+		'--hcr-mask-length' => $cfg{'hcr-mask-length'},
+		'--hcr-sticky-length' => $cfg{'hcr-sticky-length'},
 	);
-	
-	# mask hcrs unless final run
-	$pbc_default{'--hcr-mask'} = undef;# if $PASS < $opt_passes;
 	
 	my @pbc_keys = sort keys %pbc_default;
 	
@@ -947,16 +940,25 @@ sub correct_sr_mt{
 	open($xgr, "(xargs --arg-file $cfg_file --max-procs $opt_threads -L 1 --verbose perl $Bin/sam2cns) 2>&1 |")
 		or $v->exit($!);
 	
+	$vb->hline();
 	# 
+	my $bc;
+	my $bs = "Batch %d/".@$sam_chunk_offsets;
 	while(<$xgr>){
 		chomp();
-		$vb->verbose($_);
+		if ($_ =~ /^perl /){
+			$v->verbose(sprintf($bs, ++$bc));
+			$vb->verbose($_);
+			$vb->hline() 
+		}else{
+			$vb->verbose($_);
+		}
+		
 		if(/xargs:.*255/){
 			$v->exit("sam2cns returned with error");
 		}
 	}
 	
-	$vb->hline();
 	
 	$v->verbose("Merging corrected output");
 	my $fq_file = pass_file_name(".fq");

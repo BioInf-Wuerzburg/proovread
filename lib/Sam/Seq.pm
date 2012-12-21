@@ -819,25 +819,31 @@ sub _state_matrix{
 		# there should be no l/t D since the reads are aligned semiglobal
 		# leading
 		if($cigar[1] eq 'I'){
+			#use Data::Dumper; print Dumper("leading I", $aln);
 			substr($seq,0,$cigar[0],''); # adjust read
 			splice(@cigar,0,2); # adjust cigar
 		}
 		# trailing
 		my $e = $#cigar;
 		if($cigar[$e] eq 'I'){
+			#use Data::Dumper; print Dumper("trailing I", $aln);
 			substr($seq,-$cigar[$e-1],$cigar[$e-1],''); # adjust read
 			splice(@cigar,$e-1,2); # adjust cigar
 		}
 		
 		# detect long I/Ds within first 3 M of read
 		if($cigar[1] eq 'M' && $cigar[0] < 4 && @cigar > 3){
-			if($cigar[3] eq 'I' && $cigar[2] > 1){
-				# "long" (>= 2bp) I within first 3 matches -> discard read start
+			if($cigar[3] eq 'I' && $cigar[2] > 2){
+				#use Data::Dumper; print Dumper("leading long I", $aln);
+				
+				# "long" (>= 3bp) I within first 3 matches -> discard read start
 				$rpos+=$cigar[0]; # increase rpos of M
 				substr($seq,0,$cigar[0]+$cigar[2],''); # remove I and M from read
 				splice(@cigar,0,4); # adjust cigar
-			}elsif($cigar[3] eq 'D' && $cigar[2] > 1){
-				# "long" (>= 2bp) D within first 3 M -> discard read start
+			}elsif($cigar[3] eq 'D' && $cigar[2] > 2){
+				#use Data::Dumper; print Dumper("leading long D", $aln);
+				
+				# "long" (>= 3bp) D within first 3 M -> discard read start
 				$rpos+=($cigar[0]+$cigar[2]); # increase rpos by number of M + D
 				substr($seq,0,$cigar[0],''); # remove M from read
 				splice(@cigar,0,4); # adjust cigar
@@ -847,13 +853,17 @@ sub _state_matrix{
 		$e = $#cigar;
 		# detect long I/Ds within last 3 M of read
 		if($e > 1 && $cigar[$e] eq 'M' && $cigar[$e-1] < 4){
-			if($cigar[$e-2] eq 'I' && $cigar[$e-3] > 1){
-				# "long" (>= 2bp) I within first 3 matches -> discard read start
+			if($cigar[$e-2] eq 'I' && $cigar[$e-3] > 2){
+				#use Data::Dumper; print Dumper("trailing long I", $aln);
+				
+				# "long" (>= 3bp) I within first 3 matches -> discard read start
 				my $tail = $cigar[$e-1]+$cigar[$e-3];
 				substr($seq,-$tail,$tail,''); # remove I and M from read
 				splice(@cigar,$e-3,4); # adjust cigar
-			}elsif($cigar[$e-2] eq 'D' && $cigar[$e-3] > 1){
-				# "long" (>= 2bp) D within first 3 M -> discard read start
+			}elsif($cigar[$e-2] eq 'D' && $cigar[$e-3] > 2){
+				#use Data::Dumper; print Dumper("trailing long D", $aln);
+				
+				# "long" (>= 3bp) D within first 3 M -> discard read start
 				substr($seq,-$cigar[$e-1],$cigar[$e-1],''); # remove M from read
 				splice(@cigar,$e-3,4); # adjust cigar
 			}
