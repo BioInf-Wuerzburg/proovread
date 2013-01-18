@@ -4,11 +4,20 @@ package Fastq::Parser;
 
 use warnings;
 use strict;
+
+# preference libs in same folder over @INC
+use lib '../';
+
 use Fastq::Seq 0.03;
+
 
 our $VERSION = '0.07';
 our ($REVISION) = '$Revision$' =~ /(\d+)/;
-our $MODIFIED = '$Date$' =~ /Date: (.+)/;
+our ($MODIFIED) = '$Date$' =~ /Date: (.+)/;
+
+
+
+##------------------------------------------------------------------------##
 
 =head1 NAME 
 
@@ -37,15 +46,35 @@ TODO
 
 =over
 
+=item
+
+=item [Change] Preference libs in same folder over @INC
+
+=item [Change] C<< $fp->guess_seq_length >> now returns estimated mean
+ READLENGTH, STDDEV. In case a file is provided, reads are randomly sampled,
+ not read from the current file position as done with pipes. By default 
+ reads 1000 reads.
+
+=item [Feature] C<< $fp->next_seq >> and C<< $fp->next_raw_seq >> now take
+ an optional boolean true which makes the methods search safely for the next 
+ record entry, regardless of any arbitrary position the file handle currently
+ might have. Useful after seek stuff.
+
+=item [Feature] C<< $fp->check_fh_is_pipe >> checks whether filehandle is 
+ associated with pipe or file.
+
 =item [BugFix] Splicing reads from buffer had error.
 
 =item [Change] Added auto Id, Date and Revision on svn checkin
 
 =item [Feature] C<< $fp->guess_phred_offset >>
 
-=item [Feature] C<< $fp->guess_read_length >>
+=item [Feature] C<< $fp->guess_seq_length >>
 
-=item [Feature] C<< $fp->guess_total_reads >>
+=item [Feature] C<< $fp->guess_seq_count >>
+
+=item [Feature] C<< $fp->sample_seqs >> returns randomly drawn seq objects 
+ from parsed file.
 
 =item [Change] C<< $fp->check_format >> now stores a complete entry (4 lines)
 
@@ -87,8 +116,6 @@ Initial Parser module. Provides Constructor and generic accessor
 
 =item Tests
 
-=item read reads chunkwise
-
 =back
 
 =cut
@@ -97,17 +124,17 @@ Initial Parser module. Provides Constructor and generic accessor
 
 =head2 new
 
-Initialize a fastq parser object. Takes parameters in key => value format. 
+Initialize a Fastq::Parser object. Takes parameters in key => value format. 
  Parameters are:
 
   fh => \*STDIN,
   file => undef,
   phred_offset => 64.
-  mode => '<',   # read, 
-                 # '+>': read+write (clobber file first)
-                 # '+<': read+write (append)
-                 # '>' : write (clobber file first)
-                 # '>>': write (append)
+  mode => '<',  # read, 
+        # '+>'    read+write (clobber file first)
+        # '+<'    read+write (append)
+        # '>'     write (clobber file first)
+        # '>>'    write (append)
 
 =cut
 
@@ -121,6 +148,7 @@ sub new{
 		phred_offset => 64,
 		mode => '<',
 		_buffer => [],
+		_is_pipe => undef,
 		@_	# overwrite defaults
 	};
 
@@ -129,6 +157,9 @@ sub new{
 		my $fh;
 		open ( $fh , $self->{mode}, $self->{file}) or die sprintf("%s: %s, %s",(caller 0)[3],$self->{file}, $!);
 		$self->{fh} = $fh;
+		$self->{_is_pipe} = '';
+	}else{
+		 $self->{_is_pipe} = -p $self->{fh} ? 1 : ''; 
 	}
 
 	bless $self, $class;
@@ -145,17 +176,29 @@ sub DESTROY{
 
 =cut
 
-=head2 next_seq
+=head2 next_seq()
 
-Loop through fastq file and return next 'Fastq::Seq' object.
+Loop through fastq file and return next 'Fastq::Seq' object. Without 
+ parameter, assumes consistent, "four line wise" run through file,
+ therefore it will fail if the filehandle is manually set to arbitrary 
+ position. 
+
+Set the first parameter to TRUE, to perform an additional check to find the 
+ actual start of the next valid record before retrieving it. This behaviour
+ is useful in combination with any previous C<< $fp->seek >> actions.
+
+Returns undef on eof.
+
+  $first_seq = $fp->next_seq();
+
+  $fp->seek(-1000,2); # go 1000 bytes back from eof
+  $close_to_last_seq = $fp->next_seq(1);
+
 
 =cut
 
-
 sub next_seq{
-	my ($self) = @_;
-	
-	use Data::Dumper;
+	my ($self, $safe) = (@_, 0);
 	
 	if(@{$self->{_buffer}}){
 		# return fastq seq object
@@ -172,6 +215,26 @@ sub next_seq{
 		defined(my $qh = <$fh>) &&
 		defined(my $qs = <$fh>)
 	){
+		
+		if($safe){
+			# safe record start
+			my $lines = 0;
+			until($nh =~ /^@/ && $qh =~ /^\+/){
+				$nh = $ns;
+				$ns = $qh;
+				$qh = $qs;
+				$qs = <$fh>;
+				# eof
+				return unless defined ($qs);
+	
+				# corrupt file
+				die	sprintf("%s: %s, %s",(caller 0)[3],$self->{file}, "Couldn't find record start within next 5 lines, possibly corrupted file or wrong format")
+					if $lines > 4;
+				
+				$lines++;
+			}
+		}
+		
 		# return fastq seq object
 		return Fastq::Seq->new(
 			$nh,$ns,$qh,$qs,
@@ -183,12 +246,15 @@ sub next_seq{
 }
 
 
-
 =head2 check_format
 
-Takes a peek at the next entry in the file and checks wether the format of 
- the input looks like FASTQ (leading @). Returns the Parser object on success, 
- undef on failure.
+Takes a peek at the first entry in the file and checks wether the format of 
+ the input looks like FASTQ (leading @, + at start of third line). Returns 
+ the Parser object on success, undef on failure.
+ 
+NOTE: Use this directly after creating the Parser object, if other methods 
+ are run on the Fastq::Parser object prior, it is likely to 
+ fail.
 
 =cut
 
@@ -196,25 +262,29 @@ sub check_format{
 	my $self = shift;
 	my $fh = $self->fh;
 	# read a line from/to the buffer
-	$self->{_buffer} = [scalar <$fh>, scalar <$fh>, scalar <$fh>, scalar <$fh>] unless @{$self->{_buffer}};
-	my $l =	$self->{_buffer}[0];
-	return $l =~ /^\@/ ? $self : undef;
+	$self->{_buffer} = [my $nh = scalar <$fh>, scalar <$fh>, my $qh = scalar <$fh>, scalar <$fh>] unless @{$self->{_buffer}};
+	if($nh =~ /^@/ and $qh =~ /^\+/){
+		return $self;
+	}
+	return undef;
 }
 
 
 =head2 next_raw_seq
 
-Loop through fastq file and return next raw fastq sequence string. 
+Like C<< $fp->next_seq >> but returns next seq as raw string instead of 
+ Fastq::Seq object. Setting the first parameter to TRUE also makes it 
+ record safe.
 
 =cut
 
 sub next_raw_seq{
-	my ($self) = @_;
+	my ($self, $safe) = (@_, 0);
 	my $fh = $self->{fh};
 	
 	if(@{$self->{_buffer}}){
 		# return fastq seq string
-		return join("",	splice(@{$self->{_buffer}}, 4));
+		return join("",	splice(@{$self->{_buffer}}, 0, 4));
 	}
 	
 	if(
@@ -223,6 +293,26 @@ sub next_raw_seq{
 		defined(my $qh = <$fh>) &&
 		defined(my $qs = <$fh>)
 	){
+		
+		if($safe){
+			# safe record start
+			my $lines = 0;
+			until($nh =~ /^@/ && $qh =~ /^\+/){
+				$nh = $ns;
+				$ns = $qh;
+				$qh = $qs;
+				$qs = <$fh>;
+				# eof
+				return unless defined ($qs);
+	
+				# corrupt file
+				die	sprintf("%s: %s, %s",(caller 0)[3],$self->{file}, "Couldn't find record start within next 5 lines, possibly corrupted file or wrong format")
+					if $lines > 4;
+				
+				$lines++;
+			}
+		}
+		
 		# return fastq seq string
 		return $nh.$ns.$qh.$qs;
 	}
@@ -230,19 +320,19 @@ sub next_raw_seq{
 	return;
 }
 
+
 =head2 seek
 
 Set the filehandle to the specified byte offset. Takes two
-optional arguments "POSITION" (0), "WHENCE" (0), see perl "seek" for more.
+optional arguments POSITION (default 0), WHENCE (default 0), see perl "seek" for more.
 Returns 'true' on success.
 
-NOTE: this operation does only work on real files, not on STDIN.
+NOTE: this operation only works on real files, not on STDIN.
 
 =cut
 
 sub seek{
 	my ($self, $offset, $whence) = (@_, 0, 0);
-	$self->{_buffer} = [];
 	return seek($self->fh, $offset, $whence);
 }
 
@@ -275,123 +365,217 @@ sub append_tell{
 	return tell($self->{fh});
 }
 
-=head2 guess_read_length
+=head2 sample_seq
 
-Reads up to n reads from the current position of the FASTQ and returns either 
- READLENGTH if all n reads had identical lengths or shortcuts if to reads
- differ in length, returns undef. Provide n as the first parameter, default 
- 100.
+Sample reads from file. If used on pipe, returns N reads from the current
+ position, while keeping them in the buffer for further processing. Takes 
+ one argument, the number of reads to sample, default 1000. Returns LIST
+ of Fastq::Seq objects.
+ 
+NOTE: The set of samples reads is entirely kept in memory, therefore this
+ method is not suited to sample large amount of reads from a large file.
 
 =cut
 
-sub guess_read_length{
-	my ($self, $n) = (@_, 100);
+sub sample_seq{
+	my ($self, $n) = (@_, 1000);
 	my $fh = $self->fh;
 	my $i;
-	my $l;
-	# read a lines from buffer
-	for($i=0; $i<$n && $i < (@{$self->{_buffer}}-3)/4; $i++){
-		my $ns = $self->{_buffer}[($i*4) +1];
-		$l = length($ns)-1 unless $l; # unchomped
-		return 0 unless $l == length($ns)-1;
+	my @reads;
+	
+	if($self->check_fh_is_pipe){
+		#cant seek on pipe: need to buffer and can only read head
+		
+		my $l;
+		# read lines from buffer
+		for($i=0; $i<$n && $i < (@{$self->{_buffer}}-3)/4; $i++){
+			push @reads,  Fastq::Seq->new(
+				$self->{_buffer}[($i*4)..($i*4+3)],
+				phred_offset => $self->{phred_offset}
+			);
+		}
+		
+		# read new lines and add to buffer
+		while(
+			$i < $n && 
+			defined (my $nh = scalar <$fh>) &&
+			defined (my $ns = scalar <$fh>) &&
+			defined (my $qh = scalar <$fh>) &&
+			defined (my $qs = scalar <$fh>)
+		){
+			push @{$self->{_buffer}}, $nh, $ns, $qh, $qs;
+			# return fastq seq object
+			push @reads, Fastq::Seq->new(
+				$nh,$ns,$qh,$qs,
+				phred_offset => $self->{phred_offset}
+			);
+			$i++;		
+		}
+	}else{
+		my $file_pos = tell();
+		# can seek on file: sample random reads
+		my $size = -s $fh;
+		$size -= $size/100; # reduce size by 1% to prevent sampling eof
+
+		for($i=$n;$i;$i--){
+			$self->seek(int(rand($size))); # jump to random pos
+			my $fq = $self->next_seq(1); # get next reads with safe start
+			if($fq){
+				push @reads, $fq;
+			}else{	# eof
+				$i++; # do one more iteration
+			}; 
+		}
+		# restore file handle
+		$self->seek($file_pos);
 	}
 	
-	# read new lines and add to buffer
-	while(
-		$i < $n && 
-		defined (my $nh = scalar <$fh>) &&
-		defined (my $ns = scalar <$fh>) &&
-		defined (my $qh = scalar <$fh>) &&
-		defined (my $qs = scalar <$fh>)
-	){
-		push @{$self->{_buffer}}, $nh, $ns, $qh, $qs;
-		$l = length($ns)-1 unless $l; # unchomped
-		return 0 unless $l == length($ns)-1;
-		$i++;		
-	}
-	return $l;
+	return @reads;
+}
+
+
+=head2 guess_seq_length
+
+Reads up to N reads, randomly sampled if input is file, from the current 
+ position if input is pipe, and returns rounded (READLENGTH,STDDEV), or 
+ undef on failure or empty file. Provide N as the first parameter, 
+ default 1000.
+
+=cut
+
+sub guess_seq_length{
+	my ($self, $n) = (@_, 1000);
+	my $fh = $self->fh;
+	my $i;
+	
+	my @sample_seq = $self->sample_seq($n);
+	
+	my $l_total;
+	my @lengths = map{my $l = length($_->seq); $l_total+=$l; $l}@sample_seq;
+	
+	# empty file
+	return undef unless $l_total;
+	
+	my $mean_l = $l_total/$n;
+	my $stddev = _stddev(\@lengths, $mean_l);
+	# round mean
+	return (int($mean_l + 0.5), int($stddev + 0.5)); 
 }
 
 =head2 guess_phred_offset
 
-Reads up to n reads from the current position of the FASTQ and scans the quality 
- sequence. If a numeric value of a quality character below 64 is found, 
- returns 33, if a value above 33+43 (76) is found, returns 64. If neither
- condition is met within n reads, returns undef. Provide n as the first 
- parameter, default 100.
+Samples up to N reads from current data and checks the boundaries of the 
+ quality range. Returns 33 for range (33,33+42), 64 for range (64,64+42)
+ or undef in any other case. Provide N as the first 
+ parameter, default 1000.
+ 
+ NOTE: There is an intersection for both ranges (64 to 75). If all sampled 
+ values lie within this intersection range the method will return undef, 
+ since the offset cannot be determined with certainty.
 
 =cut
 
 sub guess_phred_offset{
-	my ($self, $n) = (@_, 100);
+	my ($self, $n) = (@_, 1000);
 	my $fh = $self->fh;
 	my $i;
-	my $min;
-	my $max;
-	# read a lines from buffer
-	for($i=0; $i<$n && $i < (@{$self->{_buffer}}-3)/4; $i++){
-		my $qs = $self->{_buffer}[($i*4) +3];
-		foreach(split(//, $qs)){
-			return 33 if ord($_) < 64;
-			return 64 if ord($_) > 76;
-		}
+	
+	my @sample_seq = $self->sample_seq($n);
+	
+	return undef unless @sample_seq;
+	
+	my @quals;
+	foreach my $fq(@sample_seq){
+		push @quals, split(//, $fq->qual);
 	}
 	
-	# read new lines and add to buffer
-	while(
-		$i < $n && 
-		defined (my $nh = scalar <$fh>) &&
-		defined (my $ns = scalar <$fh>) &&
-		defined (my $qh = scalar <$fh>) &&
-		defined (my $qs = scalar <$fh>)
-	){
-		push @{$self->{_buffer}}, $nh, $ns, $qh, $qs;
-		foreach(split(//, $qs)){
-			return 33 if ord($_) < 64;
-			return 64 if ord($_) > 76;
-		}
-		$i++;		
-	}
+	@quals = sort @quals;
+	
+	my $min = $quals[0];
+	my $max = $quals[-1];
+	
+	# intersection => undetermined
+	return undef if ord($min) >= 64 && ord($max) <= 33+42;
+	
+	# 33
+	return 33 if ord($min) >= 33 && ord($max) <= 33+42;
+	# 64
+	return 64 if ord($min) >= 64 && ord($max) <= 64+42;
+	
+	# unknown
+	return undef;
 }
 
-=head2 guess_total_reads
+=head2 guess_seq_count
 
 Reads up to n reads from the current position of the FASTQ and estimates the
- mean size in bytes per FASTQ entry. Extrapolates the read number match the 
- file size and returns the thus approximated total number of reads. Returns
- undef on STDIN.
+ mean size in bytes per FASTQ entry. Extrapolates the read number to match 
+ the file size and returns the thus approximated total number of reads. 
+ Returns undef on STDIN.
 
 =cut
 
-sub guess_total_reads{
-	my ($self, $n) = (@_, 100);
+sub guess_seq_count{
+	my ($self, $n) = (@_, 1000);
 	my $fh = $self->fh;
-	my $i;
+	# pipe
+	return undef if $self->check_fh_is_pipe;
+
 	my $size;
 	my $file_size = -s $fh;
-	return unless $file_size; # 
-	# read a lines from buffer
-	for($i=0; $i<$n && $i < (@{$self->{_buffer}}-3)/4; $i++){
-		my @fq = @{$self->{_buffer}}[($i*4)..($i*4)+3];
-		$size+=length(join("", @fq));
-	}
-	
-	# read new lines and add to buffer
-	while(
-		$i < $n && 
-		defined (my $nh = scalar <$fh>) &&
-		defined (my $ns = scalar <$fh>) &&
-		defined (my $qh = scalar <$fh>) &&
-		defined (my $qs = scalar <$fh>)
-	){
-		push @{$self->{_buffer}}, $nh, $ns, $qh, $qs;
-		$size+=length(join("", $nh, $ns, $qh, $qs));
-		$i++;
-	}
-	
-	return int(($file_size/$size)*$i);
-	
+	# empty file
+	return 0 unless $file_size;
+
+	$size+= length($_->string)for $self->sample_seq($n);
+	#print $median_size;
+	return int(($file_size/$size*$n)+0.5);
 }
+
+=head2 check_fh_is_pipe
+
+Returns TRUE (1) if filehandle is associated with a pipe, FALSE ('') if it is 
+ associated with a real file.
+
+=cut
+
+sub check_fh_is_pipe{
+	my $self = shift;
+	return $self->{_is_pipe};
+}
+
+=head2 _stddev
+
+Takes a reference to a list of values and returns mean and stddev of the
+ list. Additionally takes the mean of the list as second parameter, in it
+ has been calculated before to speed up computation.
+
+=cut
+
+sub _stddev{
+	my($values, $mean1) = (@_);
+	#Prevent division by 0 error in case you get junk data
+	return undef unless scalar @$values;
+	
+	# calculate mean unless given
+	unless(defined $mean1){
+		# Step 1, find the mean of the numbers
+		my $total1 = 0;
+		$total1 += $_  for @$values;
+		my $mean1 = $total1 / (scalar @$values);
+	}
+	
+	
+	# find the mean of the squares of the differences
+	# between each number and the mean
+	my $total2 = 0;
+	$total2 += ($mean1-$_)**2 for @$values;
+	my $mean2 = $total2 / (scalar @$values);
+	
+	# standard deviation is the square root of the
+	# above mean
+	return sqrt($mean2);
+}
+
 
 
 =head1 Accessor METHODS
@@ -406,7 +590,10 @@ Get/Set the file handle.
 
 sub fh{
 	my ($self, $fh) = @_;
-	$self->{fh} = $fh if $fh;
+	if($fh){
+		$self->{fh} = $fh;
+		$self->{_is_pipe} = -p $fh ? 1 : undef;	
+	};
 	return $self->{fh};
 }
 

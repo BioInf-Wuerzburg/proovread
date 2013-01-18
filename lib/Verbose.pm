@@ -82,6 +82,14 @@ Collection of generic function to create verbose messages.
 
 =head1 CHANGELOG
 
+=head2 0.08
+
+=over
+
+=item [Feature] Added attribute C<exit_val> with default 255 to Verbose objects.
+
+=back
+
 =head2 0.07
 
 =over
@@ -179,6 +187,7 @@ sub new{
 		start_time => time(),	# safe time() of creation for elapsed templates
 		line_delim => "\n",
 		line_width => undef,
+		exit_val => 255,
 		@_	# overwrite
 	};
 	
@@ -188,7 +197,7 @@ sub new{
 		$self->{fh} = $fh;
 	}
 	
-	$self->{format_exit} = $self->{format}."{TRACE}\n" unless $self->{format_exit};
+	$self->{format_exit} = "{HLINE}".$self->{format}."{TRACE}\n" unless $self->{format_exit};
 	
 	bless $self, $class;
 }
@@ -457,7 +466,7 @@ sub exit{
 		trace_1 => [caller(1)],
 		format => $self->{format_exit}, # overwrite format to verbose temp.
 	);
-	exit 1;
+	exit $self->{exit_val};
 }
 
 

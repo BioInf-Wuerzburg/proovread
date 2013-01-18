@@ -27,10 +27,10 @@ use lib "$Bin/../lib/";
 use Verbose;
 use Verbose::ProgressBar;
 
-use Fastq::Parser;
+use Fastq::Parser '0.07';
 use Fastq::Seq;
 
-use Fasta::Parser;
+use Fasta::Parser '0.08';
 use Fasta::Seq;
 
 use Sam::Parser;
@@ -40,7 +40,7 @@ use Sam::Seq;
 use Shrimp;
 
 
-our $VERSION = '0.71';
+our $VERSION = '0.72';
 our ($REVISION) = '$Revision$' =~ /(\d+)/;
 our ($MODIFIED) = '$Date$' =~ /Date: (\S+\s\S+)/;
 
@@ -60,7 +60,23 @@ Correct single molecule sequencing reads by iterative mapping of high
 
 =head1 CHANGELOG
 
+
+=head2 0.72
+
+=over
+
+=item [Feature] Read short reads FASTA input
+
+=item [Change] remove_tree moved to END{}, to delete folders also in case of 
+ an error
+
+=item [BugFix] Bad rounding, $pg_step could become 0, does not work in modulus
+
+=back
+
 =head2 0.71
+
+=over
 
 =item [Feature] Test config file for existence before loading.
 
@@ -71,6 +87,8 @@ Correct single molecule sequencing reads by iterative mapping of high
  priority remains with the scripts command line parameter, yet the configs 
  manipulate the defaults and allow additional advanced settings, like shrimp
  mapping parameter, which cannot be controlled via command line. 
+
+=back
 
 =head2 0.70
 
@@ -133,6 +151,8 @@ Correct single molecule sequencing reads by iterative mapping of high
 =cut
 
 ##------------------------------------------------------------------------##
+
+my $no_error;
 
 # verbose
 my $v = Verbose->new(
@@ -409,22 +429,51 @@ $opt_lr_file && ! -f $opt_lr_file && pod2usage("Cannot find $opt_lr_file");
 
 # sr file
 $opt_sr_file && ! -f $opt_lr_file && pod2usage("Cannot find $opt_lr_file");
-# TODO: test if short reads are FASTA
-#	if(Fasta::Parser->new(file=> $opt_sr_file)->check_format){ # FASTA
-#	}
-#	
-my $fap = Fastq::Parser->new(file => $opt_sr_file);
-unless (defined $opt_sr_length){
-	$opt_sr_length = $fap->guess_read_length;
-	$v->verbose(sprintf("Guessing short read length: %s", $opt_sr_length ? $opt_sr_length : "ambiguous" ));
-}
-unless (defined $opt_sr_qv_offset){
-	$opt_sr_qv_offset = $fap->guess_phred_offset; 
-	$v->verbose(sprintf("Guessing short read quality offset: %d", $opt_sr_qv_offset));
-}
-unless (defined $opt_sr_count){
-	$opt_sr_count = $fap->guess_total_reads();
-	$v->verbose(sprintf("Guessing approx number of short reads: %s", Verbose->Humanize($opt_sr_count)));
+
+# test if short reads are FASTQ/FASTA
+my $fp;
+if($fp = Fastq::Parser->new(file => $opt_sr_file)->check_format){ # FASTQ
+	$v->verbose("Detected FASTQ format for --short-reads $opt_sr_file");
+	unless (defined $opt_sr_length){
+		my ($opt_sr_length, $opt_sr_length_dev) = $fp->guess_seq_length;
+		$v->verbose(sprintf("Guessing short read length: %d +-%d", $opt_sr_length, $opt_sr_length_dev ));
+		if($opt_sr_length > 500){
+			$v->exit(
+				"Estimated short reads length > 500\n"
+				."Are you sure you specified the correct data? "
+				."To run the pipeline on this data, which by design is not really suited, "
+				."you need to explicitly provide their mean length as parameter --sr-length"
+			);
+		}
+	}
+	unless (defined $opt_sr_qv_offset){
+		$opt_sr_qv_offset = $fp->guess_phred_offset; 
+		$v->verbose(sprintf("Guessing short read quality offset: %d", $opt_sr_qv_offset));
+	}
+	unless (defined $opt_sr_count){
+		$opt_sr_count = $fp->guess_seq_count();
+		$v->verbose(sprintf("Guessing approx number of short reads: %s", Verbose->Humanize($opt_sr_count)));
+	}
+}elsif($fp = Fasta::Parser->new(file=> $opt_sr_file)->check_format){ # FASTA
+	$v->verbose("Detected FASTA format for --short-reads $opt_sr_file");
+	unless (defined $opt_sr_length){
+		my ($opt_sr_length, $opt_sr_length_dev) = $fp->guess_seq_length;
+		$v->verbose(sprintf("Guessing short read length: %d +-%d", $opt_sr_length, $opt_sr_length_dev));
+		if($opt_sr_length > 500){
+			$v->exit(
+				"Estimated short reads length > 500\n"
+				."Are you sure you specified the correct data? "
+				."To run the pipeline on this data, which by design is not really suited, "
+				."you need to explicitly provide their mean length as parameter --sr-length"
+			);
+		}
+	}
+	unless (defined $opt_sr_count){
+		$opt_sr_count = $fp->guess_seq_count();
+		$v->verbose(sprintf("Guessing approx number of short reads: %s", Verbose->Humanize($opt_sr_count)));
+	}
+}else{
+	$v->exit("Short read file $opt_sr_count neither FASTQ nor FASTA format");
 }
 
 
@@ -555,8 +604,6 @@ if($opt_sam_file){
 	copy(pass_file_name(".fa"), $opt_fa_out);
 	copy(pass_file_name(".fq"), $opt_fq_out);
 
-	remove_tree(@tmp_dirs) unless $opt_keep;
-	
 }
 
 
@@ -568,9 +615,15 @@ $v->verbose("Cleaning up temporary files and memory");
 
 %PB = ();
 
+# lets see if we came this far
+$no_error++;
+
 # put in END to wait for memory to be cleaned
 END{
-	Verbose->new()->verbose("Done");
+	remove_tree(@tmp_dirs) unless $opt_keep;
+	if ($no_error){
+		Verbose->new()->verbose("Done");
+	} 
 }
 
 
@@ -660,7 +713,7 @@ sub run_shrimp{
 	
 	# init input stream parser progess bar	
 	my $pg_rsp = Verbose::ProgressBar->new(size => $opt_sr_count);
-	my $pg_step = int($opt_sr_count/100);
+	my $pg_step = int(($opt_sr_count/100)+0.5);
 	
 	# shrimp
 	my $shrimp;

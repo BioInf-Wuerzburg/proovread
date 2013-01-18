@@ -1,9 +1,9 @@
 package Fasta::Parser;
 
+# $Id$
+
 use warnings;
 use strict;
-
-# $Id$
 
 # preference libs in same folder over @INC
 use lib '../';
@@ -38,6 +38,13 @@ TODO
 =head2 0.08
 
 =over
+
+=item [Feature] C<< $fp->guess_seq_length >>
+
+=item [Feature] C<< $fp->guess_seq_count >>
+
+=item [Feature] C<< $fp->sample_seqs >> returns randomly drawn seq objects 
+ from parsed file.
 
 =item [Change] Preference libs in same folder over @INC
 
@@ -250,6 +257,145 @@ NOTE: this operation does only work on real files, not on STDIN.
 sub seek{
 	my ($self, $offset, $whence) = (@_, 0, 0);
 	return seek($self->fh, $offset, $whence);
+}
+
+=head2 sample_seqs
+
+Sample reads from file. If used on pipe returns undef. Takes 
+ one argument, the number of reads to sample, default 1000. Returns LIST
+ of Fastq::Seq objects.
+ 
+=cut
+
+sub sample_seqs{
+	my ($self, $n) = (@_, 1000);
+	my $fh = $self->fh;
+	my $i;
+	my @seqs;
+	
+	return if $self->check_fh_is_pipe;
+
+	my $file_pos = tell();
+
+	# can seek on file: sample random reads
+	my $size = -s $fh;
+	$size -= $size/100; # reduce size by 1% to prevent sampling eof
+
+	for($i=$n;$i;$i--){
+		$self->seek(int(rand($size))); # jump to random pos
+		local $/ = "\n>";
+		scalar <$fh>; # make sure to get a record start
+		my $fa = $self->next_seq(); # get next record
+		
+		if($fa){
+			push @seqs, $fa;
+		}else{	# eof
+			$i++; # do one more iteration
+		}; 
+	}
+	# restore file handle
+	$self->seek($file_pos);
+	
+	return @seqs;
+}
+
+
+=head2 guess_seq_length
+
+Reads N sequences, randomly sampled if input is file and returns rounded 
+ READLENGTH,STDDEV or undef on pipe, failure or empty file. Provide N as 
+ the first parameter, default 1000.
+
+=cut
+
+sub guess_seq_length{
+	my ($self, $n) = (@_, 1000);
+	my $fh = $self->fh;
+	my $i;
+	
+	my @sample_seqs = $self->sample_seqs($n);
+	
+	my $l_total;
+	my @lengths = map{my $l = length($_->seq); $l_total+=$l; $l}@sample_seqs;
+	
+	# empty file
+	return undef unless $l_total;
+	
+	my $mean_l = $l_total/$n;
+	my $stddev = _stddev(\@lengths, $mean_l);
+	# round mean
+	return (int($mean_l + 0.5), int($stddev + 0.5)); 
+}
+
+
+=head2 guess_seq_count
+
+Reads up to n reads from the current position of the file and estimates the
+ mean size in bytes per FASTA record. Extrapolates the number sequences to 
+ match the file size and returns the thus approximated total number of 
+ sequences. Returns undef on STDIN.
+
+=cut
+
+sub guess_seq_count{
+	my ($self, $n) = (@_, 1000);
+	my $fh = $self->fh;
+	# pipe
+	return undef if $self->check_fh_is_pipe;
+
+	my $size;
+	my $file_size = -s $fh;
+	# empty file
+	return 0 unless $file_size;
+
+	$size+= length($_->string)for $self->sample_seqs($n);
+	#print $median_size;
+	return int(($file_size/$size*$n)+0.5);
+}
+
+=head2 check_fh_is_pipe
+
+Returns TRUE (1) if filehandle is associated with a pipe, FALSE ('') if it is 
+ associated with a real file.
+
+=cut
+
+sub check_fh_is_pipe{
+	my $self = shift;
+	return $self->{_is_pipe};
+}
+
+=head2 _stddev
+
+Takes a reference to a list of values and returns mean and stddev of the
+ list. Additionally takes the mean of the list as second parameter, in it
+ has been calculated before to speed up computation.
+
+=cut
+
+sub _stddev{
+	my($values, $mean1) = (@_);
+	#Prevent division by 0 error in case you get junk data
+	return undef unless scalar @$values;
+	
+	# calculate mean unless given
+	unless(defined $mean1){
+		# Step 1, find the mean of the numbers
+		my $total1 = 0;
+		$total1 += $_  for @$values;
+		my $mean1 = $total1 / (scalar @$values);
+	}
+	
+	
+	# find the mean of the squares of the differences
+	# between each number and the mean
+	my $total2 = 0;
+	$total2 += ($mean1-$_)**2 for @$values;
+	my $mean2 = $total2 / (scalar @$values);
+	
+	# standard deviation is the square root of the
+	# above mean
+	return sqrt($mean2);
 }
 
 ##------------------------------------------------------------------------##

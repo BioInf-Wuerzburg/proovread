@@ -43,20 +43,6 @@ Class for handling sam reference sequences and its aligned reads.
 
 =head1 CHANGELOG
 
-=head2 0.08
-
-=over
-
-=item [Change] In order to implement InDelTabooLength correctly, the states
- of an alignment are now computed independently of the state matrix, then 
- trimmed and after that added to the global matrix.
-
-=item [Feature] C<< $Sam::Seq::InDelTabooLength >> and C<< Sam::Seq->InDelTabooLength() >>
-
-=item [Feature] length normalize score to handle varying short read lengths
-
-=back
-
 =head2 0.07
 
 =over
@@ -182,17 +168,6 @@ our $MaxCoverage = 50;
 
 our $PhredOffset = 33;
 
-=head2 InDelTabooLength [5]
-
-Within specified number of positions from the outer edges (and additionally
- specified inner edges, e.g. hcrs) the state matrix call will ignore 
- insertions/deletions to prevent false results by mapping 
- artefacts.
-
-=cut
-
-our $InDelTabooLength = 5;
-
 =head1 Class METHODS
 
 =cut
@@ -233,17 +208,7 @@ sub PhredOffset{
 	return $PhredOffset;
 }
 
-=head2 InDelTabooLength
 
-Get/Set $Sam::Seq::InDelTabooLength. Default 10.
-
-=cut
-
-sub InDelTabooLength{
-	my ($class, $indeltaboo) = @_;
-	$InDelTabooLength = $indeltaboo if defined $indeltaboo;
-	return $InDelTabooLength;
-}
 
 ##------------------------------------------------------------------------##
 
@@ -470,7 +435,7 @@ sub consensus{
 	my @hcrs = @_;
 	# init state matrix
 	$self->{_state_matrix} = [map{[]}1..$self->len];
-	$self->_state_matrix(@hcrs);# unless $self->_state_matrix();
+	$self->_state_matrix();# unless $self->_state_matrix();
 	$self->_add_pre_calc_fq(@hcrs) if @hcrs;
 	$self->_consensus;
 	return $self->{con};
@@ -828,16 +793,13 @@ sub _init_read_bins{
 
 sub _state_matrix{
 	my $self = shift;
-	my @hcrs = @_;
+	
 	# state matrix
 	my @S = @{$self->{_state_matrix}};
 	# predefined states
 	my %states = %{$self->{_states}};
 	
 	while(my $aln = $self->next_aln){
-		
-		###################
-		### prepare aln ###
 		# get read seq
 		my $seq = $aln->seq;
 		my $orig_seq_length = length($seq);
@@ -852,207 +814,110 @@ sub _state_matrix{
 		
 		# reference position
 		my $rpos = $aln->pos-1;
-
-=pod
 		
-		##################
-		### InDelTaboo ###
-		# this also removes leading/trailing InDels regardless of InDelTabooLength
-		# trim head
-		my $head=0;	
-		for(my $i=0; $i<@cigar;$i+=2){
-			if($cigar[$i+1] eq 'M'){
-				$head+=$cigar[$i];
-				if($head > $InDelTabooLength){
-					if($i){# there was something before this match
-						# only cut before this match
-						my $head_cut = $head-$cigar[$i]; 
-						# trim cigar
-						splice(@cigar, 0, $i);
-						# adjust rpos
-						$rpos+= $head_cut;
-						# trim seq
-						substr($seq, 0, $head_cut, '');
-					}
-					last;
-				}
-			}elsif($cigar[$i+1] eq 'D'){ # ignore leading deletions, but adjust rpos
-				$rpos+= $cigar[$i];
-			}elsif($cigar[$i+1] eq 'I'){
-				$head+=$cigar[$i];
-			}else{
-				$V->exit("Unknown Cigar '".$cigar[$i+1]."'");
-			}
+		# remove leading/trailing I
+		# there should be no l/t D since the reads are aligned semiglobal
+		# leading
+		if($cigar[1] eq 'I'){
+			#use Data::Dumper; print Dumper("leading I", $aln);
+			substr($seq,0,$cigar[0],''); # adjust read
+			splice(@cigar,0,2); # adjust cigar
+		}
+		# trailing
+		my $e = $#cigar;
+		if($cigar[$e] eq 'I'){
+			#use Data::Dumper; print Dumper("trailing I", $aln);
+			substr($seq,-$cigar[$e-1],$cigar[$e-1],''); # adjust read
+			splice(@cigar,$e-1,2); # adjust cigar
 		}
 		
-		# have to have kept at least 50 bps and 70% of original read length
-		#  to consider read for state matrix
-		next if length($seq) < 50  || (length($seq)/$orig_seq_length) < 0.7;
-		
-		# trim tail
-		my $tail=0;	
-		for(my $i=$#cigar-1; $i;$i-=2){
-			if($cigar[$i+1] eq 'M'){
-				$tail+=$cigar[$i];
-				if($tail > $InDelTabooLength){
-					if($i < $#cigar-1){# there is after this match
-						# only cut before this match
-						my $tail_cut = $tail-$cigar[$i]; 
-						# trim cigar
-						splice(@cigar, -($#cigar-($i+1)));
-						# trim seq
-						substr($seq, -$tail_cut, $tail_cut, '');
-					}
-					last;
-				}
-			}elsif($cigar[$i+1] eq 'D'){ # ignore leading deletions, but adjust rpos
-
-			}elsif($cigar[$i+1] eq 'I'){
-				$tail+=$cigar[$i];
-			}else{
-				$V->exit("Unknown Cigar '".$cigar[$i+1]."'");
-			}
-		}
-
-		# have to have kept at least 50 bps and 70% of original read length
-		#  to consider read for state matrix
-		next if length($seq) < 50  || (length($seq)/$orig_seq_length) < 0.7;
-		
-=cut
-		
-		#		##################
-		#		### DEPRECATED ### 
-		#		### leading/trailing long indel removal
-		#		# remove leading/trailing I
-		#		# there should be no l/t D since the reads are aligned semiglobal
-		#		# leading
-		#		if($cigar[1] eq 'I'){
-		#			#use Data::Dumper; print Dumper("leading I", $aln);
-		#			substr($seq,0,$cigar[0],''); # adjust read
-		#			splice(@cigar,0,2); # adjust cigar
-		#		}
-		#		# trailing
-		#		my $e = $#cigar;
-		#		if($cigar[$e] eq 'I'){
-		#			#use Data::Dumper; print Dumper("trailing I", $aln);
-		#			substr($seq,-$cigar[$e-1],$cigar[$e-1],''); # adjust read
-		#			splice(@cigar,$e-1,2); # adjust cigar
-		#		}
-		#		
-		#		# detect long I/Ds within first 3 M of read
-		#		if($cigar[1] eq 'M' && $cigar[0] < 4 && @cigar > 3){
-		#			if($cigar[3] eq 'I' && $cigar[2] > 2){
-		#				#use Data::Dumper; print Dumper("leading long I", $aln);
-		#				
-		#				# "long" (>= 3bp) I within first 3 matches -> discard read start
-		#				$rpos+=$cigar[0]; # increase rpos of M
-		#				substr($seq,0,$cigar[0]+$cigar[2],''); # remove I and M from read
-		#				splice(@cigar,0,4); # adjust cigar
-		#			}elsif($cigar[3] eq 'D' && $cigar[2] > 2){
-		#				#use Data::Dumper; print Dumper("leading long D", $aln);
-		#				
-		#				# "long" (>= 3bp) D within first 3 M -> discard read start
-		#				$rpos+=($cigar[0]+$cigar[2]); # increase rpos by number of M + D
-		#				substr($seq,0,$cigar[0],''); # remove M from read
-		#				splice(@cigar,0,4); # adjust cigar
-		#			}
-		#		}
-		
-		
-		
-		
-		#######################
-		### cigar to states ###
-		my @states;
-		
-		# cigar counter, increment by 2 to capture count and type of cigar (10,M) (3,I) (5,D) ...
-		
-		for(my $i=0; $i<@cigar;$i+=2){
-			print $seq,"\n";
-			if($cigar[$i+1] eq 'M'){
-				push @states, split(//,substr($seq,0,$cigar[$i],''));
-			}elsif($cigar[$i+1] eq 'D'){
-				push @states, ('-') x $cigar[$i];
-			}elsif($cigar[$i+1] eq 'I'){
+		# detect long I/Ds within first 3 M of read
+		if($cigar[1] eq 'M' && $cigar[0] < 4 && @cigar > 3){
+			if($cigar[3] eq 'I' && $cigar[2] > 2){
+				#use Data::Dumper; print Dumper("leading long I", $aln);
 				
-				$i
-				# append to prev state
-				? $states[$#states] .= substr($seq,0,$cigar[$i],'')
-				: $states[0] = substr($seq,0,$cigar[$i],'');		
+				# "long" (>= 3bp) I within first 3 matches -> discard read start
+				$rpos+=$cigar[0]; # increase rpos of M
+				substr($seq,0,$cigar[0]+$cigar[2],''); # remove I and M from read
+				splice(@cigar,0,4); # adjust cigar
+			}elsif($cigar[3] eq 'D' && $cigar[2] > 2){
+				#use Data::Dumper; print Dumper("leading long D", $aln);
+				
+				# "long" (>= 3bp) D within first 3 M -> discard read start
+				$rpos+=($cigar[0]+$cigar[2]); # increase rpos by number of M + D
+				substr($seq,0,$cigar[0],''); # remove M from read
+				splice(@cigar,0,4); # adjust cigar
+			}
+		}
+		
+		$e = $#cigar;
+		# detect long I/Ds within last 3 M of read
+		if($e > 1 && $cigar[$e] eq 'M' && $cigar[$e-1] < 4){
+			if($cigar[$e-2] eq 'I' && $cigar[$e-3] > 2){
+				#use Data::Dumper; print Dumper("trailing long I", $aln);
+				
+				# "long" (>= 3bp) I within first 3 matches -> discard read start
+				my $tail = $cigar[$e-1]+$cigar[$e-3];
+				substr($seq,-$tail,$tail,''); # remove I and M from read
+				splice(@cigar,$e-3,4); # adjust cigar
+			}elsif($cigar[$e-2] eq 'D' && $cigar[$e-3] > 2){
+				#use Data::Dumper; print Dumper("trailing long D", $aln);
+				
+				# "long" (>= 3bp) D within first 3 M -> discard read start
+				substr($seq,-$cigar[$e-1],$cigar[$e-1],''); # remove M from read
+				splice(@cigar,$e-3,4); # adjust cigar
+			}
+		}		
+		
+		# have to have kept at least 50 bps and 70% of original read length
+		#  to consider read for state matrix
+		next if length($seq) < 50  || (length($seq)/$orig_seq_length) < 0.7;
+		
+		my $state; # buffer last match, required if followed by insertion
+		for(my $i=0; $i<@cigar;$i+=2){
+			if($cigar[$i+1] eq 'M'){
+				my @subseq = split(//,substr($seq,0,$cigar[$i],''));
+				foreach $_ (@subseq){
+					($S[$rpos][$states{$_}])++;  # match states always exist
+					$rpos++;
+				}
+				$state = $subseq[$#subseq];
+			}elsif($cigar[$i+1] eq 'D'){
+				for(1..$cigar[$i]){
+					($S[$rpos][4])++;  # $states{'-'} is always 4 
+					$rpos++;
+				}
+				$state = '-';
+			}elsif($cigar[$i+1] eq 'I'){
+				#unless ($state){print STDERR $aln->pos," : ",$rpos,"\n"} 
+				my $complex_state;
+				if($state){
+					$complex_state = $state.substr($seq,0,$cigar[$i],'');
+					($S[$rpos-1][$states{$state}])--; #
+				}else{
+					$complex_state = substr($seq,0,$cigar[$i],'');
+				}
+				# replace by complex state, add state idx to %states if new
+				if(exists ($states{$complex_state})){
+					#TODO: insertion before first M
+					next if ($rpos-1 < 0);
+					$S[$rpos-1][$states{$complex_state}]++
+				}else{
+					next if ($rpos-1 < 0);
+					$states{$complex_state} = scalar keys %states;
+					$S[$rpos-1][$states{$complex_state}]++;
+				}
+				#($S[$rpos-1][exists ($states{$complex_state}) ? $states{$complex_state} : $states{$complex_state} = keys %states])++; 
+				#$seq[$#seq].= 
 			}else{
 				$V->exit("Unknown Cigar '".$cigar[$i+1]."'");
 			}
 		}
-		
-		
-		########################
-		### states to matrix ###
-		
-		foreach my $state (@states){
-			unless($state){
-				use Data::Dumper;
-				print Dumper($aln->seq, join(" ",@states), $seq, join("", @cigar));
-			}
-			if (length ($state) > 1 && ! exists $states{$state}){
-				$states{$state} = scalar keys %states; 
-			}		
-			($S[$rpos][$states{$state}])++;  # match/gap states always exist
-			$rpos++;
-		}
-
-	
-		#	##################
-		#	### DEPRECATED ###
-		#	### simultaneous cigar parsing and state matrix counting
-		#	my $state; # buffer last match, required if followed by insertion
-		#		for(my $i=0; $i<@cigar;$i+=2){
-		#			if($cigar[$i+1] eq 'M'){
-		#				my @subseq = split(//,substr($seq,0,$cigar[$i],''));
-		#				foreach $_ (@subseq){
-		#					($S[$rpos][$states{$_}])++;  # match states always exist
-		#					$rpos++;
-		#				}
-		#				$state = $subseq[$#subseq];
-		#			}elsif($cigar[$i+1] eq 'D'){
-		#				for(1..$cigar[$i]){
-		#					($S[$rpos][4])++;  # $states{'-'} is always 4 
-		#					$rpos++;
-		#				}
-		#				$state = '-';
-		#			}elsif($cigar[$i+1] eq 'I'){
-		#				#unless ($state){print STDERR $aln->pos," : ",$rpos,"\n"} 
-		#				my $complex_state;
-		#				if($state){
-		#					$complex_state = $state.substr($seq,0,$cigar[$i],'');
-		#					($S[$rpos-1][$states{$state}])--; #
-		#				}else{
-		#					$complex_state = substr($seq,0,$cigar[$i],'');
-		#				}
-		#				# replace by complex state, add state idx to %states if new
-		#				if(exists ($states{$complex_state})){
-		#					#TODO: insertion before first M
-		#					next if ($rpos-1 < 0);
-		#					$S[$rpos-1][$states{$complex_state}]++
-		#				}else{
-		#					next if ($rpos-1 < 0);
-		#					$states{$complex_state} = scalar keys %states;
-		#					$S[$rpos-1][$states{$complex_state}]++;
-		#				}
-		#				#($S[$rpos-1][exists ($states{$complex_state}) ? $states{$complex_state} : $states{$complex_state} = keys %states])++; 
-		#				#$seq[$#seq].= 
-		#			}else{
-		#				$V->exit("Unknown Cigar '".$cigar[$i+1]."'");
-		#			}
-		#		}
-
-
 	}
-	
 	
 	# return state matrix
 	$self->{_state_matrix} = \@S;
 	$self->{_states} = \%states;
-	
 	return $self;
 	
 }
