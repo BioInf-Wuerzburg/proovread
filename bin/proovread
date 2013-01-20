@@ -18,11 +18,11 @@ use List::Util qw(sum max);
 use File::Basename;
 use File::Path qw(make_path remove_tree);
 use File::Copy;
-use FindBin qw($Bin);
+use FindBin qw($RealBin);
 
 use Data::Dumper;
 
-use lib "$Bin/../lib/";
+use lib "$RealBin/../lib/";
 
 use Verbose;
 use Verbose::ProgressBar;
@@ -35,7 +35,7 @@ use Fasta::Seq;
 
 use Sam::Parser;
 use Sam::Alignment;
-use Sam::Seq;
+use Sam::Seq '0.08';
 
 use Shrimp;
 
@@ -64,6 +64,15 @@ Correct single molecule sequencing reads by iterative mapping of high
 =head2 0.72
 
 =over
+
+=item [Feature] Added C<sr-trim> and C<sr-indel-taboo-length> to advanced
+ config options
+
+=item [Change] Uses Sam::Seq 0.08, which provides InDelTabooLength based 
+ short read trimming to reduce errors especially in edge regions
+
+=item [Change] Binary path is now determined by $FindBin::Realbin instead of
+ $FindBin::Bin. Robust against linking the binary.
 
 =item [Feature] Read short reads FASTA input
 
@@ -179,7 +188,7 @@ $v->verbose("Running $0-$VERSION, rev$REVISION, $MODIFIED");
 
 # load core defaults
 $v->verbose("Reading core config");
-my $cfg_core_file = "$Bin/../proovread.cfg"; 
+my $cfg_core_file = "$RealBin/../proovread.cfg"; 
 my %cfg = do $cfg_core_file;
 
 =item [--create-cfg=<CFGFILENAME>] [<CWD>/proovread_cfg.pm]
@@ -552,6 +561,8 @@ make_path(@tmp_dirs);
 
 Sam::Seq->MaxCoverage($opt_cov);
 Sam::Seq->BinSize(20);
+Sam::Seq->Trim($cfg{'sr-trim'});
+Sam::Seq->InDelTabooLength($cfg{'sr-indel-taboo-length'});
 
 
 ##------------------------------------------------------------------------##
@@ -990,7 +1001,7 @@ sub correct_sr_mt{
 	
 	# xarg cmds, capture stderr;
 	my $xgr;
-	open($xgr, "(xargs --arg-file $cfg_file --max-procs $opt_threads -L 1 --verbose perl $Bin/sam2cns) 2>&1 |")
+	open($xgr, "(xargs --arg-file $cfg_file --max-procs $opt_threads -L 1 --verbose perl $RealBin/sam2cns) 2>&1 |")
 		or $v->exit($!);
 	
 	$vb->hline();

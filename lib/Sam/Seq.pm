@@ -20,7 +20,7 @@ use Fastq::Seq;
 use Fasta::Seq;
 
 
-our $VERSION = '0.07';
+our $VERSION = '0.08';
 our ($REVISION) = '$Revision$' =~ /(\d+)/;
 our ($MODIFIED) = '$Date$' =~ /Date: (\S+\s\S+)/;
 
@@ -184,14 +184,21 @@ our $PhredOffset = 33;
 
 =head2 InDelTabooLength [5]
 
-Within specified number of positions from the outer edges (and additionally
- specified inner edges, e.g. hcrs) the state matrix call will ignore 
- insertions/deletions to prevent false results by mapping 
- artefacts.
+Trim reads to prevent insertions/deletions within the first InDelTabooLength
+ bases. N=0 deactivates the feature.
 
 =cut
 
 our $InDelTabooLength = 5;
+
+=head2 $Trim
+
+Boolean. Deactivate trimming completely, including leading/trailing indels 
+ and InDelTabooLength.
+
+=cut
+
+our $Trim = 1;
 
 =head1 Class METHODS
 
@@ -244,6 +251,20 @@ sub InDelTabooLength{
 	$InDelTabooLength = $indeltaboo if defined $indeltaboo;
 	return $InDelTabooLength;
 }
+
+=head2 Trim
+
+Get/Set $Sam::Seq::Trim. Default TRUE.
+
+=cut
+
+sub Trim{
+	my ($class, $trim) = @_;
+	$Trim = $trim if defined $trim;
+	return $Trim;
+}
+
+
 
 ##------------------------------------------------------------------------##
 
@@ -828,7 +849,6 @@ sub _init_read_bins{
 
 sub _state_matrix{
 	my $self = shift;
-	my @hcrs = @_;
 	# state matrix
 	my @S = @{$self->{_state_matrix}};
 	# predefined states
@@ -853,72 +873,71 @@ sub _state_matrix{
 		# reference position
 		my $rpos = $aln->pos-1;
 
-=pod
-		
-		##################
-		### InDelTaboo ###
-		# this also removes leading/trailing InDels regardless of InDelTabooLength
-		# trim head
-		my $head=0;	
-		for(my $i=0; $i<@cigar;$i+=2){
-			if($cigar[$i+1] eq 'M'){
-				$head+=$cigar[$i];
-				if($head > $InDelTabooLength){
-					if($i){# there was something before this match
-						# only cut before this match
-						my $head_cut = $head-$cigar[$i]; 
-						# trim cigar
-						splice(@cigar, 0, $i);
-						# adjust rpos
-						$rpos+= $head_cut;
-						# trim seq
-						substr($seq, 0, $head_cut, '');
+		if($Trim){
+			##################
+			### InDelTaboo ###
+			# this also removes leading/trailing InDels regardless of InDelTabooLength
+			# trim head
+			my $mc = 0;
+			my $dc = 0;
+			my $ic = 0;	
+			for(my $i=0; $i<@cigar;$i+=2){
+				if($cigar[$i+1] eq 'M'){
+					if($mc + $ic + $cigar[$i] > $InDelTabooLength){
+						if($i){# there was something before this match
+							# only cut before this match
+							# trim cigar
+							splice(@cigar, 0, $i);
+							# adjust rpos
+							$rpos+= ($mc+$dc);
+							# trim seq
+							substr($seq, 0, $mc+$ic, '');
+						}
+						last;
 					}
-					last;
+					$mc+=$cigar[$i];
+				}elsif($cigar[$i+1] eq 'D'){
+					$dc+= $cigar[$i];
+				}elsif($cigar[$i+1] eq 'I'){
+					$ic+= $cigar[$i];
+				}else{
+					$V->exit("Unknown Cigar '".$cigar[$i+1]."'");
 				}
-			}elsif($cigar[$i+1] eq 'D'){ # ignore leading deletions, but adjust rpos
-				$rpos+= $cigar[$i];
-			}elsif($cigar[$i+1] eq 'I'){
-				$head+=$cigar[$i];
-			}else{
-				$V->exit("Unknown Cigar '".$cigar[$i+1]."'");
 			}
-		}
-		
-		# have to have kept at least 50 bps and 70% of original read length
-		#  to consider read for state matrix
-		next if length($seq) < 50  || (length($seq)/$orig_seq_length) < 0.7;
-		
-		# trim tail
-		my $tail=0;	
-		for(my $i=$#cigar-1; $i;$i-=2){
-			if($cigar[$i+1] eq 'M'){
-				$tail+=$cigar[$i];
-				if($tail > $InDelTabooLength){
-					if($i < $#cigar-1){# there is after this match
-						# only cut before this match
-						my $tail_cut = $tail-$cigar[$i]; 
-						# trim cigar
-						splice(@cigar, -($#cigar-($i+1)));
-						# trim seq
-						substr($seq, -$tail_cut, $tail_cut, '');
+			
+			# have to have kept at least 50 bps and 70% of original read length
+			#  to consider read for state matrix
+			next if length($seq) < 50  || (length($seq)/$orig_seq_length) < 0.7;
+			
+			# trim tail
+			my $tail=0;	
+			for(my $i=$#cigar-1; $i;$i-=2){
+				if($cigar[$i+1] eq 'M'){
+					$tail+=$cigar[$i];
+					if($tail > $InDelTabooLength){
+						if($i < $#cigar-1){# there is after this match
+							# only cut before this match
+							my $tail_cut = $tail-$cigar[$i]; 
+							# trim cigar
+							splice(@cigar, -($#cigar-($i+1)));
+							# trim seq
+							substr($seq, -$tail_cut, $tail_cut, '');
+						}
+						last;
 					}
-					last;
+				}elsif($cigar[$i+1] eq 'D'){ # ignore leading deletions, but adjust rpos
+	
+				}elsif($cigar[$i+1] eq 'I'){
+					$tail+=$cigar[$i];
+				}else{
+					$V->exit("Unknown Cigar '".$cigar[$i+1]."'");
 				}
-			}elsif($cigar[$i+1] eq 'D'){ # ignore leading deletions, but adjust rpos
-
-			}elsif($cigar[$i+1] eq 'I'){
-				$tail+=$cigar[$i];
-			}else{
-				$V->exit("Unknown Cigar '".$cigar[$i+1]."'");
 			}
+	
+			# have to have kept at least 50 bps and 70% of original read length
+			#  to consider read for state matrix
+			next if length($seq) < 50  || (length($seq)/$orig_seq_length) < 0.7;
 		}
-
-		# have to have kept at least 50 bps and 70% of original read length
-		#  to consider read for state matrix
-		next if length($seq) < 50  || (length($seq)/$orig_seq_length) < 0.7;
-		
-=cut
 		
 		#		##################
 		#		### DEPRECATED ### 
@@ -967,18 +986,21 @@ sub _state_matrix{
 		
 		# cigar counter, increment by 2 to capture count and type of cigar (10,M) (3,I) (5,D) ...
 		
+		my $qpos = 0;
 		for(my $i=0; $i<@cigar;$i+=2){
-			print $seq,"\n";
 			if($cigar[$i+1] eq 'M'){
-				push @states, split(//,substr($seq,0,$cigar[$i],''));
+				push @states, split(//,substr($seq,$qpos,$cigar[$i]));
+				$qpos += $cigar[$i];
 			}elsif($cigar[$i+1] eq 'D'){
 				push @states, ('-') x $cigar[$i];
 			}elsif($cigar[$i+1] eq 'I'){
-				
-				$i
-				# append to prev state
-				? $states[$#states] .= substr($seq,0,$cigar[$i],'')
-				: $states[0] = substr($seq,0,$cigar[$i],'');		
+				if($i){
+					# append to prev state
+					$states[$#states] .= substr($seq,$qpos,$cigar[$i]);
+				}else{
+					$states[0] = substr($seq,$qpos,$cigar[$i]);		
+				}
+				$qpos += $cigar[$i];
 			}else{
 				$V->exit("Unknown Cigar '".$cigar[$i+1]."'");
 			}
@@ -989,10 +1011,6 @@ sub _state_matrix{
 		### states to matrix ###
 		
 		foreach my $state (@states){
-			unless($state){
-				use Data::Dumper;
-				print Dumper($aln->seq, join(" ",@states), $seq, join("", @cigar));
-			}
 			if (length ($state) > 1 && ! exists $states{$state}){
 				$states{$state} = scalar keys %states; 
 			}		
