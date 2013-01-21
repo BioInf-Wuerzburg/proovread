@@ -281,6 +281,27 @@ Number of threads to use for mapping. Defaults to 8 (or maximum available
 
 $opt{'t|threads=i'} = \(my $opt_threads = $cfg{'threads'});
 
+=item [-m, --mode] ['pacbio-iterative']
+
+Running mode of the pipeline, accepted values are 
+ 'pacbio-iterative', 'pacbio-simple', 'finish-only', 'external-sam'.
+ See manual for further information.
+
+=cut
+
+$opt{'m|mode=s'} = \(my $opt_mode = $cfg{'mode'});
+
+=item [--sam] [8]
+
+External SAM file to compute corrected consensus sequences from. 
+ Provide as input instead of --long-reads/--short-reads. Automatically
+ sets --mode to 'external-sam'.
+ 
+=cut
+
+$opt{'sam=s'} = \(my $opt_sam = $cfg{'sam'});
+
+
 =item [--sr-qv-offset] [auto-guess]
 
 Short read quality offset, usually 64 or 33, use 0 for FASTA. Defaults to 
@@ -322,17 +343,6 @@ Specify '--ram-sam' to hold the SAM presentation entirely in memory. This is
 =cut
 
 $opt{'ram-sam'} = \(my $opt_ram_sam = $cfg{'ram-sam'});
-
-=item [--raw-sam] [OFF]
-
-Do not process shrimp output on-the-fly, but create a raw sam file
- and parse this file. Use this for small genomes, where one SMRT
- Cell covers the genome more than 1X. Otherwise the mapper is 
- thwarted by the parser.
-
-=cut
-
-$opt{'raw-sam'} = \(my $opt_raw_sam = $cfg{'raw-sam'});
 
 =item [--sort-sam-by-coordinates] [OFF]
 
@@ -489,9 +499,7 @@ if($fp = Fastq::Parser->new(file => $opt_sr_file)->check_format){ # FASTQ
 ##------------------------------------------------------------------------##
 
 # globals
-my %PB;
-my @PB_IDS;
-my $PASS;
+my $PASS = 0;
 my $PG_line;
 my $PASS_0_suffix;
 
@@ -541,13 +549,6 @@ unless($opt_prefix){
 	}	
 }
 
-my $opt_sam_tmp = $opt_prefix.".tmp.sam";
-my $opt_log = $opt_prefix.".log";
-my $opt_fa_out = $opt_prefix.".fa";
-my $opt_fq_out = $opt_prefix.".fq";
-
-# DEPRECATED
-#my @opt_full_threshold = split(",", $opt_full_threshold);
 
 # create tmp folders
 my @tmp_dirs = map{$opt_prefix."_p".$_}(0..$opt_passes);
@@ -571,49 +572,35 @@ Sam::Seq->InDelTabooLength($cfg{'sr-indel-taboo-length'});
 
 =cut
 
+my @PASSES;
 
+# external-sam, shrimp-iter-1, shrimp-iter-2, ...,  shrimp-once, finish, draft
 
+push @PASSES, 'external-sam' if $opt_sam_file;
+
+my $lr_chunk_offsets = prepare_lr();
+
+# pass 1
 # reads sam or run shrimp
-if($opt_sam_file){
-	my $lr_chunk_offsets = prepare_lr();
-	read_sam();
-	@PB_IDS = sort keys %PB;
-	my $sam_chunk_offsets = create_sorted_sam();
-	correct_sr_mt($sam_chunk_offsets, $lr_chunk_offsets);
-}else{
-	# read and prepare lr
-	$PASS = 0;
-	my $lr_chunk_offsets = prepare_lr();
-	
-	# first pass
-	$PASS++;
-	# run shrimp
-	my $shrimp = run_shrimp(
-#		%{$cfg{"shrimp:$PASS"}}, # basic shrimp params from cfg
-#		verbose => 1,
-#		'log' => pass_file_name("_shrimp.log"),
-#		$opt_raw_sam ? ('out' => pass_file_name("_raw.sam")) : (),
-#		'-ref' => pass_file_name('.fa', pass => $PASS-1),
-#		'-1' => $opt_sr_file[$PASS-1],
-#		'--threads' => $opt_threads,
-#		'--qv-offset' => $opt_sr_qv_offset,
-#		'--progress' => $pg_step
-	);
-	# check if something went wrong with shrimp
-	$shrimp->status() eq 'canceled' &&	$v->exit("Shrimp terminated abnormally\n".$shrimp->log_string);
-	
-	@PB_IDS = sort keys %PB;
-	# create filtered sam
-	my $sam_chunk_offsets = create_sorted_sam();
-	# correct reads with filtered sam
 
-	$lr_chunk_offsets = correct_sr_mt($sam_chunk_offsets, $lr_chunk_offsets);
-	%PB = ();
-	
+my $LR = $opt_sam_file ? read_sam() : run_shrimp(
+	%{$cfg{"shrimp:$PASS"}}, # basic shrimp params from cfg
+	verbose => 1,
+	'log' => pass_file_name(suffix => "_shrimp.log"),
+	'-ref' => pass_file_name('.fa', pass => $PASS-1),
+	'-1' => $opt_sr_file,
+	'--threads' => $opt_threads,
+	'--qv-offset' => $opt_sr_qv_offset,
+);
+
+my $sam_chunk_offsets = create_sorted_sam(sort keys %$LR);
+$lr_chunk_offsets = correct_sr_mt($sam_chunk_offsets, $lr_chunk_offsets);
+
+if($passes)
 	# second/final pass
 	$PASS++;
 
-	$shrimp = run_shrimp();
+	$LR = run_shrimp();
 	# check if something went wrong with shrimp
 	$shrimp->status() eq 'canceled' &&	$v->exit("Shrimp terminated abnormally\n".$shrimp->log_shrimp);
 
@@ -621,20 +608,22 @@ if($opt_sam_file){
 
 	correct_sr_mt($sam_chunk_offsets, $lr_chunk_offsets);
 
-	# create final output
-	copy(pass_file_name(".fa"), $opt_fa_out);
-	copy(pass_file_name(".fq"), $opt_fq_out);
 
+	%PB = ();
 }
 
+
+# create final output
+my $opt_fa_out = $opt_prefix.".fa";
+my $opt_fq_out = $opt_prefix.".fq";
+
+copy(pass_file_name(".fa"), $opt_fa_out);
+copy(pass_file_name(".fq"), $opt_fq_out);
 
 
 # remove tmp
 $v->verbose("Cleaning up temporary files and memory");
 
-# unlink $opt_sam_tmp;
-
-%PB = ();
 
 # lets see if we came this far
 $no_error++;
@@ -665,7 +654,10 @@ END{
 =cut
 
 sub read_sam{
-		# init input stream parser
+	
+	my %LR;
+	
+	# init input stream parser
 	my $rsp = Sam::Parser->new(
 		file => $opt_sam_file
 	);
@@ -691,7 +683,7 @@ sub read_sam{
 			$PG_line = $h{raw};
 			next;
 		}
-		$PB{$h{'SN'}} = Sam::Seq->new(
+		$LR{$h{'SN'}} = Sam::Seq->new(
 			id => $h{SN}, 
 			len => $h{LN},
 			sam => $tsp,	# indexed sam file, containing aln data
@@ -704,13 +696,13 @@ sub read_sam{
 	if($opt_ram_sam){
 		while(my $aln = $rsp->next_aln()){
 			# try to add aln, if sufficient score, add to temporary sam file
-			$rsp_c++ if($PB{$aln->rname}->add_aln_by_score($aln));
+			$rsp_c++ if($LR{$aln->rname}->add_aln_by_score($aln));
 			$pg_rsp->update() unless $rsp_c%10000;
 		}
 	}else{
 		while(my $aln = $rsp->next_aln()){
 			# try to add aln, if sufficient score, add to temporary sam file
-			if($PB{$aln->rname}->add_aln_by_score($aln)){
+			if($LR{$aln->rname}->add_aln_by_score($aln)){
 				$rsp_c++;
 				$tsp->append_aln($aln);
 			};
@@ -728,7 +720,12 @@ Run and process shrimp first pass
 
 =cut
 
+
 sub run_shrimp{
+	
+	################
+	## DEPRECATED ##
+	################
 	
 	$v->verbose("Run and process Shrimp pass $PASS output");
 	
@@ -852,6 +849,9 @@ sub run_shrimp{
 	# finish shrimp run
 	return $shrimp->finish;
 	
+	# check if something went wrong with shrimp
+	$shrimp->status() eq 'canceled' &&	$v->exit("Shrimp terminated abnormally\n".$shrimp->log_string);
+	
 	$vb->hline();
 }
 
@@ -876,7 +876,10 @@ sub run_shrimp{
 	my $pg_step = int(($opt_sr_count/100)+0.5);
 	
 	# init shrimp handler
-	my $shrimp = Shrimp->new( %{$p->{shrimp}} );
+	my $shrimp = Shrimp->new( 
+		'--progress' => $pg_step,
+		%{$p->{shrimp}}, 
+	);
 
 	$vb->hline();
 	$vb->verbose($shrimp->command());
@@ -968,6 +971,7 @@ sub run_shrimp{
 =cut
 
 sub create_sorted_sam{
+	my $PB_IDS = shift;
 	my $opt_sam_out = pass_file_name(".sam");
 	
 	$v->verbose("Creating filtered sam ".$opt_sam_out);
@@ -977,7 +981,7 @@ sub create_sorted_sam{
 	
 	# header section
 	printf OUT ("\@HD\tVN:%s\tSO:%s\n", "unknown", "unknown");
-	foreach my $pb_id (@PB_IDS){
+	foreach my $pb_id (@$PB_IDS){
 		printf OUT ("\@SQ\tSN:%s\tLN:%s\n", $pb_id, $PB{$pb_id}->len);
 	}
 	
@@ -985,12 +989,12 @@ sub create_sorted_sam{
 	print OUT $PG_line;
 	
 	# init input stream parser progess bar	
-	my $pgb = Verbose::ProgressBar->new(size => scalar @PB_IDS);
+	my $pgb = Verbose::ProgressBar->new(size => scalar @$PB_IDS);
 	
 	my @chunk_idxs;
 	# alignment section
 	my $pb_c = 0;
-	foreach my $pb_id (@PB_IDS){
+	foreach my $pb_id (@$PB_IDS){
 		push @chunk_idxs, tell(OUT) unless $pb_c % $opt_chunk_size;
 		foreach my $aln($PB{$pb_id}->alns($opt_sort_sam_by_coords)){
 			print OUT $aln->raw;
