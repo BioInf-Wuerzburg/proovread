@@ -585,7 +585,6 @@ my @tmp_dirs = map{$opt_prefix."_".$_}@TASKS;
 make_path(@tmp_dirs);
 
 my $LR;
-my $LR_ids;
 my $lr_chunk_offsets;
 my $sam_chunk_offsets;
 
@@ -913,8 +912,8 @@ sub create_sorted_sam{
 	open(OUT, '>',$opt_sam_out) or $v->exit($!);
 	
 	# header section
-	printf OUT ("\@HD\tVN:%s\tSO:%s\n", "unknown", "unknown");
-	foreach my $pb_id (@$LR_ids){
+	printf OUT ("\@HD\tVN:%s\$lr_idstSO:%s\n", "unknown", "unknown");
+	foreach my $pb_id (@$lr_ids){
 		printf OUT ("\@SQ\tSN:%s\tLN:%s\n", $pb_id, $LR->{$pb_id}->len);
 	}
 	
