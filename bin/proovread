@@ -585,6 +585,7 @@ my @tmp_dirs = map{$opt_prefix."_".$_}@TASKS;
 make_path(@tmp_dirs);
 
 my $LR;
+my $LR_ids;
 my $lr_chunk_offsets;
 my $sam_chunk_offsets;
 
@@ -614,9 +615,12 @@ foreach my $task(@TASKS){
 			}
 		);
 	
-		$sam_chunk_offsets = create_sorted_sam(sort keys %$LR);
+		$LR_ids = \(sort keys %$LR);
+		$sam_chunk_offsets = create_sorted_sam();
 
 		$lr_chunk_offsets = correct_sr_mt($sam_chunk_offsets, $lr_chunk_offsets);
+
+		$LR = undef;
 
 	}elsif($task eq 'shrimp-iter-2'){
 
@@ -632,10 +636,13 @@ foreach my $task(@TASKS){
 			}
 		);
 
+		$LR_ids = \(sort keys %$LR);
 		$sam_chunk_offsets = create_sorted_sam(sort keys %$LR);
 
 		$lr_chunk_offsets = correct_sr_mt($sam_chunk_offsets, $lr_chunk_offsets);
 	
+		$LR = undef;
+		
 	}elsif($task eq 'shrimp-ccs'){
 
 		$LR = run_shrimp(
@@ -650,9 +657,12 @@ foreach my $task(@TASKS){
 			}
 		);
 		
+		$LR_ids = \(sort keys %$LR);
 		$sam_chunk_offsets = create_sorted_sam(sort keys %$LR);
 
 		$lr_chunk_offsets = correct_sr_mt($sam_chunk_offsets, $lr_chunk_offsets);
+		
+		$LR = undef;
 		
 	}elsif($task eq 'shrimp-finish'){
 		
@@ -668,9 +678,13 @@ foreach my $task(@TASKS){
 			}
 		);
 		
+		$LR_ids = \(sort keys %$LR);
 		$sam_chunk_offsets = create_sorted_sam(sort keys %$LR);
 
 		$lr_chunk_offsets = correct_sr_mt($sam_chunk_offsets, $lr_chunk_offsets);
+		
+		$LR = undef;
+		
 	}
 }
 
