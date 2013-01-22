@@ -367,7 +367,7 @@ $opt{'sort-sam-by-coordinates'} = \(my $opt_sort_sam_by_coords = $cfg{'sort-sam-
 
 =item [--keep-temporary-files] [OFF]
 
-Specify once, to keep temporary file of each pass, twice to also keep the
+Specify once, to keep temporary file of each task, twice to also keep the
  individual temporary file of each thread.
 
 =cut
@@ -408,14 +408,6 @@ NOTE: Affects correction, does not affect shrimp.
 =cut
 
 $opt{'chunk-size=i'} = \(my $opt_chunk_size = $cfg{'chunk-size'});
-
-=item [--passes=<INT>] [2]
-
-Number of passes.
-
-=cut
-
-$opt{'passes=i'} = \(my $opt_passes = $cfg{'passes'});
 
 =item [--sam=<SAM>]
 
@@ -503,9 +495,7 @@ if($fp = Fastq::Parser->new(file => $opt_sr_file)->check_format){ # FASTQ
 ##------------------------------------------------------------------------##
 
 # globals
-my $PASS = 0;
 my $PG_line;
-my $PASS_0_suffix;
 
 ##------------------------------------------------------------------------##
 
@@ -553,10 +543,6 @@ unless($opt_prefix){
 }
 
 
-# create tmp folders
-my @tmp_dirs = map{$opt_prefix."_p".$_}(0..$opt_passes);
-make_path(@tmp_dirs);
-
 # coverage settings
 # TODO: coverage from params
 # Coverage =~ Binsize/BinMaxCoverage * readlength/2
@@ -594,6 +580,9 @@ if($opt_sam_file){
 	}
 }
 
+# create tmp folders
+my @tmp_dirs = map{$opt_prefix."_".$_}@TASKS;
+make_path(@tmp_dirs);
 
 my $LR;
 my $lr_chunk_offsets;
@@ -614,13 +603,15 @@ foreach my $task(@TASKS){
 	}elsif($task eq 'shrimp-iter-1'){
 
 		$LR = run_shrimp(
-			%{$cfg{$task}}, # basic shrimp params from cfg
-			verbose => 1,
-			'log' => pass_file_name(suffix => "_shrimp.log"),
-			'-ref' => pass_file_name('.fa', pass => $TC-1),
-			'-1' => $opt_sr_file,
-			'--threads' => $opt_threads,
-			'--qv-offset' => $opt_sr_qv_offset,
+			shrimp => {
+				%{$cfg{$task}}, # basic shrimp params from cfg
+				verbose => 1,
+				'log' => task_file_name(suffix => "_shrimp.log"),
+				'-ref' => task_file_name('.fa', task => $TASKS[$TC-1] ),
+				'-1' => $opt_sr_file,
+				'--threads' => $opt_threads,
+				'--qv-offset' => $opt_sr_qv_offset,
+			}
 		);
 	
 		$sam_chunk_offsets = create_sorted_sam();
@@ -630,13 +621,15 @@ foreach my $task(@TASKS){
 	}elsif($task eq 'shrimp-iter-2'){
 
 		$LR = run_shrimp(
-			%{$cfg{$task}}, # basic shrimp params from cfg
-			verbose => 1,
-			'log' => pass_file_name(suffix => "_shrimp.log"),
-			'-ref' => pass_file_name(".fm", pass => $TC-1),
-			'-1' => $opt_sr_file,
-			'--threads' => $opt_threads,
-			'--qv-offset' => $opt_sr_qv_offset,
+			shrimp => {
+				%{$cfg{$task}}, # basic shrimp params from cfg
+				verbose => 1,
+				'log' => task_file_name(suffix => "_shrimp.log"),
+				'-ref' => task_file_name(".fm", task => $TASKS[$TC-1] ),
+				'-1' => $opt_sr_file,
+				'--threads' => $opt_threads,
+				'--qv-offset' => $opt_sr_qv_offset,
+			}
 		);
 
 		$sam_chunk_offsets = create_sorted_sam();
@@ -646,13 +639,15 @@ foreach my $task(@TASKS){
 	}elsif($task eq 'shrimp-ccs'){
 
 		$LR = run_shrimp(
-			%{$cfg{$task}}, # basic shrimp params from cfg
-			verbose => 1,
-			'log' => pass_file_name(suffix => "_shrimp.log"),
-			'-ref' => pass_file_name('.fa', pass => $PASS-1),
-			'-1' => $opt_sr_file,
-			'--threads' => $opt_threads,
-			'--qv-offset' => $opt_sr_qv_offset,
+			shrimp => {
+				%{$cfg{$task}}, # basic shrimp params from cfg
+				verbose => 1,
+				'log' => task_file_name(suffix => "_shrimp.log"),
+				'-ref' => task_file_name('.fa', task => $TASKS[$TC-1] ),
+				'-1' => $opt_sr_file,
+				'--threads' => $opt_threads,
+				'--qv-offset' => $opt_sr_qv_offset,
+			}
 		);
 		
 		$sam_chunk_offsets = create_sorted_sam();
@@ -662,13 +657,15 @@ foreach my $task(@TASKS){
 	}elsif($task eq 'shrimp-finish'){
 		
 		$LR = run_shrimp(
-			%{$cfg{$task}}, # basic shrimp params from cfg
-			verbose => 1,
-			'log' => pass_file_name(suffix => "_shrimp.log"),
-			'-ref' => pass_file_name('.fa', pass => $PASS-1),
-			'-1' => $opt_sr_file,
-			'--threads' => $opt_threads,
-			'--qv-offset' => $opt_sr_qv_offset,
+			shrimp => {
+				%{$cfg{$task}}, # basic shrimp params from cfg
+				verbose => 1,
+				'log' => task_file_name(suffix => "_shrimp.log"),
+				'-ref' => task_file_name('.fa', task => $TASKS[$TC-1] ),
+				'-1' => $opt_sr_file,
+				'--threads' => $opt_threads,
+				'--qv-offset' => $opt_sr_qv_offset,
+			}
 		);
 		
 		$sam_chunk_offsets = create_sorted_sam();
@@ -683,8 +680,8 @@ foreach my $task(@TASKS){
 my $opt_fa_out = $opt_prefix.".fa";
 my $opt_fq_out = $opt_prefix.".fq";
 
-copy(pass_file_name(".fa"), $opt_fa_out);
-copy(pass_file_name(".fq"), $opt_fq_out);
+copy(task_file_name(".fa"), $opt_fa_out);
+copy(task_file_name(".fq"), $opt_fq_out);
 
 
 # remove tmp
@@ -783,15 +780,19 @@ sub read_sam{
 
 =head2 run_shrimp
 
-Run and process shrimp first pass
+Run and process shrimp
 
 =cut
 
 sub run_shrimp{
-	my $p = {@_};
+	my $p = {
+		shrimp => {},
+		tmp_sam => '',
+		@_
+	};
 	
 	
-	$v->verbose("Run and process Shrimp pass $TC output");
+	$v->verbose("Run and process Shrimp task $TC output");
 	
 	# init input stream parser progess bar	
 	my $pg_rsp = Verbose::ProgressBar->new(size => $opt_sr_count);
@@ -800,7 +801,7 @@ sub run_shrimp{
 	# init shrimp handler
 	my $shrimp = Shrimp->new( 
 		'--progress' => $pg_step,
-		%$p, 
+		%{$p->{shrimp}}, 
 	);
 
 	$vb->hline();
@@ -817,7 +818,7 @@ sub run_shrimp{
 	);
 	
 	my $tsp = $opt_ram_sam ? undef : Sam::Parser->new(
-		file => $p->{tmp_sam},
+		file => task_file_name("_tmp.sam"),
 		mode => '+>',
 	);
 	
@@ -894,7 +895,7 @@ sub run_shrimp{
 
 sub create_sorted_sam{
 	my $PB_IDS = shift;
-	my $opt_sam_out = pass_file_name(".sam");
+	my $opt_sam_out = task_file_name(".sam");
 	
 	$v->verbose("Creating filtered sam ".$opt_sam_out);
 	$v->verbose("Writing ".keys (%$LR)." pacbio read sam blocks");
@@ -948,7 +949,7 @@ sub prepare_lr{
 	$lrpr || $v->exit("Unknown format in '--long-read' file: ".$opt_lr_file);
 
 	$lrpw = Fasta::Parser->new( 
-		file => pass_file_name(".fa", pass => $PASS), 
+		file => task_file_name(".fa", task => $TC), 
 		mode => '+>'
 	);
 	
@@ -997,7 +998,7 @@ sub correct_sr_mt{
 	
 	# pbc_correct.pl 
 	my %pbc_default = (
-		'--sam' 		=> pass_file_name(".sam"),
+		'--sam' 		=> task_file_name(".sam"),
 		'--sam-offset' 	=> undef,
 		'--ref' 		=> undef,
 		'--ref-offset'	=> undef,
@@ -1016,12 +1017,12 @@ sub correct_sr_mt{
 	for(my $ci=0; $ci<@$sam_chunk_offsets; $ci++){
 		my %pbc_config = (
 			%pbc_default,
-			'--ref' 		=> $PASS == 1
-							 	 ? pass_file_name(".f[aq]", pass => $PASS-1)
-							 	 : pass_file_name(".fq", pass => $PASS-1),
+			'--ref' 		=> $TC == 1
+							 	 ? task_file_name(".f[aq]", task => $TC-1)
+							 	 : task_file_name(".fq", task => $TC-1),
 			'--sam-offset' 	=> $sam_chunk_offsets->[$ci],
 			'--ref-offset'	=> $lr_chunk_offsets->[$ci],
-			'--prefix'		=> pass_file_name(sprintf ".%010d", $ci),
+			'--prefix'		=> task_file_name(sprintf ".%010d", $ci),
 		);
 		
 		# params
@@ -1036,7 +1037,7 @@ sub correct_sr_mt{
 	
 	# write cmd file
 	
-	my $cfg_file = pass_file_name(".cfg");
+	my $cfg_file = task_file_name(".cfg");
 	open(CFG, '>', $cfg_file) or $v->exit($!);
 	print CFG $pbc_cmds;
 	close CFG;
@@ -1067,12 +1068,12 @@ sub correct_sr_mt{
 	
 	
 	$v->verbose("Merging corrected output");
-	my $fq_file = pass_file_name(".fq");
-	my $fq_glob = pass_file_name(".[0-9]*.fq");
-	my $fa_file = pass_file_name(".fa");
-	my $fa_glob = pass_file_name(".[0-9]*.fa");
-	my $fm_file = pass_file_name(".fm");
-	my $fm_glob = pass_file_name(".[0-9]*.fm");
+	my $fq_file = task_file_name(".fq");
+	my $fq_glob = task_file_name(".[0-9]*.fq");
+	my $fa_file = task_file_name(".fa");
+	my $fa_glob = task_file_name(".[0-9]*.fa");
+	my $fm_file = task_file_name(".fm");
+	my $fm_glob = task_file_name(".[0-9]*.fm");
 	
 	my @fq_glob = glob $fq_glob;
 	my @fa_glob = glob $fa_glob;
@@ -1105,27 +1106,27 @@ sub correct_sr_mt{
 
 =head2 file_name
 
-Create a file name depending on current $PASS and $opt_prefix
+Create a file name depending on current $TC and $opt_prefix
 
-  $PASS = 1;
+  $TC = 1;
   $opt_prefix = "/foo";
-  pass_file_name(".suf");
-    # "/foo_p1.suf"
-  pass_file_name(".suf", prefix => "/foo/bar", pass => 2);
-    # "/foo/bar_p2.suf"
+  task_file_name(".suf"); # $TASKS[$TC]
+    # "/foo_shrimp-iter-1.suf"
+  task_file_name(".suf", prefix => "/foo/bar", task => 'custom');
+    # "/foo_custom/bar_custom.suf"
 
 =cut
 
 
-sub pass_file_name{
+sub task_file_name{
 	my $p = {
 		prefix => $opt_prefix,
-		pass => $PASS,
+		task => $TASKS[$TC],
 		suffix => (@_%2 ? shift : ''),
 		@_
 	};
 	
-	return sprintf('%1$s_p%2$d/%1$s_p%2$d%3$s', $p->{prefix}, $p->{pass}, $p->{suffix});
+	return sprintf('%1$s_%2$s/%1$s_%2$s%3$s', $p->{prefix}, $p->{task}, $p->{suffix});
 }
 
 
@@ -1160,7 +1161,7 @@ sub copy_custom_cfg{
 =cut
 
 sub coverage_tables{
-	my $opt_fq_out = pass_file_name("fq");
+	my $opt_fq_out = task_file_name("fq");
 	
 	# progess bar	
 	my $pgp = Verbose::ProgressBar->new(
@@ -1176,7 +1177,7 @@ sub coverage_tables{
 		if($opt_fq_out eq '-'){
 			$ofh = \*STDOUT;
 		}else{
-			open($ofh, '>', pass_file_name('_'.$i.'.tsv')) or $v->exit($!);
+			open($ofh, '>', task_file_name('_'.$i.'.tsv')) or $v->exit($!);
 		}
 		foreach my $score_co(1..1000){
 			$pb->is(sub{ 
