@@ -901,8 +901,7 @@ sub run_shrimp{
 =cut
 
 sub create_sorted_sam{
-	my $lr_ids = \(sort keys %$LR);
-	print Dumper ($lr_ids);
+	my @lr_ids = sort keys %$LR;
 	my $opt_sam_out = task_file_name(".sam");
 	
 	$v->verbose("Creating filtered sam ".$opt_sam_out);
@@ -912,7 +911,7 @@ sub create_sorted_sam{
 	
 	# header section
 	printf OUT ("\@HD\tVN:%s\$lr_idstSO:%s\n", "unknown", "unknown");
-	foreach my $pb_id (@$lr_ids){
+	foreach my $pb_id (@lr_ids){
 		printf OUT ("\@SQ\tSN:%s\tLN:%s\n", $pb_id, $LR->{$pb_id}->len);
 	}
 	
@@ -920,12 +919,12 @@ sub create_sorted_sam{
 	print OUT $PG_line;
 	
 	# init input stream parser progess bar	
-	my $pgb = Verbose::ProgressBar->new(size => scalar @$lr_ids);
+	my $pgb = Verbose::ProgressBar->new(size => scalar @lr_ids);
 	
 	my @chunk_idxs;
 	# alignment section
 	my $pb_c = 0;
-	foreach my $pb_id (@$lr_ids){
+	foreach my $pb_id (@lr_ids){
 		push @chunk_idxs, tell(OUT) unless $pb_c % $opt_chunk_size;
 		foreach my $aln($LR->{$pb_id}->alns($opt_sort_sam_by_coords)){
 			print OUT $aln->raw;
