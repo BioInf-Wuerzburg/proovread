@@ -40,7 +40,7 @@ use Sam::Seq '0.08';
 use Shrimp;
 
 
-our $VERSION = '0.73';
+our $VERSION = '0.80';
 our ($REVISION) = '$Revision$' =~ /(\d+)/;
 our ($MODIFIED) = '$Date$' =~ /Date: (\S+\s\S+)/;
 
@@ -60,6 +60,16 @@ Correct single molecule sequencing reads by iterative mapping of high
 
 =head1 CHANGELOG
 
+
+=head2 0.80
+
+relative InDelTabooLength
+
+finisher
+
+modes
+
+refactoring main
 
 =head2 0.72
 
@@ -281,15 +291,16 @@ Number of threads to use for mapping. Defaults to 8 (or maximum available
 
 $opt{'t|threads=i'} = \(my $opt_threads = $cfg{'threads'});
 
-=item [-m, --mode] ['pacbio-iterative']
+=item [-m, --mode] [auto]
 
 Running mode of the pipeline, accepted values are 
- 'pacbio-iterative', 'pacbio-simple', 'finish-only', 'external-sam'.
- See manual for further information.
+ 'pacbio-iterative', 'pacbio-ccs', 'external-sam'. By default, the
+ most appropriate mode is choosen based on the provided input data.
+ See manual for further information. 
 
 =cut
 
-$opt{'m|mode=s'} = \(my $opt_mode = $cfg{'mode'});
+$opt{'m|mode=s'} = \(my $opt_mode);
 
 =item [--sam] [8]
 
@@ -302,7 +313,7 @@ External SAM file to compute corrected consensus sequences from.
 $opt{'sam=s'} = \(my $opt_sam = $cfg{'sam'});
 
 
-=item [--sr-qv-offset] [auto-guess]
+=item [--sr-qv-offset] [auto]
 
 Short read quality offset, usually 64 or 33, use 0 for FASTA. Defaults to 
  guessing, taking into account the first 100 reads of the file. Specify 
@@ -312,7 +323,7 @@ Short read quality offset, usually 64 or 33, use 0 for FASTA. Defaults to
 
 $opt{'sr-qv-offset=i'} = \(my $opt_sr_qv_offset = $cfg{'sr-qv-offset'});
 
-=item [--sr-length] [auto-guess]
+=item [--sr-length] [auto]
 
 Short read length. Defaults to guessing, taking into account the first 100
  reads of the file. Specify value if guessing fails.
@@ -321,7 +332,7 @@ Short read length. Defaults to guessing, taking into account the first 100
 
 $opt{'sr-length=i'} = \(my $opt_sr_length = $cfg{'sr-length'});
 
-=item [--sr-count] [auto-guess]
+=item [--sr-count] [auto]
 
 Number of short reads provided, used for ETA calculation. Defaults to 
  guessing, taking into account the first 100 reads of the file. Specify 
@@ -386,15 +397,6 @@ $opt{'h|help'} = \(my $opt_help);
 =over
 
 =cut
-
-# shrimp:$PASS param
-#=item [-f, --full-threshold=<STRING>] [55%,35%]
-#
-#Shrimp SW Full Hit Threshold. Comma separated, one value for each pass.
-#
-#=cut
-#
-#$opt{'f|full-threshold=s'} = \(my $opt_full_threshold = $cfg{'full-threshold'});
 
 =item [--chunk-size] [100]
 
@@ -572,45 +574,108 @@ Sam::Seq->InDelTabooLength($cfg{'sr-indel-taboo-length'});
 
 =cut
 
-my @PASSES;
+# mode
+my @TASKS;
+my $TC = -1;
 
-# external-sam, shrimp-iter-1, shrimp-iter-2, ...,  shrimp-once, finish, draft
-
-push @PASSES, 'external-sam' if $opt_sam_file;
-
-my $lr_chunk_offsets = prepare_lr();
-
-# pass 1
-# reads sam or run shrimp
-
-my $LR = $opt_sam_file ? read_sam() : run_shrimp(
-	%{$cfg{"shrimp:$PASS"}}, # basic shrimp params from cfg
-	verbose => 1,
-	'log' => pass_file_name(suffix => "_shrimp.log"),
-	'-ref' => pass_file_name('.fa', pass => $PASS-1),
-	'-1' => $opt_sr_file,
-	'--threads' => $opt_threads,
-	'--qv-offset' => $opt_sr_qv_offset,
-);
-
-my $sam_chunk_offsets = create_sorted_sam(sort keys %$LR);
-$lr_chunk_offsets = correct_sr_mt($sam_chunk_offsets, $lr_chunk_offsets);
-
-if($passes)
-	# second/final pass
-	$PASS++;
-
-	$LR = run_shrimp();
-	# check if something went wrong with shrimp
-	$shrimp->status() eq 'canceled' &&	$v->exit("Shrimp terminated abnormally\n".$shrimp->log_shrimp);
-
-	$sam_chunk_offsets = create_sorted_sam();
-
-	correct_sr_mt($sam_chunk_offsets, $lr_chunk_offsets);
-
-
-	%PB = ();
+if($opt_sam_file){
+	$opt_mode = 'external-sam';
+	@TASKS = @{$cfg{'mode-tasks'}{$opt_mode}};
+}else{
+	unless($opt_mode){
+		if($opt_sr_length > 200){
+			$opt_mode = 'pacbio-ccs';
+			@TASKS = @{$cfg{'mode-tasks'}{$opt_mode}};
+		}else{
+			$opt_mode = 'pacbio-iterative';
+			@TASKS = @{$cfg{'mode-tasks'}{$opt_mode}};
+		}
+	}
 }
+
+
+my $LR;
+my $lr_chunk_offsets;
+my $sam_chunk_offsets;
+
+foreach my $task(@TASKS){
+	$TC++;
+	if($task eq 'read-sam'){
+		# TODO: sam2cns w/o reference
+#		$LR = read_sam();
+#		my $sam_chunk_offsets = create_sorted_sam(sort keys %$LR);
+#		my $lr_chunk_offsets = correct_sr_mt($sam_chunk_offsets, $lr_chunk_offsets);
+		
+	}elsif($task eq 'read-long'){
+		
+		$lr_chunk_offsets = prepare_lr();
+		
+	}elsif($task eq 'shrimp-iter-1'){
+
+		$LR = run_shrimp(
+			%{$cfg{$task}}, # basic shrimp params from cfg
+			verbose => 1,
+			'log' => pass_file_name(suffix => "_shrimp.log"),
+			'-ref' => pass_file_name('.fa', pass => $TC-1),
+			'-1' => $opt_sr_file,
+			'--threads' => $opt_threads,
+			'--qv-offset' => $opt_sr_qv_offset,
+		);
+	
+		$sam_chunk_offsets = create_sorted_sam();
+
+		$lr_chunk_offsets = correct_sr_mt($sam_chunk_offsets, $lr_chunk_offsets);
+
+	}elsif($task eq 'shrimp-iter-2'){
+
+		$LR = run_shrimp(
+			%{$cfg{$task}}, # basic shrimp params from cfg
+			verbose => 1,
+			'log' => pass_file_name(suffix => "_shrimp.log"),
+			'-ref' => pass_file_name(".fm", pass => $TC-1),
+			'-1' => $opt_sr_file,
+			'--threads' => $opt_threads,
+			'--qv-offset' => $opt_sr_qv_offset,
+		);
+
+		$sam_chunk_offsets = create_sorted_sam();
+
+		$lr_chunk_offsets = correct_sr_mt($sam_chunk_offsets, $lr_chunk_offsets);
+	
+	}elsif($task eq 'shrimp-ccs'){
+
+		$LR = run_shrimp(
+			%{$cfg{$task}}, # basic shrimp params from cfg
+			verbose => 1,
+			'log' => pass_file_name(suffix => "_shrimp.log"),
+			'-ref' => pass_file_name('.fa', pass => $PASS-1),
+			'-1' => $opt_sr_file,
+			'--threads' => $opt_threads,
+			'--qv-offset' => $opt_sr_qv_offset,
+		);
+		
+		$sam_chunk_offsets = create_sorted_sam();
+
+		$lr_chunk_offsets = correct_sr_mt($sam_chunk_offsets, $lr_chunk_offsets);
+		
+	}elsif($task eq 'shrimp-finish'){
+		
+		$LR = run_shrimp(
+			%{$cfg{$task}}, # basic shrimp params from cfg
+			verbose => 1,
+			'log' => pass_file_name(suffix => "_shrimp.log"),
+			'-ref' => pass_file_name('.fa', pass => $PASS-1),
+			'-1' => $opt_sr_file,
+			'--threads' => $opt_threads,
+			'--qv-offset' => $opt_sr_qv_offset,
+		);
+		
+		$sam_chunk_offsets = create_sorted_sam();
+
+		$lr_chunk_offsets = correct_sr_mt($sam_chunk_offsets, $lr_chunk_offsets);
+	}
+}
+
 
 
 # create final output
@@ -714,146 +779,6 @@ sub read_sam{
 }
 
 
-=head2 run_shrimp
-
-Run and process shrimp first pass
-
-=cut
-
-
-sub run_shrimp{
-	
-	################
-	## DEPRECATED ##
-	################
-	
-	$v->verbose("Run and process Shrimp pass $PASS output");
-	
-	# init input stream parser progess bar	
-	my $pg_rsp = Verbose::ProgressBar->new(size => $opt_sr_count);
-	my $pg_step = int(($opt_sr_count/100)+0.5);
-	
-	# shrimp
-	my $shrimp;
-	#-r 25% -w 120% -s w10
-	
-	# first (second last) pass
-	if($PASS == $opt_passes - 1){
-		# init shrimp handler
-		$shrimp = Shrimp->new(
-			%{$cfg{"shrimp:$PASS"}}, # basic shrimp params from cfg
-			verbose => 1,
-			'log' => pass_file_name("_shrimp.log"),
-			$opt_raw_sam ? ('out' => pass_file_name("_raw.sam")) : (),
-			'-ref' => pass_file_name('.fa', pass => $PASS-1),
-			'-1' => $opt_sr_file[$PASS-1],
-			'--threads' => $opt_threads,
-			'--qv-offset' => $opt_sr_qv_offset,
-			'--progress' => $pg_step,
-		);
-	# final pass
-	}elsif($PASS == $opt_passes){
-		# init shrimp handler
-		$shrimp = Shrimp->new(
-			%{$cfg{"shrimp:$PASS"}}, # basic shrimp params from cfg
-			verbose => 1,
-			'log' => pass_file_name("_shrimp.log"),
-			$opt_raw_sam ? ('out' => pass_file_name("_raw.sam")) : (),
-			'-ref' => pass_file_name(".fm", pass => $PASS-1),
-			'-1' => $opt_sr_file[$PASS-1],
-			'--threads' => $opt_threads,
-			'--qv-offset' => $opt_sr_qv_offset,
-			'--progress' => $pg_step,
-		);
-	}else{
-		$v->exit("No shrimp config for $PASS");
-	}
-
-	$vb->hline();
-	$vb->verbose($shrimp->command());
-	$vb->hline();
-	
-	# run shrimp
-	$shrimp->run;
-
-	# init input stream parser
-	my $rsp = Sam::Parser->new(
-		fh => $shrimp->oh
-	# init temporary sam writer
-	);
-	
-	my $tsp = $opt_ram_sam ? undef : Sam::Parser->new(
-		file => pass_file_name("_tmp.sam"),
-		mode => '+>',
-	);
-	
-	$v->verbose("Indexing Long reads");
-	# read SAM header
-	while(my %h = $rsp->next_header_line('SQ|PG')){
-		# @PG
-		if($h{tag} eq '@PG'){
-			$PG_line = $h{raw};
-			next;
-		}
-		$PB{$h{'SN'}} = Sam::Seq->new(
-			id => $h{SN}, 
-			len => $h{LN},
-			sam => $tsp,	# indexed sam file, containing aln data
-		);
-	}
-
-	$PG_line = '@PG ID:unknown' unless $PG_line;
-
-	$v->verbose("Mapping short reads");
-
-	# read SAM alignmetn section
-	my $rsp_c = 0;
-	my $add_c = 0;
-	my $cur_c = 0;
-	# shrimp log
-	my $slh = $shrimp->logh;
-	
-	if($opt_ram_sam){
-		while(my $aln = $rsp->next_aln()){
-			# try to add aln
-			$add_c++ if($PB{$aln->rname}->add_aln_by_score($aln));
-			# monitor shrimp progress
-			unless($rsp_c% $pg_step){
-				seek($slh, -50, 2); # get, ..
-				read($slh, my $tail, 50); # .. read, .. 
-				# .. and parse last 50 chars of shrimp log for number of processed reads
-				$pg_rsp->update($tail =~ /(\d+)\s+\S+\s+\S+\s*$/); 
-			}
-			$rsp_c++;
-		}
-	}else{ # create tmp sam
-		while(my $aln = $rsp->next_aln()){
-			# try to add aln, if sufficient score, add to temporary sam file
-			if($PB{$aln->rname}->add_aln_by_score($aln)){
-				$add_c++; 
-				$tsp->append_aln($aln);
-			};
-			# monitor shrimp progress
-			unless($rsp_c% $pg_step){
-				seek($slh, -50, 2); # get, ..
-				read($slh, my $tail, 50); # .. read, .. 
-				# .. and parse last 50 chars of shrimp log for number of processed reads
-				$pg_rsp->update($tail =~ /(\d+)\s+\S+\s+\S+\s*$/); 
-			}
-			$rsp_c++;
-		}
-	}
-	
-	$pg_rsp->finish($opt_sr_count);
-	
-	# finish shrimp run
-	return $shrimp->finish;
-	
-	# check if something went wrong with shrimp
-	$shrimp->status() eq 'canceled' &&	$v->exit("Shrimp terminated abnormally\n".$shrimp->log_string);
-	
-	$vb->hline();
-}
 
 =head2 run_shrimp
 
@@ -869,7 +794,7 @@ sub run_shrimp{
 	};
 	
 	
-	$v->verbose("Run and process Shrimp pass $PASS output");
+	$v->verbose("Run and process Shrimp pass $TC output");
 	
 	# init input stream parser progess bar	
 	my $pg_rsp = Verbose::ProgressBar->new(size => $opt_sr_count);
@@ -908,7 +833,7 @@ sub run_shrimp{
 			$PG_line = $h{raw};
 			next;
 		}
-		$PB{$h{'SN'}} = Sam::Seq->new(
+		$LR->{$h{'SN'}} = Sam::Seq->new(
 			id => $h{SN}, 
 			len => $h{LN},
 			sam => $tsp,	# indexed sam file, containing aln data
@@ -929,7 +854,7 @@ sub run_shrimp{
 	if($opt_ram_sam){
 		while(my $aln = $rsp->next_aln()){
 			# try to add aln
-			$add_c++ if($PB{$aln->rname}->add_aln_by_score($aln));
+			$add_c++ if($LR->{$aln->rname}->add_aln_by_score($aln));
 			# monitor shrimp progress
 			unless($rsp_c% $pg_step){
 				seek($slh, -50, 2); # get, ..
@@ -942,7 +867,7 @@ sub run_shrimp{
 	}else{ # create tmp sam
 		while(my $aln = $rsp->next_aln()){
 			# try to add aln, if sufficient score, add to temporary sam file
-			if($PB{$aln->rname}->add_aln_by_score($aln)){
+			if($LR->{$aln->rname}->add_aln_by_score($aln)){
 				$add_c++; 
 				$tsp->append_aln($aln);
 			};
@@ -975,14 +900,14 @@ sub create_sorted_sam{
 	my $opt_sam_out = pass_file_name(".sam");
 	
 	$v->verbose("Creating filtered sam ".$opt_sam_out);
-	$v->verbose("Writing ".keys (%PB)." pacbio read sam blocks");
+	$v->verbose("Writing ".keys (%$LR)." pacbio read sam blocks");
 	
 	open(OUT, '>',$opt_sam_out) or $v->exit($!);
 	
 	# header section
 	printf OUT ("\@HD\tVN:%s\tSO:%s\n", "unknown", "unknown");
 	foreach my $pb_id (@$PB_IDS){
-		printf OUT ("\@SQ\tSN:%s\tLN:%s\n", $pb_id, $PB{$pb_id}->len);
+		printf OUT ("\@SQ\tSN:%s\tLN:%s\n", $pb_id, $LR->{$pb_id}->len);
 	}
 	
 	# header @PG
@@ -996,7 +921,7 @@ sub create_sorted_sam{
 	my $pb_c = 0;
 	foreach my $pb_id (@$PB_IDS){
 		push @chunk_idxs, tell(OUT) unless $pb_c % $opt_chunk_size;
-		foreach my $aln($PB{$pb_id}->alns($opt_sort_sam_by_coords)){
+		foreach my $aln($LR->{$pb_id}->alns($opt_sort_sam_by_coords)){
 			print OUT $aln->raw;
 		}
 		$pgb->update($pb_c);
@@ -1242,13 +1167,13 @@ sub coverage_tables{
 	
 	# progess bar	
 	my $pgp = Verbose::ProgressBar->new(
-		size => scalar keys %PB 
+		size => scalar keys %$LR
 	);
 
 	$v->verbose("Calculating exact coverage by score tables ".$opt_fq_out);
 
 	my $i=1;
-	while(my ($pb_id, $pb) = each %PB){
+	while(my ($pb_id, $pb) = each %$LR){
 		my @COV;
 		my $ofh;
 		if($opt_fq_out eq '-'){
