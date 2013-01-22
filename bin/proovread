@@ -453,10 +453,12 @@ $opt_sr_file && ! -f $opt_lr_file && pod2usage("Cannot find $opt_lr_file");
 
 # test if short reads are FASTQ/FASTA
 my $fp;
+my $opt_sr_length_dev = '0';
+
 if($fp = Fastq::Parser->new(file => $opt_sr_file)->check_format){ # FASTQ
 	$v->verbose("Detected FASTQ format for --short-reads $opt_sr_file");
 	unless (defined $opt_sr_length){
-		my ($opt_sr_length, $opt_sr_length_dev) = $fp->guess_seq_length;
+		($opt_sr_length, $opt_sr_length_dev) = $fp->guess_seq_length;
 		$v->verbose(sprintf("Guessing short read length: %d +-%d", $opt_sr_length, $opt_sr_length_dev ));
 		if($opt_sr_length > 500){
 			$v->exit(
@@ -478,7 +480,7 @@ if($fp = Fastq::Parser->new(file => $opt_sr_file)->check_format){ # FASTQ
 }elsif($fp = Fasta::Parser->new(file=> $opt_sr_file)->check_format){ # FASTA
 	$v->verbose("Detected FASTA format for --short-reads $opt_sr_file");
 	unless (defined $opt_sr_length){
-		my ($opt_sr_length, $opt_sr_length_dev) = $fp->guess_seq_length;
+		($opt_sr_length, $opt_sr_length_dev) = $fp->guess_seq_length;
 		$v->verbose(sprintf("Guessing short read length: %d +-%d", $opt_sr_length, $opt_sr_length_dev));
 		if($opt_sr_length > 500){
 			$v->exit(
