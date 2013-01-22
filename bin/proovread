@@ -949,7 +949,7 @@ sub prepare_lr{
 	$lrpr || $v->exit("Unknown format in '--long-read' file: ".$opt_lr_file);
 
 	$lrpw = Fasta::Parser->new( 
-		file => task_file_name(".fa", task => $TC), 
+		file => task_file_name(".fa", task => $TASKS[$TC] ), 
 		mode => '+>'
 	);
 	
