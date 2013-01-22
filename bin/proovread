@@ -1025,8 +1025,8 @@ sub correct_sr_mt{
 		my %pbc_config = (
 			%pbc_default,
 			'--ref' 		=> $TC == 1
-							 	 ? task_file_name(".f[aq]", task => $TC-1)
-							 	 : task_file_name(".fq", task => $TC-1),
+							 	 ? task_file_name(".f[aq]", task => $TASKS[$TC-1] )
+							 	 : task_file_name(".fq", task => $TASKS[$TC-1] ),
 			'--sam-offset' 	=> $sam_chunk_offsets->[$ci],
 			'--ref-offset'	=> $lr_chunk_offsets->[$ci],
 			'--prefix'		=> task_file_name(sprintf ".%010d", $ci),
