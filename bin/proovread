@@ -689,8 +689,8 @@ foreach my $task(@TASKS){
 my $opt_fa_out = $opt_prefix.".fa";
 my $opt_fq_out = $opt_prefix.".fq";
 
-copy(task_file_name(".fa"), $opt_fa_out);
-copy(task_file_name(".fq"), $opt_fq_out);
+copy(task_file_name(".fa", task=>$TASKS[$TC]), $opt_fa_out);
+copy(task_file_name(".fq", task=>$TASKS[$TC]), $opt_fq_out);
 
 
 # remove tmp
