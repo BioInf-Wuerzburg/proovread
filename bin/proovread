@@ -602,7 +602,7 @@ foreach my $task(@TASKS){
 		
 	}elsif($task eq 'shrimp-iter-1'){
 
-		$LR = run_shrimp(
+		run_shrimp(
 			shrimp => {
 				%{$cfg{$task}}, # basic shrimp params from cfg
 				verbose => 1,
@@ -622,7 +622,7 @@ foreach my $task(@TASKS){
 
 	}elsif($task eq 'shrimp-iter-2'){
 
-		$LR = run_shrimp(
+		run_shrimp(
 			shrimp => {
 				%{$cfg{$task}}, # basic shrimp params from cfg
 				verbose => 1,
@@ -642,7 +642,7 @@ foreach my $task(@TASKS){
 		
 	}elsif($task eq 'shrimp-ccs'){
 
-		$LR = run_shrimp(
+		run_shrimp(
 			shrimp => {
 				%{$cfg{$task}}, # basic shrimp params from cfg
 				verbose => 1,
@@ -662,7 +662,7 @@ foreach my $task(@TASKS){
 		
 	}elsif($task eq 'shrimp-finish'){
 		
-		$LR = run_shrimp(
+		run_shrimp(
 			shrimp => {
 				%{$cfg{$task}}, # basic shrimp params from cfg
 				verbose => 1,
@@ -893,8 +893,6 @@ sub run_shrimp{
 	
 	# finish shrimp run
 	return $shrimp->finish;
-	
-	$vb->hline();
 }
 
 
