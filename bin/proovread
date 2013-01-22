@@ -614,7 +614,7 @@ foreach my $task(@TASKS){
 			}
 		);
 	
-		$sam_chunk_offsets = create_sorted_sam(\(sort keys %$LR));
+		$sam_chunk_offsets = create_sorted_sam();
 
 		$lr_chunk_offsets = correct_sr_mt($sam_chunk_offsets, $lr_chunk_offsets);
 
@@ -634,7 +634,7 @@ foreach my $task(@TASKS){
 			}
 		);
 
-		$sam_chunk_offsets = create_sorted_sam(\(sort keys %$LR));
+		$sam_chunk_offsets = create_sorted_sam();
 
 		$lr_chunk_offsets = correct_sr_mt($sam_chunk_offsets, $lr_chunk_offsets);
 	
@@ -654,7 +654,7 @@ foreach my $task(@TASKS){
 			}
 		);
 		
-		$sam_chunk_offsets = create_sorted_sam(\(sort keys %$LR));
+		$sam_chunk_offsets = create_sorted_sam();
 
 		$lr_chunk_offsets = correct_sr_mt($sam_chunk_offsets, $lr_chunk_offsets);
 		
@@ -674,7 +674,7 @@ foreach my $task(@TASKS){
 			}
 		);
 		
-		$sam_chunk_offsets = create_sorted_sam(\(sort keys %$LR));
+		$sam_chunk_offsets = create_sorted_sam();
 
 		$lr_chunk_offsets = correct_sr_mt($sam_chunk_offsets, $lr_chunk_offsets);
 		
@@ -903,7 +903,7 @@ sub run_shrimp{
 =cut
 
 sub create_sorted_sam{
-	my $lr_ids = shift;
+	my $lr_ids = \(sort keys %$LR);
 	my $opt_sam_out = task_file_name(".sam");
 	
 	$v->verbose("Creating filtered sam ".$opt_sam_out);
