@@ -615,8 +615,7 @@ foreach my $task(@TASKS){
 			}
 		);
 	
-		$LR_ids = \(sort keys %$LR);
-		$sam_chunk_offsets = create_sorted_sam();
+		$sam_chunk_offsets = create_sorted_sam(\(sort keys %$LR));
 
 		$lr_chunk_offsets = correct_sr_mt($sam_chunk_offsets, $lr_chunk_offsets);
 
@@ -636,8 +635,7 @@ foreach my $task(@TASKS){
 			}
 		);
 
-		$LR_ids = \(sort keys %$LR);
-		$sam_chunk_offsets = create_sorted_sam(sort keys %$LR);
+		$sam_chunk_offsets = create_sorted_sam(\(sort keys %$LR));
 
 		$lr_chunk_offsets = correct_sr_mt($sam_chunk_offsets, $lr_chunk_offsets);
 	
@@ -657,8 +655,7 @@ foreach my $task(@TASKS){
 			}
 		);
 		
-		$LR_ids = \(sort keys %$LR);
-		$sam_chunk_offsets = create_sorted_sam(sort keys %$LR);
+		$sam_chunk_offsets = create_sorted_sam(\(sort keys %$LR));
 
 		$lr_chunk_offsets = correct_sr_mt($sam_chunk_offsets, $lr_chunk_offsets);
 		
@@ -678,8 +675,7 @@ foreach my $task(@TASKS){
 			}
 		);
 		
-		$LR_ids = \(sort keys %$LR);
-		$sam_chunk_offsets = create_sorted_sam(sort keys %$LR);
+		$sam_chunk_offsets = create_sorted_sam(\(sort keys %$LR));
 
 		$lr_chunk_offsets = correct_sr_mt($sam_chunk_offsets, $lr_chunk_offsets);
 		
@@ -908,7 +904,7 @@ sub run_shrimp{
 =cut
 
 sub create_sorted_sam{
-	my $LR_IDS = shift;
+	my $lr_ids = shift;
 	my $opt_sam_out = task_file_name(".sam");
 	
 	$v->verbose("Creating filtered sam ".$opt_sam_out);
@@ -918,7 +914,7 @@ sub create_sorted_sam{
 	
 	# header section
 	printf OUT ("\@HD\tVN:%s\tSO:%s\n", "unknown", "unknown");
-	foreach my $pb_id (@$LR_IDS){
+	foreach my $pb_id (@$LR_ids){
 		printf OUT ("\@SQ\tSN:%s\tLN:%s\n", $pb_id, $LR->{$pb_id}->len);
 	}
 	
@@ -926,12 +922,12 @@ sub create_sorted_sam{
 	print OUT $PG_line;
 	
 	# init input stream parser progess bar	
-	my $pgb = Verbose::ProgressBar->new(size => scalar @$LR_IDS);
+	my $pgb = Verbose::ProgressBar->new(size => scalar @$lr_ids);
 	
 	my @chunk_idxs;
 	# alignment section
 	my $pb_c = 0;
-	foreach my $pb_id (@$LR_IDS){
+	foreach my $pb_id (@$lr_ids){
 		push @chunk_idxs, tell(OUT) unless $pb_c % $opt_chunk_size;
 		foreach my $aln($LR->{$pb_id}->alns($opt_sort_sam_by_coords)){
 			print OUT $aln->raw;
