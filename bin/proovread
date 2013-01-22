@@ -904,6 +904,7 @@ sub run_shrimp{
 
 sub create_sorted_sam{
 	my $lr_ids = \(sort keys %$LR);
+	print Dumper ($lr_ids);
 	my $opt_sam_out = task_file_name(".sam");
 	
 	$v->verbose("Creating filtered sam ".$opt_sam_out);
