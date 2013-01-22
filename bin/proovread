@@ -516,25 +516,24 @@ foreach(sort keys %opt){
 $v->verbose($params);
 
 # read files
-my @opt_sr_file = split(",", $opt_sr_file);
 
-# recycle
-if(@opt_sr_file == 1 and $opt_passes > 1){
-	@opt_sr_file = ($opt_sr_file[0]) x $opt_passes;
-}
-if(@opt_sr_file != $opt_passes){
-	pod2usage(
-		'-msg' => "number of '--sr' files (". scalar @opt_sr_file .") differs from number of --passes ($opt_passes)",
-		'-exitval' => 1
-	);
-}
+
+## DEPRECATED
+## recycle
+#if(@opt_sr_file == 1 and $opt_passes > 1){
+#	@opt_sr_file = ($opt_sr_file[0]) x $opt_passes;
+#}
+#if(@opt_sr_file != $opt_passes){
+#	pod2usage(
+#		'-msg' => "number of '--sr' files (". scalar @opt_sr_file .") differs from number of --passes ($opt_passes)",
+#		'-exitval' => 1
+#	);
+#}
 
 # lr file
 if($opt_lr_file){
 	$v->exit($opt_lr_file.": ".$!) unless -e $opt_lr_file;
-	foreach my $orf (@opt_sr_file){
-		$v->exit($orf.": ".$!) unless -e $orf;
-	}
+	$v->exit($opt_sr_file.": ".$!) unless -e $opt_sr_file;
 }elsif($opt_sam_file){
 	$v->exit($opt_sam_file.": ".$!) unless -e $opt_sam_file;
 }
@@ -789,11 +788,7 @@ Run and process shrimp first pass
 =cut
 
 sub run_shrimp{
-	my $p = {
-		shrimp => {},
-		tmp_sam => '',
-		@_
-	};
+	my $p = {@_};
 	
 	
 	$v->verbose("Run and process Shrimp pass $TC output");
@@ -805,7 +800,7 @@ sub run_shrimp{
 	# init shrimp handler
 	my $shrimp = Shrimp->new( 
 		'--progress' => $pg_step,
-		%{$p->{shrimp}}, 
+		%$p, 
 	);
 
 	$vb->hline();
