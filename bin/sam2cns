@@ -7,7 +7,7 @@
 # $Id$
 #
 ##------------------------------------------------------------------------##
-
+In
 use warnings;
 use strict;
 
@@ -217,7 +217,7 @@ my $opt_hcr_mask_length = $cfg{'hcr-mask-length'};
 my $opt_hcr_sticky_length = $cfg{'hcr-sticky-length'};
 
 Sam::Seq->Trim($cfg{'sr-trim'});
-Sam::Seq->InDelTabooLength($cfg{'sr-indel-taboo'});
+Sam::Seq->InDelTaboo($cfg{'sr-indel-taboo'});
 Sam::Seq->MaxCoverage($opt_cov);
 Sam::Seq->BinSize($cfg{'bin-size'});
 
