@@ -591,7 +591,7 @@ if($opt_sam_file){
 }
 
 # create tmp folders
-my @tmp_dirs = map{$opt_prefix."_".$_}@TASKS;
+my @tmp_dirs = ($opt_prefix, map{$opt_prefix."/".$_}@TASKS);
 make_path(@tmp_dirs);
 
 my $LR;
@@ -673,25 +673,53 @@ foreach my $task(@TASKS){
 	}elsif($task eq 'shrimp-finish'){
 		
 		# get all previously collected short reads foreach long read
+		# already done by create_sorted_sam(); Might need to change as it
+		# create a lot of temporary data. Maybe creation of SR.fq on-the-fly
+		# would be better, yet slower
 		
+		# split latest LR-consensus.fa
+		my $latest_lr_fa_file = task_file_name('.fa', task => $TASKS[$TC-1] );
 		
-		run_shrimp(
-			shrimp => {
-				%{$cfg{$task}}, # basic shrimp params from cfg
-				verbose => 1,
-				'log' => task_file_name(suffix => "_shrimp.log"),
-				'-ref' => task_file_name('.fa', task => $TASKS[$TC-1] ),
-				'-1' => $opt_sr_file,
-				'--threads' => $opt_threads,
-				'--qv-offset' => $opt_sr_qv_offset,
-			}
-		);
+		my $lrpr = Fasta::Parser->new(file => $latest_lr_fa_file);
 		
-		$sam_chunk_offsets = create_sorted_sam();
+		my $lr_c = 0;
+		while(my $lr = $lrpr->next_seq){
+			my $lr_fa = task_file_name(task => "shrimp-finish/$lr_c", prefix => "lr", suffix=> ".fa");
+			my $sr_fq = task_file_name(task => "shrimp-finish/$lr_c", prefix => "sr", suffix=> ".fq");
+			my $shrimp_log = task_file_name(task => "shrimp-finish/$lr_c", prefix => $lr_c, suffix => "_shrimp.log");
+			open(FA, '>', $lr_fa) or $v->exit($lr_fa.": ".$!);
+			print FA $lr->string;
+			close FA;
+	#!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+			# TODO  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+	#!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+			# increase report level to omit run_shrimp progress
+			# shrimp has verbose => 0 to silence it
 
-		$lr_chunk_offsets = correct_sr_mt($sam_chunk_offsets, $lr_chunk_offsets);
+			# shrimp
+			run_shrimp(
+				shrimp => {
+					%{$cfg{$task}}, # basic shrimp params from cfg
+					verbose => 0,
+					'log' => $shrimp_log,
+					'-ref' => $lr_fa,
+					'-1' => $sr_fq,
+					'--threads' => $opt_threads,
+					'--qv-offset' => 33,  # shrimp converts phreds to +33 in output
+				}
+			);
+			$lr_c++;
+		}
 		
-		$LR = undef;
+		last;
+		
+		# get everything in one sam
+		# instead of
+		# $sam_chunk_offsets = create_sorted_sam();
+
+		# $lr_chunk_offsets = correct_sr_mt($sam_chunk_offsets, $lr_chunk_offsets);
+		
+		# $LR = undef;
 		
 	}
 }
@@ -699,8 +727,10 @@ foreach my $task(@TASKS){
 
 
 # create final output
-my $opt_fa_out = $opt_prefix.".fa";
-my $opt_fq_out = $opt_prefix.".fq";
+my $opt_fa_out = task_file_name(task => '', suffix => ".fa");
+my $opt_fq_out = task_file_name(task => '', suffix => ".fq");
+
+print Dumper($opt_fa_out,$opt_fq_out);
 
 copy(task_file_name(".fa", task=>$TASKS[$TC]), $opt_fa_out);
 copy(task_file_name(".fq", task=>$TASKS[$TC]), $opt_fq_out);
@@ -810,6 +840,7 @@ sub run_shrimp{
 	my $p = {
 		shrimp => {},
 		tmp_sam => '',
+		ram_sam => $opt_ram_sam,
 		@_
 	};
 	
@@ -839,7 +870,7 @@ sub run_shrimp{
 	# init temporary sam writer
 	);
 	
-	my $tsp = $opt_ram_sam ? undef : Sam::Parser->new(
+	my $tsp = $p->{ram_sam} ? undef : Sam::Parser->new(
 		file => task_file_name("_tmp.sam"),
 		mode => '+>',
 	);
@@ -871,7 +902,7 @@ sub run_shrimp{
 	# shrimp log
 	my $slh = $shrimp->logh;
 	
-	if($opt_ram_sam){
+	if($p->{ram_sam}){
 		while(my $aln = $rsp->next_aln()){
 			# try to add aln
 			$add_c++ if($LR->{$aln->rname}->add_aln_by_score($aln));
@@ -917,7 +948,7 @@ sub create_sorted_sam{
 	my @lr_ids = sort keys %$LR;
 	my $opt_sam_out = task_file_name(".sam");
 	
-	$v->verbose("Creating filtered sam ".$opt_sam_out);
+	$v->verbose("Creating filtered sam ".$opt_sam_out." and LR wise SR FASTQ files");
 	$v->verbose("Writing ".keys (%$LR)." pacbio read sam blocks");
 	
 	open(OUT, '>',$opt_sam_out) or $v->exit($!);
@@ -939,12 +970,19 @@ sub create_sorted_sam{
 	my $pb_c = 0;
 	foreach my $pb_id (@lr_ids){
 		push @chunk_idxs, tell(OUT) unless $pb_c % $opt_chunk_size;
+
 		# create LR wise SR file for finisher
-		open(FQ, '>', task_file_name("$pb_id.fq")) or $v->exit($!);
-				
+		my $dir = task_file_name(task => "shrimp-finish/$pb_c", prefix => "", suffix=> "");
+		unless(-e $dir){
+			mkdir($dir) or $v->exit($!);
+		}
+
+		open(FQ, '>>', task_file_name(task => "shrimp-finish/$pb_c", prefix => "sr", suffix=> ".fq")) or $v->exit($!);
 		foreach my $aln($LR->{$pb_id}->alns($opt_sort_sam_by_coords)){
+			# write to sam
 			print OUT $aln->raw;
-			printf FQ ("@%s\n%s\n+\n%s\n", $aln->qname, $aln->seq, $aln->qual);
+			# write to LR wise FASTQ
+			printf FQ ("@%s TC:%s\n%s\n+\n%s\n", $aln->qname, $TC, $aln->seq, $aln->qual);
 		}
 		close FQ;
 		$pgb->update($pb_c);
@@ -1144,13 +1182,14 @@ Create a file name depending on current $TC and $opt_prefix
 
 sub task_file_name{
 	my $p = {
-		prefix => $opt_prefix,
+		root => $opt_prefix,
 		task => $TASKS[$TC],
+		prefix => $opt_prefix,
 		suffix => (@_%2 ? shift : ''),
 		@_
 	};
 	
-	return sprintf('%1$s_%2$s/%1$s_%2$s%3$s', $p->{prefix}, $p->{task}, $p->{suffix});
+	return sprintf('%1$s/%2$s/%3$s%4$s', $p->{root}, $p->{task}, $p->{prefix}, $p->{suffix});
 }
 
 
