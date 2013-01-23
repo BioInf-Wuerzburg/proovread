@@ -171,11 +171,11 @@ Correct single molecule sequencing reads by iterative mapping of high
 
 =over
 
-=item hcr-masked and hcr-unmasked output
-
 =item masking stats -> FastaFilter
 
-=item 1-3 passes
+=item dont overwrite output
+
+=item dont write to existing folders
 
 =back
 
@@ -672,6 +672,9 @@ foreach my $task(@TASKS){
 		
 	}elsif($task eq 'shrimp-finish'){
 		
+		# get all previously collected short reads foreach long read
+		
+		
 		run_shrimp(
 			shrimp => {
 				%{$cfg{$task}}, # basic shrimp params from cfg
@@ -936,9 +939,14 @@ sub create_sorted_sam{
 	my $pb_c = 0;
 	foreach my $pb_id (@lr_ids){
 		push @chunk_idxs, tell(OUT) unless $pb_c % $opt_chunk_size;
+		# create LR wise SR file for finisher
+		open(FQ, '>', task_file_name("$pb_id.fq")) or $v->exit($!);
+				
 		foreach my $aln($LR->{$pb_id}->alns($opt_sort_sam_by_coords)){
 			print OUT $aln->raw;
+			printf FQ ("@%s\n%s\n+\n%s\n", $aln->qname, $aln->seq, $aln->qual);
 		}
+		close FQ;
 		$pgb->update($pb_c);
 		$pb_c++;
 	}
