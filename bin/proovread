@@ -550,9 +550,7 @@ unless($opt_prefix){
 #$Sam::Seq::BinMaxCoverage = int($opt_cov/10);
 
 Sam::Seq->MaxCoverage($opt_cov);
-Sam::Seq->BinSize(20);
-$v->verbose("Short read trimming: ".Sam::Seq->Trim($cfg{'sr-trim'}));
-$v->verbose("InDelTabooLength: ".Sam::Seq->InDelTabooLength($cfg{'sr-indel-taboo-length'}));
+Sam::Seq->BinSize($cfg{'bin-size'});
 
 
 ##------------------------------------------------------------------------##
@@ -1012,8 +1010,7 @@ sub correct_sr_mt{
 		'--max-reads'	=> $opt_chunk_size,
 		'--prefix'		=> undef,
 		'--coverage'	=> $opt_cov,
-		'--hcr-mask-length' => $cfg{'hcr-mask-length'},
-		'--hcr-sticky-length' => $cfg{'hcr-sticky-length'},
+		'--cfg'			=> $cfg,
 	);
 	
 	my @pbc_keys = sort keys %pbc_default;

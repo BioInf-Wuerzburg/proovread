@@ -14,8 +14,8 @@ use strict;
 use Pod::Usage;
 use Getopt::Long;
 
-use FindBin qw($Bin);
-use lib "$Bin/../lib/";
+use FindBin qw($RealBin);
+use lib "$RealBin/../lib/";
 
 use Verbose;
 use Verbose::ProgressBar;
@@ -30,7 +30,7 @@ use Fasta::Seq;
 use Fastq::Parser;
 use Fastq::Seq 0.08;
 
-our $VERSION  = '0.02';
+our $VERSION  = '0.03';
 our ($REVISION) = '$Revision$' =~ /(\d+)/;
 our ($MODIFIED) = '$Date$' =~ /Date: (\S+\s\S+)/;
 
@@ -53,6 +53,21 @@ Compute consensus sequences based on SAM file.
 
 =head1 CHANGELOG
 
+=head2 0.03
+
+=over
+
+=item [Change] Removed C<--sticky-end-length> and  C<--hcr-mask-length> 
+ parameter from command line options. Are now set via config
+
+=item [Feature] Added <--cfg> to read from custom config
+
+=item [Feature] Reads core config
+
+=item [Change] Uses C<<$FindBin::RealBin>> instead of C<<$FindBin::Bin>>
+
+=back
+
 =head2 0.02
 
 =over
@@ -74,9 +89,24 @@ Initial script.
 =cut
 
 
-my %opt;
 
 ##------------------------------------------------------------------------##
+
+# load core defaults
+my $cfg_core_file = "$RealBin/../proovread.cfg"; 
+my %cfg = do $cfg_core_file;
+
+# custom config
+my $cfg;
+for(my $i=0; $i<@ARGV; $i++){
+	if($ARGV[$i] =~ /-c$|--cfg$/){
+		$cfg = $ARGV[$i+1];
+		%cfg = (%cfg, do "$cfg"); 
+		last;
+	}
+}
+
+my %opt;
 
 =head1 OPTIONS
 
@@ -137,24 +167,6 @@ Maximum number of reads to correct. Default OFF.
 
 $opt{'max-reads=s'} = \(my $opt_max_reads = 0);
 
-=item [--hcr-mask-length] [off]
-
-Compute HCR regions and mask their cores with "N"s in output FASTA. Append
- HCR coordinates to header descriptions.
-
-=cut
-
-$opt{'hcr-mask-length=i'} = \(my $opt_hcr_mask_length = 0);
-
-=item [--hcr-sticky-length=<INT>] [40]
-
-Required number of HCR bases left and right of --hcr-mask-length, which 
- will not be masked.
-
-=cut
-
-$opt{'hcr-sticky-length=i'} = \(my $opt_hcr_sticky_length = 40);
-
 =item [--coverage=<INT>] [50]
 
 Estimated coverage.
@@ -181,6 +193,9 @@ $opt{'qv-offset=s'} = \(my $opt_qv_offset = 33);
 
 
 
+
+
+
 ##------------------------------------------------------------------------##
 
 =head1 MAIN
@@ -198,8 +213,13 @@ my $sp = Sam::Parser->new(
 	file => $opt_sam_file,
 );
 
+my $opt_hcr_mask_length = $cfg{'hcr-mask-length'};
+my $opt_hcr_sticky_length = $cfg{'hcr-sticky-length'};
+
+Sam::Seq->Trim($cfg{'sr-trim'});
+Sam::Seq->InDelTabooLength($cfg{'sr-indel-taboo-length'});
 Sam::Seq->MaxCoverage($opt_cov);
-Sam::Seq->BinSize(20);
+Sam::Seq->BinSize($cfg{'bin-size'});
 
 
 # qual_lcs is used on cov seq to mask high cov regions, min cov 10
