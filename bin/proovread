@@ -1026,7 +1026,7 @@ sub correct_sr_mt{
 							 	 : task_file_name(".fq", task => $TASKS[$TC-1] ),
 			'--sam-offset' 	=> $sam_chunk_offsets->[$ci],
 			'--ref-offset'	=> $lr_chunk_offsets->[$ci],
-			'--prefix'		=> task_file_name(sprintf ".%010d", $ci),
+			'--prefix'		=> task_file_name($ci),
 		);
 		
 		# params
@@ -1079,9 +1079,9 @@ sub correct_sr_mt{
 	my $fm_file = task_file_name(".fm");
 	my $fm_glob = task_file_name(".[0-9]*.fm");
 	
-	my @fq_glob = glob $fq_glob;
-	my @fa_glob = glob $fa_glob;
-	my @fm_glob = glob $fm_glob;
+	my @fq_glob = sort byfile glob $fq_glob;
+	my @fa_glob = sort byfile glob $fa_glob;
+	my @fm_glob = sort byfile glob $fm_glob;
 	
 	
 	# create offset idx for reference
@@ -1214,6 +1214,30 @@ sub coverage_tables{
 
 }
 
+
+=head2 byfile
+
+Sort function for "natural" filesorting, descending.
+
+=cut
+
+sub byfile {
+  my @a = split /(\d+)/, $a;
+  my @b = split /(\d+)/, $b;
+  my $M = @a > @b ? @a : @b;
+  my $res = 0;
+  for (my $i = 0; $i < $M; $i++) {
+    return -1 if ! defined $a[$i];
+    return 1 if  ! defined $b[$i];
+    if ($a[$i] =~ /\d/) {
+      $res = $a[$i] <=> $b[$i];
+    } else {
+      $res = $a[$i] cmp $b[$i];
+    }
+    last if $res;
+  }
+  $res;
+}
 
 
 ##------------------------------------------------------------------------##
