@@ -63,19 +63,31 @@ Correct single molecule sequencing reads by iterative mapping of high
 
 =head2 0.80
 
-relative InDelTabooLength
+=over
 
-finisher
+=item [Change] Chunk files have natural consecutive numbering scheme
+ and are sorted using C<byfile()> to keep there order consistent. This
+ makes the chunk filename robust for any number of chunks.
 
-modes
+=item [Feature] C<byfile()> sorting function for "natural" file sorting
 
-refactoring main
+=item [Refactoring] Changed PASS based workflow to TASK based 
+ workflow, where tasks can be modularily put together to adjust for
+ different scenarios. TASK order can easily configured via the 
+ config file.
+
+=item [Feature] Config provides 'modes', which essentially are 
+ templates running specific TASKs for different scenarios. 
+
+=item [Feature] Fsinisher
+
+=back
 
 =head2 0.72
 
 =over
 
-=item [Feature] Added C<sr-trim> and C<sr-indel-taboo-length> to advanced
+=item [Feature] Added C<sr-trim> and C<sr-indel-taboo> to advanced
  config options
 
 =item [Change] Uses Sam::Seq 0.08, which provides InDelTabooLength based 
