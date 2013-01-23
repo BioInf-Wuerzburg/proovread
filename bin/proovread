@@ -1010,7 +1010,7 @@ sub correct_sr_mt{
 		'--max-reads'	=> $opt_chunk_size,
 		'--prefix'		=> undef,
 		'--coverage'	=> $opt_cov,
-		'--cfg'			=> $cfg,
+		($cfg ? ('--cfg'	=> $cfg) : ()),
 	);
 	
 	my @pbc_keys = sort keys %pbc_default;
