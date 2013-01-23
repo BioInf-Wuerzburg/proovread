@@ -1038,7 +1038,7 @@ sub correct_sr_mt{
 							 	 : task_file_name(".fq", task => $TASKS[$TC-1] ),
 			'--sam-offset' 	=> $sam_chunk_offsets->[$ci],
 			'--ref-offset'	=> $lr_chunk_offsets->[$ci],
-			'--prefix'		=> task_file_name($ci),
+			'--prefix'		=> task_file_name(".".$ci),
 		);
 		
 		# params
