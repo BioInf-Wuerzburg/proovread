@@ -47,11 +47,11 @@ Class for handling sam reference sequences and its aligned reads.
 
 =over
 
-=item [Change] In order to implement InDelTabooLength correctly, the states
+=item [Change] In order to implement InDelTaboo correctly, the states
  of an alignment are now computed independently of the state matrix, then 
  trimmed and after that added to the global matrix.
 
-=item [Feature] C<< $Sam::Seq::InDelTabooLength >> and C<< Sam::Seq->InDelTabooLength() >>
+=item [Feature] C<< $Sam::Seq::InDelTaboo >> and C<< Sam::Seq->InDelTaboo() >>
 
 =item [Feature] length normalize score to handle varying short read lengths
 
@@ -182,19 +182,19 @@ our $MaxCoverage = 50;
 
 our $PhredOffset = 33;
 
-=head2 InDelTabooLength [5]
+=head2 InDelTaboo [0.1]
 
-Trim reads to prevent insertions/deletions within the first InDelTabooLength
- bases. N=0 deactivates the feature.
+Trim reads to prevent insertions/deletions within the first/last 
+ InDelTaboo fraction of the read. N=0 deactivates the feature.
 
 =cut
 
-our $InDelTabooLength = 5;
+our $InDelTaboo = 0.1;
 
 =head2 $Trim
 
 Boolean. Deactivate trimming completely, including leading/trailing indels 
- and InDelTabooLength.
+ and InDelTaboo.
 
 =cut
 
@@ -240,16 +240,16 @@ sub PhredOffset{
 	return $PhredOffset;
 }
 
-=head2 InDelTabooLength
+=head2 InDelTaboo
 
-Get/Set $Sam::Seq::InDelTabooLength. Default 10.
+Get/Set $Sam::Seq::InDelTaboo. Default 10.
 
 =cut
 
-sub InDelTabooLength{
+sub InDelTaboo{
 	my ($class, $indeltaboo) = @_;
-	$InDelTabooLength = $indeltaboo if defined $indeltaboo;
-	return $InDelTabooLength;
+	$InDelTaboo = $indeltaboo if defined $indeltaboo;
+	return $InDelTaboo;
 }
 
 =head2 Trim
@@ -876,11 +876,12 @@ sub _state_matrix{
 		if($Trim){
 			##################
 			### InDelTaboo ###
-			# this also removes leading/trailing InDels regardless of InDelTabooLength
+			# this also removes leading/trailing InDels regardless of InDelTaboo
 			# trim head
 			my $mc = 0;
 			my $dc = 0;
-			my $ic = 0;	
+			my $ic = 0;
+			my $InDelTabooLength = int($orig_seq_length * $InDelTaboo + 0.5);
 			for(my $i=0; $i<@cigar;$i+=2){
 				if($cigar[$i+1] eq 'M'){
 					if($mc + $ic + $cigar[$i] > $InDelTabooLength){
