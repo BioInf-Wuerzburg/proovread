@@ -116,6 +116,15 @@ my %opt;
 
 =cut
 
+=item --cfg=<STRING>
+
+Config file.
+
+=cut 
+
+$opt{'cfg=s'} = \$cfg;
+
+
 =item --prefix=<STRING>
 
 Prefix for output files.
