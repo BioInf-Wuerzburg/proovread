@@ -518,7 +518,7 @@ sub _run_pipe_open {
 
 	$self->{_result_reader} = $rdr;
 
-	open(my $err, '<', $tmp_error_log) or $V->exit($!);
+	open(my $err, '<', $tmp_error_log) or $V->exit($tmp_error_log.": ".$!);
 	$self->{_error_reader} = $err;
 	$self->{_tmp_error_log} = $tmp_error_log;
 	

@@ -39,6 +39,9 @@ use Sam::Seq '0.08';
 
 use Shrimp;
 
+use threads;
+use Thread::Queue;
+use Time::HiRes qw(usleep);
 
 our $VERSION = '0.80';
 our ($REVISION) = '$Revision$' =~ /(\d+)/;
@@ -595,12 +598,14 @@ my @tmp_dirs = ($opt_prefix, map{$opt_prefix."/".$_}@TASKS);
 make_path(@tmp_dirs);
 
 my $LR;
+my @LR_IDS;
 my $lr_chunk_offsets;
 my $sam_chunk_offsets;
 
 foreach my $task(@TASKS){
 	$TC++;
 	if($task eq 'read-sam'){
+		$v->exit("mode under construction")
 		# TODO: sam2cns w/o reference
 #		$LR = read_sam();
 #		my $sam_chunk_offsets = create_sorted_sam(sort keys %$LR);
@@ -625,7 +630,7 @@ foreach my $task(@TASKS){
 		);
 	
 		$sam_chunk_offsets = create_sorted_sam();
-
+		
 		$lr_chunk_offsets = correct_sr_mt($sam_chunk_offsets, $lr_chunk_offsets);
 
 		$LR = undef;
@@ -681,47 +686,122 @@ foreach my $task(@TASKS){
 		my $latest_lr_fa_file = task_file_name('.fa', task => $TASKS[$TC-1] );
 		
 		my $lrpr = Fasta::Parser->new(file => $latest_lr_fa_file);
-		
 		my $lr_c = 0;
-		while(my $lr = $lrpr->next_seq){
-			my $lr_fa = task_file_name(task => "shrimp-finish/$lr_c", prefix => "lr", suffix=> ".fa");
-			my $sr_fq = task_file_name(task => "shrimp-finish/$lr_c", prefix => "sr", suffix=> ".fq");
-			my $shrimp_log = task_file_name(task => "shrimp-finish/$lr_c", prefix => $lr_c, suffix => "_shrimp.log");
-			open(FA, '>', $lr_fa) or $v->exit($lr_fa.": ".$!);
-			print FA $lr->string;
-			close FA;
-	#!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-			# TODO  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-	#!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-			# increase report level to omit run_shrimp progress
-			# shrimp has verbose => 0 to silence it
+		
+		my $tq = Thread::Queue->new();
+		
+		my $queue_size = $opt_threads * 2;
+		
+		$v->{report_level}--;
+		#$vb->{report_level}--;
+		
+		
+		threads->create(sub {
+			
+			while (my ($lr, $lr_c) = $tq->dequeue(2) ) {
+				last unless defined $lr;
+				# do thread stuff
+				# create shrimp input files
+				my $lr_fa = task_file_name(task => "shrimp-finish/$lr_c", prefix => "lr", suffix=> ".fa");
+				my $sr_fq = task_file_name(task => "shrimp-finish/$lr_c", prefix => "sr", suffix=> ".fq");
+				my $sam_out = task_file_name(task => "shrimp-finish/$lr_c", prefix => $lr_c, suffix=> ".sam");
+				my $shrimp_log = task_file_name(task => "shrimp-finish/$lr_c", prefix => $lr_c, suffix => "_shrimp.log");
+				open(FA, '>', $lr_fa) or $v->exit($lr_fa.": ".$!);
+				print FA $lr->string;
+				close FA;
+				
+				
+				# run shrimp
+				# increase report level to omit run_shrimp progress
+				# shrimp has verbose => 0 to silence it
+	
+				# SAM needs no processing since it contains only one lr and 
+				#  hence is already sorted, and offsets are unnecessary as
+				#  the entire file needs to be read
 
-			# shrimp
-			run_shrimp(
-				shrimp => {
-					%{$cfg{$task}}, # basic shrimp params from cfg
-					verbose => 0,
-					'log' => $shrimp_log,
-					'-ref' => $lr_fa,
-					'-1' => $sr_fq,
-					'--threads' => $opt_threads,
-					'--qv-offset' => 33,  # shrimp converts phreds to +33 in output
+				run_shrimp(
+					ram_sam => 0,  # tmp SAM is already sorted SAM
+					tmp_sam => $sam_out,
+					shrimp => {
+						%{$cfg{$task}}, # basic shrimp params from cfg
+						verbose => 0,
+						'log' => $shrimp_log,
+						'-ref' => $lr_fa,
+						'-1' => $sr_fq,
+						'--threads' => 1, # single thread per lr
+						'--qv-offset' => 33,  # shrimp converts phreds to +33 in output
+					}
+				);
+			
+			
+				# correct
+				correct_sr_st($lr_fa,$sam_out);
+				
+				$LR = undef;
+			}
+			
+		}) for (1..$opt_threads);
+	
+		$v->{report_level}++;
+		#$vb->{report_level}++;
+	
+		# fill threads queue
+		QUEUEING: while(1){
+			if($tq->pending < $queue_size){
+				# enqueue a bunch of lrs (2 for every thread)
+				for(1..$queue_size){
+					# get long read
+					my $lr = $lrpr->next_seq;
+					
+					# no more to do
+					last QUEUEING unless defined $lr;
+		
+					$tq->enqueue($lr, $lr_c);
+					
+					printf("%s\t%s\n", $lr_c, $lr->id);
+					
+					# long read counter
+					$lr_c++;
 				}
-			);
-			$lr_c++;
+			}else{
+				usleep(10);
+			}
 		}
 		
-		last;
+		# enqueue "undefs" as terminator signals
+		$tq->enqueue( (undef) x $queue_size );
 		
-		# get everything in one sam
-		# instead of
-		# $sam_chunk_offsets = create_sorted_sam();
-
-		# $lr_chunk_offsets = correct_sr_mt($sam_chunk_offsets, $lr_chunk_offsets);
+		# join finished threads
+		$_->join() for threads->list();
 		
-		# $LR = undef;
+		$vb->hline();
+		
+		$v->verbose("Merging corrected output");
+		my $fq_file = task_file_name(".fq");
+		my $fq_glob = task_file_name(".[0-9]*.fq");
+		my $fa_file = task_file_name(".fa");
+		my $fa_glob = task_file_name(".[0-9]*.fa");
+		my $fm_file = task_file_name(".fm");
+		my $fm_glob = task_file_name(".[0-9]*.fm");
+		
+		my @fq_glob = sort byfile glob $fq_glob;
+		my @fa_glob = sort byfile glob $fa_glob;
+		my @fm_glob = sort byfile glob $fm_glob;
+		
+		my $fq_glob_sorted = join(" ", @fq_glob);
+		my $fa_glob_sorted = join(" ", @fa_glob);
+		my $fm_glob_sorted = join(" ", @fm_glob);	
+	
+		qx(cat $fq_glob_sorted > $fq_file);
+		qx(cat $fa_glob_sorted > $fa_file);
+		qx(cat $fm_glob_sorted > $fm_file);
+		
+		unlink @fq_glob unless $opt_keep > 1;
+		unlink @fa_glob unless $opt_keep > 1;
+		unlink @fm_glob unless $opt_keep > 1;
 		
 	}
+	
 }
 
 
@@ -730,7 +810,6 @@ foreach my $task(@TASKS){
 my $opt_fa_out = task_file_name(task => '', suffix => ".fa");
 my $opt_fq_out = task_file_name(task => '', suffix => ".fq");
 
-print Dumper($opt_fa_out,$opt_fq_out);
 
 copy(task_file_name(".fa", task=>$TASKS[$TC]), $opt_fa_out);
 copy(task_file_name(".fq", task=>$TASKS[$TC]), $opt_fq_out);
@@ -839,7 +918,7 @@ Run and process shrimp
 sub run_shrimp{
 	my $p = {
 		shrimp => {},
-		tmp_sam => '',
+		tmp_sam => task_file_name("_tmp.sam"),
 		ram_sam => $opt_ram_sam,
 		@_
 	};
@@ -871,7 +950,7 @@ sub run_shrimp{
 	);
 	
 	my $tsp = $p->{ram_sam} ? undef : Sam::Parser->new(
-		file => task_file_name("_tmp.sam"),
+		file => $p->{tmp_sam},
 		mode => '+>',
 	);
 	
@@ -945,7 +1024,6 @@ sub run_shrimp{
 =cut
 
 sub create_sorted_sam{
-	my @lr_ids = sort keys %$LR;
 	my $opt_sam_out = task_file_name(".sam");
 	
 	$v->verbose("Creating filtered sam ".$opt_sam_out." and LR wise SR FASTQ files");
@@ -954,8 +1032,8 @@ sub create_sorted_sam{
 	open(OUT, '>',$opt_sam_out) or $v->exit($!);
 	
 	# header section
-	printf OUT ("\@HD\tVN:%s\$lr_idstSO:%s\n", "unknown", "unknown");
-	foreach my $pb_id (@lr_ids){
+	printf OUT ("\@HD\tVN:%s\tSO:%s\n", "unknown", "unknown");
+	foreach my $pb_id (@LR_IDS){
 		printf OUT ("\@SQ\tSN:%s\tLN:%s\n", $pb_id, $LR->{$pb_id}->len);
 	}
 	
@@ -963,12 +1041,12 @@ sub create_sorted_sam{
 	print OUT $PG_line;
 	
 	# init input stream parser progess bar	
-	my $pgb = Verbose::ProgressBar->new(size => scalar @lr_ids);
+	my $pgb = Verbose::ProgressBar->new(size => scalar @LR_IDS);
 	
 	my @chunk_idxs;
 	# alignment section
 	my $pb_c = 0;
-	foreach my $pb_id (@lr_ids){
+	foreach my $pb_id (@LR_IDS){
 		push @chunk_idxs, tell(OUT) unless $pb_c % $opt_chunk_size;
 
 		# create LR wise SR file for finisher
@@ -1040,7 +1118,8 @@ sub prepare_lr{
 	# write sorted/indexed fq/fa lr file for pbc
 	my @lr_idxs;
 	my $lr_c = 0;
-	foreach(sort keys %lr){
+	@LR_IDS = sort byfile keys %lr;
+	foreach(@LR_IDS){
 		my $pos = $lrpw->append_seq($lr{$_});
 		push @lr_idxs, $pos unless $lr_c % $opt_chunk_size;
 		$lr_c++;
@@ -1068,7 +1147,10 @@ sub correct_sr_mt{
 		'--max-reads'	=> $opt_chunk_size,
 		'--prefix'		=> undef,
 		'--coverage'	=> $opt_cov,
-		($cfg ? ('--cfg'	=> $cfg) : ()),
+		'--append'		=> 1,
+		$cfg
+		 	? ('--cfg'	=> $cfg) 
+		 	: (),
 	);
 	
 	my @pbc_keys = sort keys %pbc_default;
@@ -1079,12 +1161,12 @@ sub correct_sr_mt{
 	for(my $ci=0; $ci<@$sam_chunk_offsets; $ci++){
 		my %pbc_config = (
 			%pbc_default,
+			'--prefix'		=> task_file_name(".".$ci),
 			'--ref' 		=> $TC == 1
 							 	 ? task_file_name(".f[aq]", task => $TASKS[$TC-1] )
 							 	 : task_file_name(".fq", task => $TASKS[$TC-1] ),
-			'--sam-offset' 	=> $sam_chunk_offsets->[$ci],
-			'--ref-offset'	=> $lr_chunk_offsets->[$ci],
-			'--prefix'		=> task_file_name(".".$ci),
+			'--sam-offset' => $sam_chunk_offsets->[$ci], 
+			'--ref-offset' => $lr_chunk_offsets->[$ci],
 		);
 		
 		# params
@@ -1140,7 +1222,9 @@ sub correct_sr_mt{
 	my @fq_glob = sort byfile glob $fq_glob;
 	my @fa_glob = sort byfile glob $fa_glob;
 	my @fm_glob = sort byfile glob $fm_glob;
-	
+	my $fq_glob_sorted = join(" ", @fq_glob);
+	my $fa_glob_sorted = join(" ", @fa_glob);
+	my $fm_glob_sorted = join(" ", @fm_glob);
 	
 	# create offset idx for reference
 	my @ref_idxs = (0);
@@ -1154,9 +1238,9 @@ sub correct_sr_mt{
 	# remove last on, its just the eof
 	pop(@ref_idxs);
 	
-	qx(cat $fq_glob > $fq_file);
-	qx(cat $fa_glob > $fa_file);
-	qx(cat $fm_glob > $fm_file);
+	qx(cat $fq_glob_sorted > $fq_file);
+	qx(cat $fa_glob_sorted > $fa_file);
+	qx(cat $fm_glob_sorted > $fm_file);
 	
 	unlink @fq_glob unless $opt_keep > 1;
 	unlink @fa_glob unless $opt_keep > 1;
@@ -1165,6 +1249,55 @@ sub correct_sr_mt{
 	return \@ref_idxs;
 }
 
+
+=head2 correct_sr_st
+
+=cut
+
+sub correct_sr_st{
+	my ($ref, $sam_out) = @_;
+	
+	# pbc_correct.pl 
+	my %pbc_default = (
+		'--sam' 		=> $sam_out,
+		'--coverage'	=> $opt_cov,
+		'--ref' 		=> undef,
+		'--prefix'		=> undef,
+		'--ignore-hcr'	=> 1,
+		'--append'		=> 1,
+		$cfg
+		 	? ('--cfg'	=> $cfg) 
+		 	: (),
+	);
+	
+	my @pbc_keys = sort keys %pbc_default;
+	
+	my $pbc_cmds = '';
+	
+	# generate cmd foreach chunk
+	my %pbc_config = (
+		%pbc_default,
+		'--prefix'		=> task_file_name(".".threads->tid()),
+		'--ref' 		=> $ref,
+	);
+	
+	# params
+	my @pbc_cmd;
+	foreach my $k (@pbc_keys){
+		my $v = $pbc_config{$k};
+		# flag only is undef or '', NOT '0' !!!
+		push @pbc_cmd, (defined($v) && $v ne '') ? ($k, $v) : $k;
+	}
+	$pbc_cmds = sprintf("perl $RealBin/sam2cns %s |",  join(" ", @pbc_cmd));
+	
+	$vb->hline;
+	$vb->verbose($pbc_cmds);
+	
+	my $xgr;
+	open($xgr, $pbc_cmds)
+		or $v->exit($!);
+	
+}
 
 =head2 file_name
 

@@ -333,6 +333,7 @@ NOTE: this operation only works on real files, not on STDIN.
 
 sub seek{
 	my ($self, $offset, $whence) = (@_, 0, 0);
+	$self->{_buffer} = [];
 	return seek($self->fh, $offset, $whence);
 }
 

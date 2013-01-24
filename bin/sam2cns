@@ -57,6 +57,13 @@ Compute consensus sequences based on SAM file.
 
 =over
 
+=item [Feature] <--append> to add output to already existing file.
+
+=item [Feature] Reference is optional, consensus from SAM only is possible.
+
+=item [Feature] <--ignore-hcr> parameter to toggle HCR evalutation 
+ consensus calls.
+
 =item [Change] Removed C<--sticky-end-length> and  C<--hcr-mask-length> 
  parameter from command line options. Are now set via config
 
@@ -192,10 +199,27 @@ Quality offset.
 
 $opt{'qv-offset=s'} = \(my $opt_qv_offset = 33);
 
+=item [--ignore-hcr] [OFF]
 
+Boolean. Do not parse and use HCRs from reference file in consensus calls.
 
+=cut
+
+$opt{'ignore-hcr!'} = \(my $opt_ignore_hcr);
 
 =back
+
+=item [--append] [OFF]
+
+Append output if output file already exists
+
+=cut
+
+$opt{'append!'} = \(my $opt_append);
+
+=back
+
+
 
 =cut
 
@@ -238,52 +262,51 @@ Fastq::Seq->Qual_lcs_min_length($opt_hcr_mask_length + (2 * $opt_hcr_sticky_leng
 
 
 # use glob, to allow glob pattern instead of full filename (fa/fq is decided by parser)
-my ($opt_ref_file) = glob($opt_ref_pat);
+my $opt_ref_file;
+my $rpr;
 
-$v->exit("Reference file not found ($opt_ref_pat)") unless $opt_ref_file;
-
-# init fastq/fasta parser
-my $rpr = Fastq::Parser->new(file => $opt_ref_file)->check_format;
-$rpr = Fasta::Parser->new(file => $opt_ref_file)->check_format unless $rpr;
-$v->exit("Unknown format of reference file: $opt_ref_file") unless $rpr;
-
-# DEPRECATED
-# for old Fasta::Parser -> bad check_format
-#my $rpr = $opt_ref_file =~/q$/
-#	? Fastq::Parser->new(file => $opt_ref_file)
-#	: Fasta::Parser->new(file => $opt_ref_file);
+if($opt_ref_pat){
+	($opt_ref_file) = glob($opt_ref_pat);
+	$v->exit("Reference file not found ($opt_ref_pat)") unless $opt_ref_file;
+	# init fastq/fasta parser
+	$rpr = Fastq::Parser->new(file => $opt_ref_file)->check_format;
+	$rpr = Fasta::Parser->new(file => $opt_ref_file)->check_format unless $rpr;
+	$v->exit("Unknown format of reference file: $opt_ref_file") unless $rpr;
+}
 
 # output files
-
 my $fq_out = $opt_pre.'.fq';
 my $fa_out = $opt_pre.'.fa';
 my $fm_out = $opt_pre.'.fm';
 
-
+my $mode = $opt_append ? ">>" : ">";
 
 my $fqh;
-open($fqh, ">", $fq_out) || $v->exit("Can't open output read file: '$fq_out'");
+open($fqh, $mode, $fq_out) || $v->exit("Can't open output read file: '$fq_out'");
 my $fah;
-open($fah, ">", $fa_out) || $v->exit("Can't open output read file: '$fa_out'");
+open($fah, $mode, $fa_out) || $v->exit("Can't open output read file: '$fa_out'");
 my $fmh;
-open($fmh, ">", $fm_out) || $v->exit("Can't open output read file: '$fm_out'");
+open($fmh, $mode, $fm_out) || $v->exit("Can't open output read file: '$fm_out'");
 
 
 
 my %PB;
 
-
-# read fasta
-$rpr->seek($opt_ref_offset) if $opt_ref_offset;
-my $ref_c = 0;
-while(my $ref = $rpr->next_seq()){
-	$PB{$ref->id} = Sam::Seq->new(
-		ref => $ref,
-		len => length($ref->seq),
-		id => $ref->id
-	);
-	last if ++$ref_c >= $opt_max_reads;
+# ref
+if($rpr){
+	# read fasta
+	$rpr->seek($opt_ref_offset) if $opt_ref_offset;
+	my $ref_c = 0;
+	while(my $ref = $rpr->next_seq()){
+		$PB{$ref->id} = Sam::Seq->new(
+			ref => $ref,
+			len => length($ref->seq),
+			id => $ref->id
+		);
+		last if ++$ref_c >= $opt_max_reads;
+	}
 }
+
 # read sam
 $sp->seek($opt_sam_offset) if $opt_sam_offset;
 while(my $aln = $sp->next_aln()){
@@ -293,13 +316,16 @@ while(my $aln = $sp->next_aln()){
 }
 
 # calculate consensus
-foreach my $pb_id(sort keys %PB){
+foreach my $pb_id(sort byfile keys %PB){
 	my @hcrs = ();
-	if(my $hcrs = $PB{$pb_id}{ref}->desc){
-		while($hcrs =~ /HCR\d+:(\d+),(\d+)/g){
-			push @hcrs, [$1, $2];
-		}
-	};
+	
+	if($rpr && ! $opt_ignore_hcr){
+		if(my $hcrs = $PB{$pb_id}{ref}->desc){
+			while($hcrs =~ /HCR\d+:(\d+),(\d+)/g){
+				push @hcrs, [$1, $2];
+			}
+		};
+	}
 	
 	my $con = $PB{$pb_id}->consensus(@hcrs);
 	# clone
@@ -338,6 +364,30 @@ foreach my $pb_id(sort keys %PB){
 }
 
 
+
+=head2 byfile
+
+Sort function for "natural" filesorting, descending.
+
+=cut
+
+sub byfile {
+  my @a = split /(\d+)/, $a;
+  my @b = split /(\d+)/, $b;
+  my $M = @a > @b ? @a : @b;
+  my $res = 0;
+  for (my $i = 0; $i < $M; $i++) {
+    return -1 if ! defined $a[$i];
+    return 1 if  ! defined $b[$i];
+    if ($a[$i] =~ /\d/) {
+      $res = $a[$i] <=> $b[$i];
+    } else {
+      $res = $a[$i] cmp $b[$i];
+    }
+    last if $res;
+  }
+  $res;
+}
 
 =head1 AUTHORS
 
