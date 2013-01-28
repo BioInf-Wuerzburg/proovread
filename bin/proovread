@@ -663,7 +663,7 @@ foreach my $task(@TASKS){
 				verbose => 1,
 				'log' => task_file_name(suffix => "_shrimp.log"),
 				'-ref' => task_file_name('.fa', task => $TASKS[$TC-1] ),
-				'-1' => task_file_name(task => "shrimp-finish", prefix => "sr", suffix=> ".fq"),
+				'-1' => ,
 				'--threads' => $opt_threads,
 				'--qv-offset' => $opt_sr_qv_offset,
 			}
@@ -684,7 +684,7 @@ foreach my $task(@TASKS){
 				verbose => 1,
 				'log' => task_file_name(suffix => "_shrimp.log"),
 				'-ref' => task_file_name('.fa', task => $TASKS[$TC-1] ),
-				'-1' => $opt_sr_file,
+				'-1' => task_file_name(task => "shrimp-finish", prefix => "sr", suffix=> ".fq"),
 				'--threads' => $opt_threads,
 				'--qv-offset' => 33,  # shrimp converts phreds to +33 in output
 			}
