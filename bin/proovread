@@ -594,8 +594,8 @@ if($opt_sam_file){
 }
 
 # create tmp folders
-my @tmp_dirs = ($opt_prefix, map{$opt_prefix."/".$_}@TASKS);
-make_path(@tmp_dirs);
+my @tmp_dirs = (map{$opt_prefix."/".$_}@TASKS);
+make_path($opt_prefix, @tmp_dirs);
 
 my $LR;
 my @LR_IDS;
@@ -663,7 +663,7 @@ foreach my $task(@TASKS){
 				verbose => 1,
 				'log' => task_file_name(suffix => "_shrimp.log"),
 				'-ref' => task_file_name('.fa', task => $TASKS[$TC-1] ),
-				'-1' => $opt_sr_file,
+				'-1' => task_file_name(task => "shrimp-finish", prefix => "sr", suffix=> ".fq"),
 				'--threads' => $opt_threads,
 				'--qv-offset' => $opt_sr_qv_offset,
 			}
@@ -676,6 +676,27 @@ foreach my $task(@TASKS){
 		$LR = undef;
 		
 	}elsif($task eq 'shrimp-finish'){
+
+	
+		run_shrimp(
+			shrimp => {
+				%{$cfg{$task}}, # basic shrimp params from cfg
+				verbose => 1,
+				'log' => task_file_name(suffix => "_shrimp.log"),
+				'-ref' => task_file_name('.fa', task => $TASKS[$TC-1] ),
+				'-1' => $opt_sr_file,
+				'--threads' => $opt_threads,
+				'--qv-offset' => 33,  # shrimp converts phreds to +33 in output
+			}
+		);
+		
+		$sam_chunk_offsets = create_sorted_sam();
+
+		$lr_chunk_offsets = correct_sr_mt($sam_chunk_offsets, $lr_chunk_offsets);
+		
+		$LR = undef;
+		
+	}elsif($task eq 'shrimp-finish-st'){
 		
 		# get all previously collected short reads foreach long read
 		# already done by create_sorted_sam(); Might need to change as it
@@ -1049,13 +1070,13 @@ sub create_sorted_sam{
 	foreach my $pb_id (@LR_IDS){
 		push @chunk_idxs, tell(OUT) unless $pb_c % $opt_chunk_size;
 
-		# create LR wise SR file for finisher
-		my $dir = task_file_name(task => "shrimp-finish/$pb_c", prefix => "", suffix=> "");
-		unless(-e $dir){
-			mkdir($dir) or $v->exit($!);
-		}
+#		# create LR wise SR file for finisher
+#		my $dir = task_file_name(task => "shrimp-finish/$pb_c", prefix => "", suffix=> "");
+#		unless(-e $dir){
+#			mkdir($dir) or $v->exit($!);
+#		}
 
-		open(FQ, '>>', task_file_name(task => "shrimp-finish/$pb_c", prefix => "sr", suffix=> ".fq")) or $v->exit($!);
+		open(FQ, '>>', task_file_name(task => "shrimp-finish", prefix => "sr", suffix=> ".fq")) or $v->exit($!);
 		foreach my $aln($LR->{$pb_id}->alns($opt_sort_sam_by_coords)){
 			# write to sam
 			print OUT $aln->raw;
