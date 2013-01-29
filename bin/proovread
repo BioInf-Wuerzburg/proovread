@@ -621,6 +621,7 @@ foreach my $task(@TASKS){
 			shrimp => {
 				%{$cfg{$task}}, # basic shrimp params from cfg
 				verbose => 1,
+				'--al' => task_file_name(suffix => "_sr.fq"),
 				'log' => task_file_name(suffix => "_shrimp.log"),
 				'-ref' => task_file_name('.fa', task => $TASKS[$TC-1] ),
 				'-1' => $opt_sr_file,
@@ -641,6 +642,7 @@ foreach my $task(@TASKS){
 			shrimp => {
 				%{$cfg{$task}}, # basic shrimp params from cfg
 				verbose => 1,
+				'--al' => task_file_name(suffix => "_sr.fq"),
 				'log' => task_file_name(suffix => "_shrimp.log"),
 				'-ref' => task_file_name(".fm", task => $TASKS[$TC-1] ),
 				'-1' => $opt_sr_file,
@@ -661,6 +663,7 @@ foreach my $task(@TASKS){
 			shrimp => {
 				%{$cfg{$task}}, # basic shrimp params from cfg
 				verbose => 1,
+				'--al' => task_file_name(suffix => "_sr.fq"),
 				'log' => task_file_name(suffix => "_shrimp.log"),
 				'-ref' => task_file_name('.fa', task => $TASKS[$TC-1] ),
 				'-1' => ,
@@ -684,9 +687,11 @@ foreach my $task(@TASKS){
 				verbose => 1,
 				'log' => task_file_name(suffix => "_shrimp.log"),
 				'-ref' => task_file_name('.fa', task => $TASKS[$TC-1] ),
-				'-1' => task_file_name(task => "shrimp-finish", prefix => "sr", suffix=> ".fq"),
 				'--threads' => $opt_threads,
-				'--qv-offset' => 33,  # shrimp converts phreds to +33 in output
+				'--qv-offset' => $opt_sr_qv_offset,
+				'-1' => join(" ",map{
+					task_file_name(task => $_, suffix=> "_sr.fq")
+				}(@TASKS[1..$TC-1])),
 			}
 		);
 		
@@ -1070,20 +1075,11 @@ sub create_sorted_sam{
 	foreach my $pb_id (@LR_IDS){
 		push @chunk_idxs, tell(OUT) unless $pb_c % $opt_chunk_size;
 
-#		# create LR wise SR file for finisher
-#		my $dir = task_file_name(task => "shrimp-finish/$pb_c", prefix => "", suffix=> "");
-#		unless(-e $dir){
-#			mkdir($dir) or $v->exit($!);
-#		}
-
-		open(FQ, '>>', task_file_name(task => "shrimp-finish", prefix => "sr", suffix=> ".fq")) or $v->exit($!);
 		foreach my $aln($LR->{$pb_id}->alns($opt_sort_sam_by_coords)){
 			# write to sam
 			print OUT $aln->raw;
 			# write to LR wise FASTQ
-			printf FQ ("@%s TC:%s\n%s\n+\n%s\n", $aln->qname, $TC, $aln->seq, $aln->qual);
 		}
-		close FQ;
 		$pgb->update($pb_c);
 		$pb_c++;
 	}
