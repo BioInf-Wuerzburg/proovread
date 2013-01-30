@@ -1165,6 +1165,9 @@ sub correct_sr_mt{
 		'--prefix'		=> undef,
 		'--coverage'	=> $opt_cov,
 		'--append'		=> 1,
+		$TASKS[$TC] eq 'shrimp-finish' # ignore hcrs on finish
+			? ('--ignore-hcr' => 1)
+			: (),
 		$cfg
 		 	? ('--cfg'	=> $cfg) 
 		 	: (),
