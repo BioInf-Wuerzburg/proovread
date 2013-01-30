@@ -63,10 +63,23 @@ Correct single molecule sequencing reads by iterative mapping of high
 
 =head1 CHANGELOG
 
+=head2 0.81
+
+=over
+
+=item [Feature] Finisher
+
+=back
+
 
 =head2 0.80
 
 =over
+
+=item [Change] Prefix defaults to proovread_<TIMESTAMP>.
+
+=item [Feature] Scripts stops if output directory cannot be created/
+ is not empty.
 
 =item [Change] Chunk files have natural consecutive numbering scheme
  and are sorted using C<byfile()> to keep there order consistent. This
@@ -81,8 +94,6 @@ Correct single molecule sequencing reads by iterative mapping of high
 
 =item [Feature] Config provides 'modes', which essentially are 
  templates running specific TASKs for different scenarios. 
-
-=item [Feature] Fsinisher
 
 =back
 
@@ -264,26 +275,35 @@ $opt{'c|cfg=s'} = \$cfg;
 
 =item -l, --long-reads=<PATHNAME>
 
-Pacbio reads to correct. FASTA or FASTQ format.
+Pacbio reads file to correct. FASTA or FASTQ format. To correct
+ mulitple files at once, provide parameter mulitple times.
+ 
+  -l cell1 -l cell2 ... # correct 2 cells at once
 
 =cut
 
-$opt{'l|long-reads=s'} = \(my $opt_lr_file = $cfg{'long-reads'});
+$opt{'l|long-reads=s@'} = \(my $opt_lr_file = $cfg{'long-reads'});
 
 =item -s, --short-reads=<PATHNAME>
 
-High confidence short reads used for correction in FASTQ format.
- Either one set of reads for all passes or a comma separated list, 
- one value for each pass.
+High confidence short reads file used for correction in FASTQ or
+ FASTA format.
+To correct with mulitple files at once, provide parameter mulitple
+ times.
+
+NOTE: If multiple libraries are provided, they need to be of the 
+ same format (FASTA or FASTQ) and quality offset (33,64...)
+ respectively.
+
+  -s lib1 -s lib2 # use reads from to libraries for correction
 
 =cut
 
-$opt{'s|short-reads=s'} = \(my $opt_sr_file = $cfg{'short-reads'});
+$opt{'s|short-reads=s@'} = \(my $opt_sr_file = $cfg{'short-reads'});
 
 =item [-p, --prefix=<STRING>]
 
-Prefix to output files. Defaults to <CWD>/<SHORTREADS#LONGREADS> or
- <CWD>/<SAM>, respectively.
+Prefix to output files. Defaults to 'proovread_<TIMESTAMP>'.
 
 =cut
 
@@ -451,12 +471,27 @@ $opt{'coverage-tables!'} = \(my $opt_cov_tables = $cfg{'coverage-tables'});
 # parse options, test files
 GetOptions(%opt) or pod2usage(1);
 $opt_help && pod2usage(1);
-$opt_sam_file || ($opt_lr_file && $opt_sr_file) || pod2usage("Either --long-reads and --short-reads or --sam required");
+$opt_sam_file || (@$opt_lr_file && @$opt_sr_file) || pod2usage("Either --long-reads and --short-reads or --sam required");
 $opt_sam_file && ! -f $opt_sam_file && pod2usage("Cannot find $opt_sam_file");
-$opt_lr_file && ! -f $opt_lr_file && pod2usage("Cannot find $opt_lr_file");
 
-# sr file
-$opt_sr_file && ! -f $opt_lr_file && pod2usage("Cannot find $opt_lr_file");
+# check input files
+
+foreach(@$opt_lr_file, @$opt_sr_file){
+	-f $_ && pod2usage("Cannot find read file: $_");
+}
+
+
+
+
+
+######################################
+## TODO: multiple lr/sr files
+######################################
+
+
+
+
+
 
 # test if short reads are FASTQ/FASTA
 my $fp;
@@ -544,20 +579,6 @@ if($opt_lr_file){
 }
 	
 
-
-# get prefix from input files, if none specified
-unless($opt_prefix){
-	if($opt_lr_file){
-		my ($pb_name, $pb_path, $pb_suffix) = fileparse($opt_lr_file, qw(.fasta .fa .fastq .fq));
-		my ($sr_name, $sr_path, $sr_suffix) = fileparse($opt_sr_file, qw(.fastq .fq));
-		$opt_prefix = $sr_name.'#'.$pb_name;
-	}else{
-		my ($prefix, $path, $suffix) = fileparse($opt_sam_file, qw(.sam));
-		$opt_prefix = $prefix;
-	}	
-}
-
-
 # coverage settings
 # TODO: coverage from params
 # Coverage =~ Binsize/BinMaxCoverage * readlength/2
@@ -593,8 +614,24 @@ if($opt_sam_file){
 	}
 }
 
+unless ($opt_prefix){
+	my @time = (localtime(time))[reverse(0..5)];
+	$time[0]+=1900;
+	$time[1]++;
+	$opt_prefix = 'proovread_'.sprintf("%4d-%02d-%02d_%02d:%02d:%02d", @time)
+}
+
 # create tmp folders
 my @tmp_dirs = (map{$opt_prefix."/".$_}@TASKS);
+if(-e $opt_prefix){
+	if(-d $opt_prefix){
+		$v->exit("Output directory already exists and is not empty")
+		unless is_empty_folder($opt_prefix);
+	}else{
+		$v->exit("Output directory already exists, yet is no directory")
+	} 
+} 
+
 make_path($opt_prefix, @tmp_dirs);
 
 my $LR;
@@ -605,7 +642,7 @@ my $sam_chunk_offsets;
 foreach my $task(@TASKS){
 	$TC++;
 	if($task eq 'read-sam'){
-		$v->exit("mode under construction")
+		$v->exit("task not yet implemented")
 		# TODO: sam2cns w/o reference
 #		$LR = read_sam();
 #		my $sam_chunk_offsets = create_sorted_sam(sort keys %$LR);
@@ -666,7 +703,7 @@ foreach my $task(@TASKS){
 				'--al' => task_file_name(suffix => "_sr.fq"),
 				'log' => task_file_name(suffix => "_shrimp.log"),
 				'-ref' => task_file_name('.fa', task => $TASKS[$TC-1] ),
-				'-1' => ,
+				'-1' => $opt_sr_file,
 				'--threads' => $opt_threads,
 				'--qv-offset' => $opt_sr_qv_offset,
 			}
@@ -701,133 +738,9 @@ foreach my $task(@TASKS){
 		
 		$LR = undef;
 		
-	}elsif($task eq 'shrimp-finish-st'){
-		
-		# get all previously collected short reads foreach long read
-		# already done by create_sorted_sam(); Might need to change as it
-		# create a lot of temporary data. Maybe creation of SR.fq on-the-fly
-		# would be better, yet slower
-		
-		# split latest LR-consensus.fa
-		my $latest_lr_fa_file = task_file_name('.fa', task => $TASKS[$TC-1] );
-		
-		my $lrpr = Fasta::Parser->new(file => $latest_lr_fa_file);
-		my $lr_c = 0;
-		
-		my $tq = Thread::Queue->new();
-		
-		my $queue_size = $opt_threads * 2;
-		
-		$v->{report_level}--;
-		#$vb->{report_level}--;
-		
-		
-		threads->create(sub {
-			
-			while (my ($lr, $lr_c) = $tq->dequeue(2) ) {
-				last unless defined $lr;
-				# do thread stuff
-				# create shrimp input files
-				my $lr_fa = task_file_name(task => "shrimp-finish/$lr_c", prefix => "lr", suffix=> ".fa");
-				my $sr_fq = task_file_name(task => "shrimp-finish/$lr_c", prefix => "sr", suffix=> ".fq");
-				my $sam_out = task_file_name(task => "shrimp-finish/$lr_c", prefix => $lr_c, suffix=> ".sam");
-				my $shrimp_log = task_file_name(task => "shrimp-finish/$lr_c", prefix => $lr_c, suffix => "_shrimp.log");
-				open(FA, '>', $lr_fa) or $v->exit($lr_fa.": ".$!);
-				print FA $lr->string;
-				close FA;
-				
-				
-				# run shrimp
-				# increase report level to omit run_shrimp progress
-				# shrimp has verbose => 0 to silence it
-	
-				# SAM needs no processing since it contains only one lr and 
-				#  hence is already sorted, and offsets are unnecessary as
-				#  the entire file needs to be read
-
-				run_shrimp(
-					ram_sam => 0,  # tmp SAM is already sorted SAM
-					tmp_sam => $sam_out,
-					shrimp => {
-						%{$cfg{$task}}, # basic shrimp params from cfg
-						verbose => 0,
-						'log' => $shrimp_log,
-						'-ref' => $lr_fa,
-						'-1' => $sr_fq,
-						'--threads' => 1, # single thread per lr
-						'--qv-offset' => 33,  # shrimp converts phreds to +33 in output
-					}
-				);
-			
-			
-				# correct
-				correct_sr_st($lr_fa,$sam_out);
-				
-				$LR = undef;
-			}
-			
-		}) for (1..$opt_threads);
-	
-		$v->{report_level}++;
-		#$vb->{report_level}++;
-	
-		# fill threads queue
-		QUEUEING: while(1){
-			if($tq->pending < $queue_size){
-				# enqueue a bunch of lrs (2 for every thread)
-				for(1..$queue_size){
-					# get long read
-					my $lr = $lrpr->next_seq;
-					
-					# no more to do
-					last QUEUEING unless defined $lr;
-		
-					$tq->enqueue($lr, $lr_c);
-					
-					printf("%s\t%s\n", $lr_c, $lr->id);
-					
-					# long read counter
-					$lr_c++;
-				}
-			}else{
-				usleep(10);
-			}
-		}
-		
-		# enqueue "undefs" as terminator signals
-		$tq->enqueue( (undef) x $queue_size );
-		
-		# join finished threads
-		$_->join() for threads->list();
-		
-		$vb->hline();
-		
-		$v->verbose("Merging corrected output");
-		my $fq_file = task_file_name(".fq");
-		my $fq_glob = task_file_name(".[0-9]*.fq");
-		my $fa_file = task_file_name(".fa");
-		my $fa_glob = task_file_name(".[0-9]*.fa");
-		my $fm_file = task_file_name(".fm");
-		my $fm_glob = task_file_name(".[0-9]*.fm");
-		
-		my @fq_glob = sort byfile glob $fq_glob;
-		my @fa_glob = sort byfile glob $fa_glob;
-		my @fm_glob = sort byfile glob $fm_glob;
-		
-		my $fq_glob_sorted = join(" ", @fq_glob);
-		my $fa_glob_sorted = join(" ", @fa_glob);
-		my $fm_glob_sorted = join(" ", @fm_glob);	
-	
-		qx(cat $fq_glob_sorted > $fq_file);
-		qx(cat $fa_glob_sorted > $fa_file);
-		qx(cat $fm_glob_sorted > $fm_file);
-		
-		unlink @fq_glob unless $opt_keep > 1;
-		unlink @fa_glob unless $opt_keep > 1;
-		unlink @fm_glob unless $opt_keep > 1;
-		
+	}else{
+		$v->exit("unknown task: ".$task);
 	}
-	
 }
 
 
@@ -1116,7 +1029,6 @@ sub prepare_lr{
 	
 	if(ref $lrpr eq 'Fasta::Parser'){
 		while(my $lr = $lrpr->next_seq){
-			# convert FASTQ to FASTA
 			$lr->seq(lc($lr->seq()));
 			$lr{$lr->id} = $lr;
 		}
@@ -1269,56 +1181,6 @@ sub correct_sr_mt{
 	return \@ref_idxs;
 }
 
-
-=head2 correct_sr_st
-
-=cut
-
-sub correct_sr_st{
-	my ($ref, $sam_out) = @_;
-	
-	# pbc_correct.pl 
-	my %pbc_default = (
-		'--sam' 		=> $sam_out,
-		'--coverage'	=> $opt_cov,
-		'--ref' 		=> undef,
-		'--prefix'		=> undef,
-		'--ignore-hcr'	=> 1,
-		'--append'		=> 1,
-		$cfg
-		 	? ('--cfg'	=> $cfg) 
-		 	: (),
-	);
-	
-	my @pbc_keys = sort keys %pbc_default;
-	
-	my $pbc_cmds = '';
-	
-	# generate cmd foreach chunk
-	my %pbc_config = (
-		%pbc_default,
-		'--prefix'		=> task_file_name(".".threads->tid()),
-		'--ref' 		=> $ref,
-	);
-	
-	# params
-	my @pbc_cmd;
-	foreach my $k (@pbc_keys){
-		my $v = $pbc_config{$k};
-		# flag only is undef or '', NOT '0' !!!
-		push @pbc_cmd, (defined($v) && $v ne '') ? ($k, $v) : $k;
-	}
-	$pbc_cmds = sprintf("perl $RealBin/sam2cns %s |",  join(" ", @pbc_cmd));
-	
-	$vb->hline;
-	$vb->verbose($pbc_cmds);
-	
-	my $xgr;
-	open($xgr, $pbc_cmds)
-		or $v->exit($!);
-	
-}
-
 =head2 file_name
 
 Create a file name depending on current $TC and $opt_prefix
@@ -1372,9 +1234,110 @@ sub copy_custom_cfg{
 	close CUS;		
 }
 
-=head2 coverage_tables
+
+
+
+=head2 byfile
+
+Sort function for "natural" filesorting, descending.
 
 =cut
+
+sub byfile {
+  my @a = split /(\d+)/, $a;
+  my @b = split /(\d+)/, $b;
+  my $M = @a > @b ? @a : @b;
+  my $res = 0;
+  for (my $i = 0; $i < $M; $i++) {
+    return -1 if ! defined $a[$i];
+    return 1 if  ! defined $b[$i];
+    if ($a[$i] =~ /\d/) {
+      $res = $a[$i] <=> $b[$i];
+    } else {
+      $res = $a[$i] cmp $b[$i];
+    }
+    last if $res;
+  }
+  $res;
+}
+
+=head2 is_empty_folder
+
+Check whether a folder contains any files.
+
+=cut
+
+sub is_folder_empty {
+    my $dirname = shift;
+    opendir(my $dh, $dirname) or die "Not a directory";
+    return scalar(grep { $_ ne "." && $_ ne ".." } readdir($dh)) == 0;
+}
+
+
+
+
+
+
+################
+## DEPRECATED ##
+################
+
+=pod
+
+#=head2 correct_sr_st
+#=cut
+#
+
+sub correct_sr_st{
+	my ($ref, $sam_out) = @_;
+	
+	# pbc_correct.pl 
+	my %pbc_default = (
+		'--sam' 		=> $sam_out,
+		'--coverage'	=> $opt_cov,
+		'--ref' 		=> undef,
+		'--prefix'		=> undef,
+		'--ignore-hcr'	=> 1,
+		'--append'		=> 1,
+		$cfg
+		 	? ('--cfg'	=> $cfg) 
+		 	: (),
+	);
+	
+	my @pbc_keys = sort keys %pbc_default;
+	
+	my $pbc_cmds = '';
+	
+	# generate cmd foreach chunk
+	my %pbc_config = (
+		%pbc_default,
+		'--prefix'		=> task_file_name(".".threads->tid()),
+		'--ref' 		=> $ref,
+	);
+	
+	# params
+	my @pbc_cmd;
+	foreach my $k (@pbc_keys){
+		my $v = $pbc_config{$k};
+		# flag only is undef or '', NOT '0' !!!
+		push @pbc_cmd, (defined($v) && $v ne '') ? ($k, $v) : $k;
+	}
+	$pbc_cmds = sprintf("perl $RealBin/sam2cns %s |",  join(" ", @pbc_cmd));
+	
+	$vb->hline;
+	$vb->verbose($pbc_cmds);
+	
+	my $xgr;
+	open($xgr, $pbc_cmds)
+		or $v->exit($!);
+	
+}
+
+
+
+#=head2 coverage_tables
+#
+#=cut
 
 sub coverage_tables{
 	my $opt_fq_out = task_file_name("fq");
@@ -1427,29 +1390,10 @@ sub coverage_tables{
 }
 
 
-=head2 byfile
-
-Sort function for "natural" filesorting, descending.
-
 =cut
 
-sub byfile {
-  my @a = split /(\d+)/, $a;
-  my @b = split /(\d+)/, $b;
-  my $M = @a > @b ? @a : @b;
-  my $res = 0;
-  for (my $i = 0; $i < $M; $i++) {
-    return -1 if ! defined $a[$i];
-    return 1 if  ! defined $b[$i];
-    if ($a[$i] =~ /\d/) {
-      $res = $a[$i] <=> $b[$i];
-    } else {
-      $res = $a[$i] cmp $b[$i];
-    }
-    last if $res;
-  }
-  $res;
-}
+
+
 
 
 ##------------------------------------------------------------------------##
