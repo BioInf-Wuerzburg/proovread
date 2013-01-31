@@ -17,7 +17,7 @@ our $Version = '1.02';
 
 =head1 NAME 
 
-Pacbio.pm
+FastqFilter.pl
 
 =head1 DESCRIPTION
 
@@ -35,11 +35,13 @@ Report sequences based on some filters (length, ids, number of
 
 =over
 
+=item [Feature] C<--phred-transform> to switch phred offsets between 33 and 64
+
 =item [BugFix] Did set sliding window size instead of min value.
 
 =item [Feature] IDS can have leading '@' or '>'.
 
-=item [Change] <--min-length/--max-length> filter are now executed
+=item [Change] C<--min-length/--max-length> filter are now executed
  after any trimming stuff.
 
 =item [Feature] Autodetect <--phred-offset>.
@@ -201,6 +203,15 @@ Phred offset for quality scores. Default auto-detect.
 
 $opt{'phred-offset=i'} = \(my $opt_offset);
 
+=item [--phred-transform]
+
+Transform phreds from input offset to specified C<--phred-transform> offset,
+ usually 33 to 64 or wise versa.
+
+=cut
+
+$opt{'phred-transform'} = \(my $opt_transform);
+
 =item [--phred-mask]
 
 Two values separated by ",", e.g "0,10" to mask all Nucleotides with
@@ -224,7 +235,6 @@ Trim sequences to quality >= INT1 using a sliding window of size
 =cut
 
 $opt{'trim=s'} = \(my $opt_trim = undef);
-
 
 =item [--trim-lcs=<INT,INT,INT>]
 
@@ -448,7 +458,13 @@ while (my $fq = $fqp->next_seq()){
 
 		# OUTPUT
 		if($opt_out){
-			print $ofh $opt_fasta ? sprintf(">%s\n%s\n", substr ($fq->seq_head, 1), $fq->seq) : $fq->string();
+			if($opt_fasta){
+				print $ofh sprintf(">%s\n%s\n", substr ($fq->seq_head, 1), $fq->seq)
+			}elsif($opt_transform){
+				print $ofh $fq->phred_transform()->string();
+			}else{
+				print $ofh $fq->string();
+			}
 		}
 		
 		# OUTPUT STATS

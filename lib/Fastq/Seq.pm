@@ -32,6 +32,9 @@ Class for handling FASTQ sequences.
 
 =over
 
+=item [Feature] C<< $fq->phred_transfrom >> to change the phred offset of
+ the quality seq to the specified value.
+
 =item [Change] Id and description parsing regexs carry C</o> flag.
 
 =item [Change] << $fq->new() >> now provides cloning functionality, if called on

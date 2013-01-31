@@ -1046,7 +1046,7 @@ sub prepare_lr{
 		if(ref $lrpr eq 'Fasta::Parser'){
 			while(my $lr = $lrpr->next_seq){
 				if(exists $lr{$lr->id}){
-					$VS->exit('Non-unique long read id ('.$lr->id.') in $_');
+					$VS->exit('Non-unique long read id ('. $lr->id .') in '. $_);
 				}
 				$lr->seq(lc($lr->seq())); # convert seq to lower case
 				$lr{$lr->id} = $lr;
@@ -1054,7 +1054,7 @@ sub prepare_lr{
 		}else{
 			while(my $lr = $lrpr->next_seq){
 				if(exists $lr{$lr->id}){
-					$VS->exit('Non-unique long read id ('.$lr->id.') in $_');
+					$VS->exit('Non-unique long read id ('. $lr->id .') in '. $_);
 				}
 				# convert FASTQ to FASTA
 				$lr{$lr->id} = Fasta::Seq->new(
