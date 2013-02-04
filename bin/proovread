@@ -27,15 +27,15 @@ use lib "$RealBin/../lib/";
 use Verbose;
 use Verbose::ProgressBar;
 
-use Fastq::Parser '0.07';
+use Fastq::Parser 0.07;
 use Fastq::Seq;
 
-use Fasta::Parser '0.08';
+use Fasta::Parser 0.08;
 use Fasta::Seq;
 
 use Sam::Parser;
 use Sam::Alignment;
-use Sam::Seq '0.08';
+use Sam::Seq 0.08;
 
 use Shrimp;
 
@@ -226,7 +226,7 @@ my $VB = Verbose->new(
 	format => "{MESSAGE}\n",
 );
 
-$VS->verbose("Running $0-$VERSION, rev$REVISION, $MODIFIED");
+$VB->verbose("$0-$VERSION, rev$REVISION, $MODIFIED");
 
 
 =head1 OPTIONS
@@ -523,7 +523,7 @@ foreach(@$opt_sr_file){
 	
 	
 	# FASTA
-	}elsif($fp = Fasta::Parser->new(file=> $opt_sr_file)->check_format){
+	}elsif($fp = Fasta::Parser->new(file=> $_)->check_format){
 		# format
 		$V->verbose("Detected FASTA format");
 
@@ -544,6 +544,11 @@ foreach(@$opt_sr_file){
 		}else{
 			$sr_qv_offset_total = 0;
 		}
+
+		# count
+		$sr_count = $fp->guess_seq_count();
+		$V->verbose(sprintf("Estimating approximate number of short reads: %s", Verbose->Humanize($sr_count)));
+
 		
 	}else{
 		$V->exit("Short read file $_ neither FASTQ nor FASTA format");
@@ -607,7 +612,10 @@ if($opt_sam_file){
 	}
 }
 
-$opt_prefix = 'proovread' unless $opt_prefix;
+$V->nline;
+$VS->verbose('Running mode: '.$opt_mode);
+
+$opt_prefix = 'proovread' unless defined $opt_prefix;
 
 # DEPRECATED
 #unless ($opt_prefix){
@@ -638,11 +646,11 @@ my $sam_chunk_offsets;
 foreach my $task(@TASKS){
 	$TC++;
 	if($task eq 'read-sam'){
-		$VS->exit("task not yet implemented")
+		# $VS->exit("task not yet implemented")
 		# TODO: sam2cns w/o reference
-#		$LR = read_sam();
-#		my $sam_chunk_offsets = create_sorted_sam(sort keys %$LR);
-#		my $lr_chunk_offsets = correct_sr_mt($sam_chunk_offsets, $lr_chunk_offsets);
+		$LR = read_sam();
+		$sam_chunk_offsets = create_sorted_sam();
+		$lr_chunk_offsets = correct_sr_mt($sam_chunk_offsets, $lr_chunk_offsets);
 		
 	}elsif($task eq 'read-long'){
 		
@@ -751,19 +759,8 @@ $VS->verbose("Creating raw output sequences");
 
 copy(task_file_name(".fa", task=>$TASKS[$TC]), $opt_fa_raw);
 copy(task_file_name(".fq", task=>$TASKS[$TC]), $opt_fq_raw);
-my $cmd_fa_fil = "$RealBin/FastqFilter.pl --in $opt_fq_raw --trim 10 --min-length 500 --fasta --out $opt_fa_fil";
-my $cmd_fq_fil = "$RealBin/FastqFilter.pl --in $opt_fq_raw --trim 10 --min-length 500 --out $opt_fq_fil";
 
-$V->nline;
-$VS->verbose("Quality trimming raw output");
-$VB->hline;
-$VB->verbose($cmd_fa_fil);
-qx($cmd_fa_fil);
-
-$VB->hline;
-$VB->verbose($cmd_fq_fil);
-qx($cmd_fq_fil);
-
+fastq_filter() if $cfg{'fastq-filter'};
 
 # lets see if we came this far
 $no_error++;
@@ -810,12 +807,10 @@ sub read_sam{
 		size => $rsp->fh
 	);
 	
-	# init temporary sam writer
-	my $tsp; 
-#	$tsp = Sam::Parser->new(
-#		file => pass_file_name("_tmp.sam"),
-#		overwrite => 1,
-#	);
+	my $tsp = $opt_ram_sam ? undef : Sam::Parser->new(
+		file => task_file_name(suffix => '_tmp.sam'),
+		mode => '+>',
+	);
 	
 	# read sam header
 	
@@ -853,6 +848,10 @@ sub read_sam{
 		}
 	}
 	$pg_rsp->finish();
+	
+	@LR_IDS = sort byfile keys %LR;
+	
+	return \%LR;
 	
 }
 
@@ -1096,8 +1095,6 @@ sub correct_sr_mt{
 	my %pbc_default = (
 		'--sam' 		=> task_file_name(".sam"),
 		'--sam-offset' 	=> undef,
-		'--ref' 		=> undef,
-		'--ref-offset'	=> undef,
 		'--max-reads'	=> $cfg{'chunk-size'},
 		'--prefix'		=> undef,
 		'--coverage'	=> $opt_cov,
@@ -1119,9 +1116,11 @@ sub correct_sr_mt{
 		my %pbc_config = (
 			%pbc_default,
 			'--prefix'		=> task_file_name(".".$ci),
-			'--ref' 		=> $TC == 1
+			$TASKS[$TC] eq 'external-sam' # ignore hcrs on finish
+				? ()
+				: ('--ref' 		=> $TC == 1
 							 	 ? task_file_name(".f[aq]", task => $TASKS[$TC-1] )
-							 	 : task_file_name(".fq", task => $TASKS[$TC-1] ),
+							 	 : task_file_name(".fq", task => $TASKS[$TC-1] )),
 			'--sam-offset' => $sam_chunk_offsets->[$ci], 
 			'--ref-offset' => $lr_chunk_offsets->[$ci],
 		);
@@ -1260,7 +1259,39 @@ sub copy_custom_cfg{
 }
 
 
+=head2 fastq_filter
 
+Run FastqFilter.pl on raw output
+
+=cut
+
+sub fastq_filter{
+	# params
+	my @params;
+	my $params;
+	foreach my $k (keys %{$cfg{'fastq-filter'}}){
+		my $v = $cfg{'fastq-filter'}{$k};
+		# flag only is '', NOT '0' !!!
+		next unless defined ($v);
+		push @params, ($v ne '') ? ($k, $v) : $k;
+	}
+	$params .= join(" ", @params);
+
+
+	my $cmd_fa_fil = "$RealBin/FastqFilter.pl $params --in $opt_fq_raw --fasta --out $opt_fa_fil\n";
+	my $cmd_fq_fil = "$RealBin/FastqFilter.pl $params --in $opt_fq_raw --out $opt_fq_fil\n";
+	
+	$V->nline;
+	$VS->verbose("Quality trimming raw output");
+	$VB->hline;
+	$VB->verbose($cmd_fa_fil);
+	qx($cmd_fa_fil);
+	
+	$VB->hline;
+	$VB->verbose($cmd_fq_fil);
+	qx($cmd_fq_fil);
+	
+}
 
 =head2 byfile
 

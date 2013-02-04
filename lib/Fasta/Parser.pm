@@ -39,6 +39,8 @@ TODO
 
 =over
 
+=item [BugFix] C<< $fp->sample_seqs >> backups and restores buffer.
+
 =item [Feature] C<< $fp->guess_seq_length >>
 
 =item [Feature] C<< $fp->guess_seq_count >>
@@ -275,7 +277,10 @@ sub sample_seqs{
 	
 	return if $self->check_fh_is_pipe;
 
-	my $file_pos = tell();
+	my $buffer = $self->{_buffer}; # backup buffer state to restore after sampling
+
+
+	my $file_pos = tell($fh);
 
 	# can seek on file: sample random reads
 	my $size = -s $fh;
@@ -295,6 +300,9 @@ sub sample_seqs{
 	}
 	# restore file handle
 	$self->seek($file_pos);
+	
+	$self->{_buffer} = $buffer; # restore buffer
+	
 	
 	return @seqs;
 }

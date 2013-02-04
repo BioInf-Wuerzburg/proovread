@@ -4,16 +4,19 @@ use strict;
 
 use Getopt::Long;
 use Pod::Usage;
-use Data::Dumper;
+
+use FindBin qw($RealBin);
+use lib "$RealBin/../lib/";
 
 use Verbose;
 use Verbose::ProgressBar;
 
-use Fastq::Parser '0.07';
-use Fastq::Seq '0.09';
+use Fastq::Parser 0.07;
+use Fastq::Seq 0.09;
 
 
-our $Version = '1.02';
+
+our $Version = '1.03';
 
 =head1 NAME 
 
@@ -223,27 +226,32 @@ NOTE: Requires C<--phred-offset>.
 
 $opt{'phred-mask=s'} = \(my $opt_mask = undef);
 
-=item [--trim=<INT1>,[<INT2>]]
+=item [--trim-window=<INT1>,[<INT2>]]
 
 Trim sequences to quality >= INT1 using a sliding window of size
- INT2, default 10. The sliding window allows to have a few positions
- below the <--trim> cutoff as long as the window mean is higher than
- INT1. It is made sure that a) below cutoff positions only occur
- within the remaining sequence, not at its start/end and b) windows
+ INT2, default 10. The sliding window allows to have positions
+ below the <--trim> cutoff provided the window mean is higher than
+ INT1. It is made sure that a) positions with quality below cutoff only 
+ occur within the remaining sequence, not at its start/end and b) windows
  never overlap eachother.
 
 =cut
 
-$opt{'trim=s'} = \(my $opt_trim = undef);
+$opt{'trim-window=s'} = \(my $opt_trim = undef);
 
 =item [--trim-lcs=<INT,INT,INT>]
 
 Three values separated by ",", e.g. "30,40,50" to grep all stretches
  of quality >= 30 and minimum length 50 from the sequences.
-Faster than C<--trim> yet breaks sequences even on a single low
+Faster than C<--trim-window> yet breaks sequences even on a single low
  quality position.
 
-NOTE: C<--trim> and C<--trim-lcs> cannot be combined.
+NOTE: C<--trim-lcs> and C<--trim-window> can be combined, e.g.
+
+  --trim-lcs 5,40,100 --trim-window 10
+
+will generate sequences with qualities of at least 5 at every position and 
+ a window mean of 10.
 
 =cut
 
@@ -301,9 +309,7 @@ if($opt_max_length && $opt_min_length && ($opt_min_length > $opt_max_length)){
 }elsif($opt_ids eq '-' && !$opt_in){
 	pod2usage(exitval=>1, msg=>'Cannot read IDS and FASTA from STDIN');
 }
-if($opt_trim && $opt_slice_lcs){
-	pod2usage(exitval=>1, msg=>'Cannot perform --trim and --trim-lcs at the same time'); 
-}
+
 
 ##------------------------------------------------------------------------##
 
@@ -325,12 +331,13 @@ my $V = Verbose->new(
 
 my $fqp = Fastq::Parser->new(
 	file => $opt_in, # defaults to STDIN if undef
+	phred_offset => $opt_offset
 )->check_format;
 $V->exit($opt_in." does not look like FASTQ") unless $fqp;
 
 $opt_offset = $fqp->guess_phred_offset unless $opt_offset;
 
-pod2usage(msg=>'Could not guess phred offset, please specify', exitval => 1) unless $opt_offset;
+pod2usage(msg=>'Could not guess phred offset, please specify manually', exitval => 2) unless $opt_offset;
 
 $V->verbose('Detected FASTQ format, phred-offset '.$opt_offset);
 
@@ -438,13 +445,12 @@ while (my $fq = $fqp->next_seq()){
 	}
 	
 	# slice by lcs
-	my @fq;
-	if($opt_trim){
-		@fq = $fq->slice_seq($fq->qual_window(1));
-	}elsif($opt_slice_lcs){
+	my @fq = ($fq);
+	if($opt_slice_lcs){ # trim lcs
 		@fq = $fq->slice_qual_lcs(1);
-	}else{
-		@fq = ($fq);
+	}
+	if($opt_trim){ # trim window
+		@fq = map{$_->slice_seq($_->qual_window(1))}@fq;
 	}
 	
 	foreach my $fq (@fq){

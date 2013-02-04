@@ -200,6 +200,18 @@ Boolean. Deactivate trimming completely, including leading/trailing indels
 
 our $Trim = 1;
 
+
+=head2 %Freqs2Phreds
+
+=cut
+
+our %Freqs2Phreds;
+@Freqs2Phreds{0..31} = (map{int((($_/50)**(1/2)*50)+0.5)}(0..39));
+@Freqs2Phreds{32..100} = (40)x69;
+
+
+our %Phreds2Freqs = reverse %Freqs2Phreds;
+
 =head1 Class METHODS
 
 =cut
@@ -264,6 +276,36 @@ sub Trim{
 	return $Trim;
 }
 
+
+=head2 Freqs2Phreds
+
+Convert a LIST of frequencies to a LIST of phreds based on precomputed values
+ from 
+
+=cut
+
+sub Freqs2Phreds{
+	my $class = shift;
+	return map{
+		$_ = 100 if $_> 100;
+		$Freqs2Phreds{int($_)};
+	}@_;
+}
+
+
+=head2 Phreds2Freqs
+
+Convert a LIST of Phreds to a LIST of frequencies based on precomputed values.
+
+=cut
+
+sub Phreds2Freqs{
+	my $class = shift;
+	return map{
+		$_ = 40 if $_> 40;
+		$Phreds2Freqs{int($_)};
+	}@_;
+}
 
 
 ##------------------------------------------------------------------------##
@@ -1089,10 +1131,14 @@ sub _add_pre_calc_fq{
 	foreach my $coords (@_){
 		my ($seq) = $self->ref->slice_seq($coords);
 		my @seq = split (//, $seq->seq);
-		my @qual = split (//, $seq->qual);
+		my @freqs = Sam::Seq->Phreds2Freqs($seq->phreds);
+		
+		use Data::Dumper;
 		for(my $i=0; $i<length($seq->seq); $i++){
 			# never add 0, if nothing more matches, a 0 count might be introduced
-			($S[$i+$coords->[0]][$self->{_states}{$seq[$i]}])+=	$self->phred2freq(ord($qual[$i])-$self->{phred_offset});
+			next unless $freqs[$i];
+			die Dumper($self->ref, $coords) unless defined $self->{_states}{$seq[$i]};
+			($S[$i+$coords->[0]][$self->{_states}{$seq[$i]}])+=	$freqs[$i];
 		}
 	}
 	$self->{_state_matrix} = \@S;
@@ -1108,8 +1154,9 @@ sub _consensus{
 	my $self = shift;
 	my %states_rev = reverse %{$self->{_states}}; # works since values are also unique
 	my $seq = '';
-	my $qual = '';
-	my $covs = '';
+#	my $qual = '';
+#	my $covs = '';
+	my @freqs;
 	my $col_c = -1;
 	foreach my $col (@{$self->{_state_matrix}}){
 		$col_c++;
@@ -1117,8 +1164,9 @@ sub _consensus{
 		# uncovered col
 		unless (scalar @$col){
 			$seq.= $self->{ref} ? substr($self->{ref}{seq}, $col_c, 1) : 'n';
-			$qual.=chr(0+$self->{phred_offset});
-			$covs.=chr(0+$self->{phred_offset});
+#			$qual.=chr(0+$self->{phred_offset});
+#			$covs.=chr(0+$self->{phred_offset});
+			push @freqs, 0;
 			next;
 		}
 		
@@ -1153,8 +1201,9 @@ sub _consensus{
 		# check $max_freq, necessary due to long gap exception
 		unless ($max_freq){
 			$seq.= $self->{ref} ? substr($self->{ref}{seq}, $col_c, 1) : 'n';
-			$qual.=chr(0+$self->{phred_offset});
-			$covs.=chr(0+$self->{phred_offset});
+#			$qual.=chr(0+$self->{phred_offset});
+#			$covs.=chr(0+$self->{phred_offset});
+			push @freqs, 0;
 			next;
 		}
 		
@@ -1167,16 +1216,17 @@ sub _consensus{
 		# entropy based quality
 		#$qual.= $self->_phred_Hx($col) x length($con);
 		# coverage based quality
-		$qual.= chr($self->freq2phred($max_freq) + $self->{phred_offset}) x length($con);
-		$covs.= chr($cov + $self->{phred_offset}) x length($con);
+#		$qual.= chr($self->freq2phred($max_freq) + $self->{phred_offset}) x length($con);
+#		$covs.= chr($cov + $self->{phred_offset}) x length($con);
+		push @freqs, ($max_freq) x length($con);
 	}
 
 	$self->{con} = Fastq::Seq->new(
 		'@'.$self->{id},
 		$seq,
 		'+',
-		$qual,
-		cov => $covs,
+		Fastq::Seq->Phreds2Char( [Sam::Seq->Freqs2Phreds(@freqs)] , $self->{phred_offset} ),
+		cov => Fastq::Seq->Phreds2Char([@freqs], $self->{phred_offset}),
 		phred_offset => $self->{phred_offset}
 	);
 	
@@ -1258,6 +1308,10 @@ sub _phred_Hx{
 		+ 10							# phred minimum
 		+ $self->{phred_offset});  		# phred offset
 }
+
+
+
+
 
 =head2 freq2phred
 

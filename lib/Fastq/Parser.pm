@@ -46,7 +46,13 @@ TODO
 
 =over
 
-=item
+=item [BugFix] C<< $fp->sample_seq >> backups and restores buffer.
+
+=item [BugFix] C<< $fp->sample_seq >> did not tell file positiion on correct
+ file handle.
+
+=item [Change] C<< $fp->guess_phred_offset >> automatically sets 
+ Parsers C<< $fp->{phred_offset} >> attribute.
 
 =item [Change] Preference libs in same folder over @INC
 
@@ -145,7 +151,7 @@ sub new{
 	my $self = {
 		fh => \*STDIN,
 		file => undef,
-		phred_offset => 64,
+		phred_offset => undef,
 		mode => '<',
 		_buffer => [],
 		_is_pipe => undef,
@@ -389,9 +395,9 @@ sub sample_seq{
 		
 		my $l;
 		# read lines from buffer
-		for($i=0; $i<$n && $i < (@{$self->{_buffer}}-3)/4; $i++){
+		for($i=0; $i<$n && 	$i < (scalar @{$self->{_buffer}}-3)/4; $i++){
 			push @reads,  Fastq::Seq->new(
-				$self->{_buffer}[($i*4)..($i*4+3)],
+				@{$self->{_buffer}}[($i*4)..($i*4+3)],
 				phred_offset => $self->{phred_offset}
 			);
 		}
@@ -413,7 +419,8 @@ sub sample_seq{
 			$i++;		
 		}
 	}else{
-		my $file_pos = tell();
+		my $buffer = $self->{_buffer}; # backup buffer state to restore after sampling
+		my $file_pos = tell($fh);
 		# can seek on file: sample random reads
 		my $size = -s $fh;
 		$size -= $size/100; # reduce size by 1% to prevent sampling eof
@@ -429,6 +436,7 @@ sub sample_seq{
 		}
 		# restore file handle
 		$self->seek($file_pos);
+		$self->{_buffer} = $buffer; # restore buffer
 	}
 	
 	return @reads;
@@ -496,15 +504,26 @@ sub guess_phred_offset{
 	my $max = $quals[-1];
 	
 	# intersection => undetermined
-	return undef if ord($min) >= 64 && ord($max) <= 33+42;
+	if( ord($min) >= 64 && ord($max) <= 33+42){
+		$self->{phred_offset} = undef;
+		return undef 
 	
 	# 33
-	return 33 if ord($min) >= 33 && ord($max) <= 33+42;
+	}elsif( ord($min) >= 33 && ord($max) <= 33+42 ){
+		$self->phred_offset(33);
+		return 33 
+	
 	# 64
-	return 64 if ord($min) >= 64 && ord($max) <= 64+42;
+	}elsif(	ord($min) >= 64 && ord($max) <= 64+42 ){
+		$self->phred_offset(64);
+		return 64 
 	
 	# unknown
-	return undef;
+	}else{
+		$self->{phred_offset} = undef;
+		return undef;
+	}
+	
 }
 
 =head2 guess_seq_count

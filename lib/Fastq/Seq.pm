@@ -7,7 +7,7 @@ use strict;
 
 use Verbose;
 
-our $VERSION = '0.08';
+our $VERSION = '0.09';
 our ($REVISION) = '$Revision$' =~ /(\d+)/;
 our ($MODIFIED) = '$Date$' =~ /Date: (\S+\s\S+)/;
 
@@ -28,12 +28,20 @@ Class for handling FASTQ sequences.
 
 =head1 CHANGELOG
 
-=head2 0.08
+=head2 0.09
 
 =over
 
 =item [Feature] C<< $fq->phred_transfrom >> to change the phred offset of
  the quality seq to the specified value.
+
+=item [Change] Phred conversion done with C<unpack>, which is much faster.
+
+=back
+
+=head2 0.08
+
+=over
 
 =item [Change] Id and description parsing regexs carry C</o> flag.
 
@@ -136,6 +144,18 @@ our $Qual_low_range = 'ABCDEFGHIJKLMNOPQRSTUVWX';
 #our $Qual_low_min_length = 1;
 our $Qual_low_regex = qr/([$Qual_low_range]+)/o;
 
+our $Qual_window_size = 10;
+
+our $Qual_window_min = 25;
+
+# phred transform 
+my $o33 = join("", map{chr($_+33)}(1..60));
+my $o64 = join("", map{chr($_+64)}(1..60));
+$o33 =~ s/([\\\^\-\[\]\/])/\\$1/g;
+$o64 =~ s/([\\\^\-\[\]\/])/\\$1/g;
+our %Tr;
+$Tr{64} = eval 'sub{ $_[0] =~ tr/'.$o33.'/'.$o64.'/;}';
+$Tr{33} = eval 'sub{ $_[0] =~ tr/'.$o64.'/'.$o33.'/;}';
 
 ##------------------------------------------------------------------------##
 
@@ -250,7 +270,41 @@ sub Qual_low_regex{
 	return $Qual_low_regex;
 }
 
+=head2 Qual_window_min [25]
 
+Get/Set min quality value for quality sliding window.
+
+=cut
+
+sub Qual_window_min{
+	my ($class, $re) = @_;
+	$Qual_window_min = $re if $re;
+	return $Qual_window_min;
+}
+
+=head2 Qual_window_size [10]
+
+Get/Set window size for quality sliding window.
+
+=cut
+
+sub Qual_window_size{
+	my ($class, $re) = @_;
+	$Qual_window_size = $re if $re;
+	return $Qual_window_size;
+}
+
+
+=head2 Phreds2Char
+
+Convert a LIST of phred values to a qual string.
+
+=cut
+
+sub Phreds2Char{
+	my ($class, $p, $po) = @_;
+	return pack("W*", map{$_+=$po}@$p);
+}
 
 
 ##------------------------------------------------------------------------##
@@ -308,10 +362,10 @@ sub new{
 			seq => $_[1],
 			qual_head => $_[2],
 			qual => $_[3],
-			phred_offset => 64,
+			phred_offset => undef,
 			@_[4..$#_]	# overwrite defaults
 		};
-		chomp(%$self);	# make sure all seqs loose there trailing "\n"
+		chomp(@$self{'seq_head','seq','qual_head', 'qual'});	# make sure all seqs loose there trailing "\n"
 	}
 
 	return bless $self, $proto;
@@ -482,11 +536,29 @@ Return the phred values of the quality string accorting to specified offset.
 sub phreds{
 	my $qs = $_[0]->{qual};
 	my $po = $_[0]->{phred_offset};
-	my @phreds;
-	my $i = length $qs;
-	$phreds[$i] = ord(chop($qs)) - $po while $i--;
-	return @phreds;
+	return map{$_-=$po}unpack("W*", $qs);
 }
+
+
+
+=head2 phred_transform
+
+Transform phred 33 to 64 or 64 to 33.
+
+=cut
+
+sub phred_transform{
+	my ($self) = @_;
+	my $po = $self->{phred_offset};
+	unless (defined $po && ($po == 33 || $po == 64)){
+		die "Unknown or unsupported phred offset, cannot transform" 
+	}
+	$po = $po == 33 ? 64 : 33; # switch po 
+	&{$Tr{$po}}($self->{qual});
+	$self->{phred_offset} = $po;
+	return $self;
+}
+
 
 
 =head2 base_content
@@ -499,6 +571,92 @@ sub base_content{
 	__PACKAGE__->Add_base_content_scan($patt) unless exists $Base_content_scans->{$patt};
 	return &{$Base_content_scans->{$patt}}($self->seq)
 }
+
+sub qual_window{
+	my ($self, $sorted_by_occurance) = (@_);
+	# sliding window
+	# each window starts/ends above $min, values below $min are allowed as long
+	# as the mean of the window values is higher than $min.
+	# Cannot create overlapping windows!!
+	# $min: 5
+	# 663663636666363
+	# 66366
+	#   [6636] <- wont show
+	#       63666636
+	# seq starts with high window
+	
+	my @s = $self->phreds;
+	my @re;
+#	my @we;
+#	my @ws;
+	my $wsum = 0;
+	my $wlen = undef;
+	my $wsize = $Qual_window_size;
+	my $wmin = $Qual_window_min * $wsize;
+
+
+	# init first window
+	$wsum += $_ for @s[0..$wsize-1];
+	unless($wsum < $wmin){
+		$re[0][0] = 0;
+		$wlen+=$wsize;
+	}; 
+
+	# init vars
+	my $i=$wsize;
+	my $j=0;
+	
+	# loop
+	for(;$i < @s; $i++){
+		$wsum+=($s[$i]- $s[$j]); # new window sum
+		if($wsum < $wmin){# low
+			if($wlen){# high ends
+				my $x = $i-1;
+				while($s[$x] < $Qual_window_min){ # go back to last pos over min
+					$x--;
+					$wlen--;
+				}
+
+				# make sure, window is still long enough to be accepted
+				unless($wlen < $wsize){ 
+					$re[$#re][1] = $wlen;
+				}else{ # if not, remove start
+					pop @re;
+				}
+				
+				$wlen = 0;
+				
+				## no overlap ##
+				# inti next window w/o overlap
+				$i+=($wsize-1);
+				$j+=($wsize-1);
+				last if $j+$wsize > $#s; # make sure there is still enough sequence left
+				$wsum = $s[$j+1];
+				$wsum += $_ for @s[$j+2..($j+$wsize)];
+			}
+		}else{# high
+			unless($wlen){
+				if($s[$j+1] >= $Qual_window_min){ # high init only on over min pos
+					# high init
+					$re[@re][0] = $j+1;
+					$wlen = $wsize;
+				}
+			}else{# high expand
+				$wlen++
+			}
+		}
+		$j++;
+	}
+	
+	# check final condition
+	unless($wsum < $wmin){
+		$re[$#re][1] = scalar @s;
+	}
+
+	return $sorted_by_occurance ? sort{$b->[1] <=> $a->[1]}@re : @re;	
+
+}
+
 
 
 ##------------------------------------------------------------------------##

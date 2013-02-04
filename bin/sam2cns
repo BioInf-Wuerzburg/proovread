@@ -256,7 +256,12 @@ Sam::Seq->BinSize($cfg{'bin-size'});
 
 
 # qual_lcs is used on cov seq to mask high cov regions, min cov 10
-Fastq::Seq->Qual_lcs_range(10, $opt_cov+20, $opt_qv_offset);  
+
+##########################################
+# TODO: mask hcr based on phreds
+##########################################
+
+Fastq::Seq->Qual_lcs_range(10, 40, $opt_qv_offset);  
 # 80 chars are cutoff at each side to keep overlaps => min length 160, better 200
 Fastq::Seq->Qual_lcs_min_length($opt_hcr_mask_length + (2 * $opt_hcr_sticky_length)); 
 
@@ -270,7 +275,11 @@ if($opt_ref_pat){
 	$v->exit("Reference file not found ($opt_ref_pat)") unless $opt_ref_file;
 	# init fastq/fasta parser
 	$rpr = Fastq::Parser->new(file => $opt_ref_file)->check_format;
-	$rpr = Fasta::Parser->new(file => $opt_ref_file)->check_format unless $rpr;
+	if($rpr){
+		$rpr->guess_phred_offset();
+	}else{
+		$rpr = Fasta::Parser->new(file => $opt_ref_file)->check_format;
+	}
 	$v->exit("Unknown format of reference file: $opt_ref_file") unless $rpr;
 }
 
@@ -293,8 +302,7 @@ open($fmh, $mode, $fm_out) || $v->exit("Can't open output read file: '$fm_out'")
 my %PB;
 
 # ref
-if($rpr){
-	# read fasta
+if($rpr){ # read fasta to get ref id, length and seq
 	$rpr->seek($opt_ref_offset) if $opt_ref_offset;
 	my $ref_c = 0;
 	while(my $ref = $rpr->next_seq()){
@@ -305,18 +313,48 @@ if($rpr){
 		);
 		last if ++$ref_c >= $opt_max_reads;
 	}
+}else{# read the sam header to get ref ids and length
+	while(my %h = $sp->next_header_line('SQ')){
+		$PB{$h{'SN'}} = Sam::Seq->new(
+			id => $h{SN}, 
+			len => $h{LN},
+		);
+	}
 }
 
+
+
 # read sam
+my @PB_IDS;
+
 $sp->seek($opt_sam_offset) if $opt_sam_offset;
-while(my $aln = $sp->next_aln()){
-	# try to add aln, if sufficient score, add to temporary sam file
-	last unless exists $PB{$aln->rname};
-	$PB{$aln->rname}->add_aln($aln);
+if($rpr){
+	while(my $aln = $sp->next_aln()){
+		# try to add aln, if sufficient score, add to temporary sam file
+		last unless exists $PB{$aln->rname};
+		$PB{$aln->rname}->add_aln($aln);
+	}
+}else{
+	my $ref_seen = 0; # since we read the entire header to %PB, we need to count ref seqs
+	my $ref_id = '';
+	while(my $aln = $sp->next_aln()){
+		# try to add aln, if sufficient score, add to temporary sam file
+		unless ($ref_id eq $aln->rname){
+			$ref_id = $aln->rname;
+			push @PB_IDS, $ref_id;
+			$ref_seen++;
+			last if $ref_seen > $opt_max_reads;
+		}
+		$PB{$aln->rname}->add_aln($aln);
+	}
 }
 
 # calculate consensus
-foreach my $pb_id(sort byfile keys %PB){
+unless(@PB_IDS){
+	@PB_IDS = sort byfile keys %PB 
+}
+
+foreach my $pb_id(@PB_IDS){
 	my @hcrs = ();
 	
 	if($rpr && ! $opt_ignore_hcr){
@@ -334,7 +372,7 @@ foreach my $pb_id(sort byfile keys %PB){
 	$PB{$pb_id}{_state_matrix} = {}; 
 	
 	# use cov seq instead of qual seq in Fastq::Seq, mask based on cov
-	$con_mask->{qual} = $con_mask->{cov};
+	# $con_mask->{qual} = $con_mask->{cov};
 
 	if($opt_hcr_mask_length){
 		# compute high coverage regions 
