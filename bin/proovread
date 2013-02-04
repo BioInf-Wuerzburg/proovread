@@ -77,6 +77,9 @@ Correct single molecule sequencing reads by iterative mapping of high
 
 =over
 
+=item [BugFix] --ignore-sr-length did not work and ccs expected 
+ length was increased to 1000
+
 =item [Feature] FastqFilter.pl default settings from config.
 
 =item [Feature] FastqFilter.pl is automatically run on results to produce
@@ -504,9 +507,9 @@ foreach(@$opt_sr_file){
 		# length
 		($sr_length, $sr_length_dev) = $fp->guess_seq_length;
 		$V->verbose(sprintf("Estimated short read length: %d +-%d", $sr_length, $sr_length_dev ));
-		if($sr_length > 700){
+		if(!$opt_ignore_sr_length && $sr_length > 1000){
 			$V->exit(
-				"Estimated short reads length > 700\n"
+				"Estimated short reads length > 1000\n"
 				."Are you sure you specified the correct data? "
 				."To run the pipeline on this data, which by design is not really suited, "
 				."you need to specify --ignore-sr-length"
@@ -542,9 +545,9 @@ foreach(@$opt_sr_file){
 		# length		
 		($sr_length, $sr_length_dev) = $fp->guess_seq_length;
 		$V->verbose(sprintf("Estimating short read length: %d +-%d", $sr_length, $sr_length_dev));
-		if($sr_length > 700){
+		if(!$opt_ignore_sr_length && $sr_length > 1000){
 			$V->exit(
-				"Estimated short reads length > 700\n"
+				"Estimated short reads length > 1000\n"
 				."Are you sure you specified the correct data? "
 				."To run the pipeline on this data, which by design is not really suited, "
 				."you need to specify --ignore-sr-length"
