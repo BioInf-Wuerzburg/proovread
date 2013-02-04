@@ -67,6 +67,8 @@ Correct single molecule sequencing reads by iterative mapping of high
 
 =over
 
+=item [Feature] FastqFilter.pl default settings from config.
+
 =item [Feature] FastqFilter.pl is automatically run on results to produce
  a trimmed output.
 
