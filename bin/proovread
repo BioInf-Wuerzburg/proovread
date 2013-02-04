@@ -43,7 +43,7 @@ use threads;
 use Thread::Queue;
 use Time::HiRes qw(usleep);
 
-our $VERSION = '0.81';
+our $VERSION = '0.90';
 our ($REVISION) = '$Revision$' =~ /(\d+)/;
 our ($MODIFIED) = '$Date$' =~ /Date: (\S+\s\S+)/;
 
@@ -62,6 +62,16 @@ Correct single molecule sequencing reads by iterative mapping of high
 =cut
 
 =head1 CHANGELOG
+
+=head2 0.90
+
+=over
+
+
+
+
+=back
+
 
 =head2 0.81
 
