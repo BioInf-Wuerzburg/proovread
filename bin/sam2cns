@@ -30,7 +30,7 @@ use Fasta::Seq;
 use Fastq::Parser;
 use Fastq::Seq 0.08;
 
-our $VERSION  = '0.03';
+our $VERSION  = '0.04';
 our ($REVISION) = '$Revision$' =~ /(\d+)/;
 our ($MODIFIED) = '$Date$' =~ /Date: (\S+\s\S+)/;
 
@@ -52,6 +52,17 @@ Compute consensus sequences based on SAM file.
 =cut
 
 =head1 CHANGELOG
+
+=head2 0.04
+
+=over
+
+=item [Feature] prevent read start/end masking within C<< --min-lcr-length >>
+
+=item [Feature] C<< --min-lcr-length >> controls the minimum number of 
+ unmasked nts between hcrs. 
+
+=back
 
 =head2 0.03
 
@@ -131,7 +142,6 @@ Config file.
 
 $opt{'cfg=s'} = \$cfg;
 
-
 =item --prefix=<STRING>
 
 Prefix for output files.
@@ -207,7 +217,6 @@ Boolean. Do not parse and use HCRs from reference file in consensus calls.
 
 $opt{'ignore-hcr!'} = \(my $opt_ignore_hcr);
 
-=back
 
 =item [--append] [OFF]
 
@@ -217,9 +226,24 @@ Append output if output file already exists
 
 $opt{'append!'} = \(my $opt_append);
 
+=item [--min-lcr-length=<INT>] [0]
+
+Minimum length of unmasked nts between hcrs
+
+=cut
+
+$opt{'--min-lcr-length=i'} = \(my $lcr_min_length);
+
+=item [--min-hcr-length=<INT>] [0]
+
+Minimum length of masked nts in hcrs
+
+=cut
+
+$opt{'--min-hcr-length=i'} = \(my $opt_hcr_mask_length = $cfg{'hcr-mask-length'});
+
+
 =back
-
-
 
 =cut
 
@@ -246,8 +270,11 @@ my $sp = Sam::Parser->new(
 	file => $opt_sam_file,
 );
 
-my $opt_hcr_mask_length = $cfg{'hcr-mask-length'};
-my $opt_hcr_sticky_length = $cfg{'hcr-sticky-length'};
+my $opt_hcr_sticky_length = 0;
+if($opt_hcr_mask_length){
+	$opt_hcr_sticky_length = $cfg{'hcr-sticky-length'};
+	$v->exit('--hcr-mask-length needs to be at least twice as great as hcr-sticky-length') if ($opt_hcr_sticky_length*2 >= $opt_hcr_mask_length);
+}
 
 Sam::Seq->Trim($cfg{'sr-trim'});
 Sam::Seq->InDelTaboo($cfg{'sr-indel-taboo'});
@@ -300,6 +327,8 @@ open($fmh, $mode, $fm_out) || $v->exit("Can't open output read file: '$fm_out'")
 
 
 my %PB;
+
+
 
 # ref
 if($rpr){ # read fasta to get ref id, length and seq
@@ -385,7 +414,87 @@ foreach my $pb_id(@PB_IDS){
 			$con->{seq_head}.= ' '.join(" ", @hcrs_string);
 			# mask hcrs minus overlap ends
 			# NOTE: this actually changes the values @hcrs!
-			$con_mask->mask_seq(map{$_->[0]+=$opt_hcr_sticky_length; $_->[1]-=$opt_hcr_sticky_length; $_}@hcrs);
+			
+			# add sticky ends
+			foreach(@hcrs){
+				$_->[0]+=$opt_hcr_sticky_length; 
+				$_->[1]-=($opt_hcr_sticky_length * 2);
+			}			
+			
+			# unmask start
+			if( (my $lcr_start_missing = $lcr_min_length - $hcrs[0][0]) > 0 ){
+				#$v->hline;
+				#$v->verbose('first hcr to close to start '.$lcr_start_missing);
+				if( ($hcrs[0][1] -= $lcr_start_missing) < $opt_hcr_mask_length){
+					#$v->verbose('first hcr to short: '.$hcrs[0][1]);
+					shift @hcrs; # remove first hcr if it becomes to short after trimming
+				}else{
+					#$v->verbose('first hcr trimmed');
+					$hcrs[0][0] += $lcr_start_missing;
+				}
+			} 
+			
+			# unmask end
+			if( scalar @hcrs  && (my $lcr_end_missing = $lcr_min_length - (length($con_mask->seq) - ($hcrs[$#hcrs][0] + $hcrs[$#hcrs][1]))) > 0 ){
+				#$v->verbose('last hcr to close to end '.$lcr_end_missing);
+				if( ($hcrs[$#hcrs][1] -= $lcr_end_missing) < $opt_hcr_mask_length){
+					#$v->verbose('last hcr to short');
+					pop @hcrs; # remove first hcr if it becomes to short after trimming
+				}else{
+					#$v->verbose('last hcr trimmed');
+				}
+			} 
+			
+			# make sure unmask regions are large enough to map more reads
+			my @remove_hcrs;
+			if(@hcrs > 1){
+				for($i=1; $i < @hcrs; $i++){
+					my $start_b = $hcrs[$i][0];
+					my $end_a = $hcrs[$i-1][0] + $hcrs[$i-1][1];
+					# lcr to short
+					if( (my $lcr_min_missing = $lcr_min_length - ($start_b - $end_a)) > 0 ){
+						#$v->verbose('lcr missing '.$lcr_min_missing.' between h'.($i-1).' and h'.($i));
+						
+						#  what if: move forward start_b by half the missing nts	
+						my $el = $hcrs[$i][1] - $lcr_min_missing/2;
+						if($el < $opt_hcr_mask_length){
+							#$v->verbose('h'.($i).' to short: '."$el < $opt_hcr_mask_length");	
+							push @remove_hcrs, $i;
+							$i++; # skip one
+							next; # dont change previous hcr
+						}
+						
+						# what if: move back end_e by half the missing nts
+						my $sl = $hcrs[$i-1][1] - $lcr_min_missing/2;
+						if($sl < $opt_hcr_mask_length){
+							#$v->verbose('h'.($i-1).' to short: '."$sl < $opt_hcr_mask_length");	
+							push @remove_hcrs, $i-1;
+							next; # dont change next hcr
+						}
+
+						# move forward start_b by half the missing nts
+						$hcrs[$i][0] += $lcr_min_missing/2;
+						$hcrs[$i][1] -= $lcr_min_missing/2;
+						
+						# move back end_e by half the missing nts
+						$hcrs[$i-1][1] -= $lcr_min_missing/2;
+						#$v->verbose('hcrs trimmed');	
+					}
+				}
+			}
+			
+			# remove hcrs which became to small after masking
+			# reverse or else we mess up 
+			# incex if stuff at the beginning gets removed
+			foreach (reverse @remove_hcrs){ 
+				#$v->verbose('removing h'.$_);	
+				splice @hcrs, $_, 1;
+			}
+
+			#$v->hline;
+
+			
+			$con_mask->mask_seq(@hcrs) if @hcrs;
 		}
 	
 		# write (masked) FASTA for next pass

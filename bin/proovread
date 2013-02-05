@@ -20,8 +20,6 @@ use File::Path qw(make_path remove_tree);
 use File::Copy;
 use FindBin qw($RealBin);
 
-use Data::Dumper;
-
 use lib "$RealBin/../lib/";
 
 use Verbose;
@@ -43,7 +41,9 @@ use threads;
 use Thread::Queue;
 use Time::HiRes qw(usleep);
 
-our $VERSION = '0.90';
+use Data::Dumper;
+
+our $VERSION = '0.82';
 our ($REVISION) = '$Revision$' =~ /(\d+)/;
 our ($MODIFIED) = '$Date$' =~ /Date: (\S+\s\S+)/;
 
@@ -63,13 +63,30 @@ Correct single molecule sequencing reads by iterative mapping of high
 
 =head1 CHANGELOG
 
-=head2 0.90
+=head2 0.82
 
 =over
 
+=item [BugFix] C<$pg_step> is used in modulo, cannot be 0.
 
+=item [Change] sam2cns-0.04 C<--lcr-min-length> calculated from mean short
+ read length
 
+=item [Feature] verbose print cfg and commandline parameter
 
+=item [BugFix] Incorrect parameter for sam2cns, fix by new method 
+ C<param_join()>  
+
+=item [BugFix] --ignore-sr-length did not work and ccs expected 
+ length was increased to 1000
+
+=item [Feature] external-sam mode
+
+=item [Feature] FastqFilter.pl default settings from config.
+
+=item [Feature] FastqFilter.pl is automatically run on results to produce
+ a trimmed output.
+ 
 =back
 
 
@@ -77,13 +94,6 @@ Correct single molecule sequencing reads by iterative mapping of high
 
 =over
 
-=item [BugFix] --ignore-sr-length did not work and ccs expected 
- length was increased to 1000
-
-=item [Feature] FastqFilter.pl default settings from config.
-
-=item [Feature] FastqFilter.pl is automatically run on results to produce
- a trimmed output.
 
 =item [Change] Cleaned up verbose messages. 
 
@@ -577,15 +587,28 @@ foreach(@$opt_sr_file){
 
 $sr_qv_offset_total = $cfg{'sr-qv-offset'} unless defined $sr_qv_offset_total;
 
+my $mean_sr_length;
+$mean_sr_length += $_ for @sr_length;
+$mean_sr_length /= @sr_length;
+
+my $mean_sr_dev;
+$mean_sr_dev += $_ for @sr_length_dev;
+$mean_sr_dev /= @sr_length_dev;
+
+my $min_lcr_length = $mean_sr_length + $mean_sr_dev;
+$min_lcr_length += $min_lcr_length * 0.15; # add another 15 percent
+$min_lcr_length = int($min_lcr_length + 0.5);
 
 ##------------------------------------------------------------------------##
 # print parameter
 
-#my $params = "Parameter:";
-#foreach(sort keys %opt){
-#	$params.= sprintf("\n\t%s => %s", $_, defined(${$opt{$_}}) ? ${$opt{$_}} : 'undef' );
-#}
-#$V->verbose($params);
+$V->nline;
+$VS->verbose("Custom config parameter\n"
+	. (Dumper(\%cfg) =~ s/^.*\n//r) =~ s/\n.*$//r) ;
+
+$V->nline;
+$VS->verbose("Command line parameter\n"
+	. (Dumper(\%opt) =~ s/^.*\n//r) =~ s/\n.*$//r) ;
 
 
 ##------------------------------------------------------------------------##
@@ -614,9 +637,6 @@ if($opt_sam_file){
 	@TASKS = @{$cfg{'mode-tasks'}{$opt_mode}};
 }else{
 	unless($opt_mode){
-		my $mean_sr_length;
-		$mean_sr_length += $_ for @sr_length;
-		$mean_sr_length /= @sr_length;
 		if($mean_sr_length > 200){
 			$opt_mode = 'pacbio-ccs';
 			@TASKS = @{$cfg{'mode-tasks'}{$opt_mode}};
@@ -891,7 +911,7 @@ sub run_shrimp{
 	
 	# init input stream parser progess bar	
 	my $pg_rsp = Verbose::ProgressBar->new(size => $sr_count_total);
-	my $pg_step = int(($sr_count_total/100)+0.5);
+	my $pg_step = int(($sr_count_total/100)+0.5) || 1; # never be zero
 	
 	# init shrimp handler
 	my $shrimp = Shrimp->new( 
@@ -997,6 +1017,9 @@ sub create_sorted_sam{
 	# header section
 	printf OUT ("\@HD\tVN:%s\tSO:%s\n", "unknown", "unknown");
 	foreach my $pb_id (@LR_IDS){
+		unless (defined $LR->{$pb_id}){
+			die $pb_id;
+		}
 		printf OUT ("\@SQ\tSN:%s\tLN:%s\n", $pb_id, $LR->{$pb_id}->len);
 	}
 	
@@ -1109,20 +1132,21 @@ sub correct_sr_mt{
 	# pbc_correct.pl 
 	my %pbc_default = (
 		'--sam' 		=> task_file_name(".sam"),
-		'--sam-offset' 	=> undef,
 		'--max-reads'	=> $cfg{'chunk-size'},
-		'--prefix'		=> undef,
 		'--coverage'	=> $opt_cov,
 		'--append'		=> 1,
-		$TASKS[$TC] eq 'shrimp-finish' # ignore hcrs on finish
-			? ('--ignore-hcr' => 1)
-			: (),
+		$opt_mode eq 'external-sam' # no ref
+			? ()
+			: ('--ref' 		=> $TC == 1
+						 	 ? task_file_name(".f[aq]", task => $TASKS[$TC-1] )
+						 	 : task_file_name(".fq", task => $TASKS[$TC-1] )),
+		$TASKS[$TC] eq 'shrimp-iter-1' # calculate hcrs on first iter for second iter
+			? ('--min-lcr-length' => $min_lcr_length) # params from config
+			: ('--min-hcr-length' => 0),
 		$cfg
 		 	? ('--cfg'	=> $cfg) 
 		 	: (),
 	);
-	
-	my @pbc_keys = sort keys %pbc_default;
 	
 	my $pbc_cmds = '';
 	
@@ -1131,23 +1155,12 @@ sub correct_sr_mt{
 		my %pbc_config = (
 			%pbc_default,
 			'--prefix'		=> task_file_name(".".$ci),
-			$TASKS[$TC] eq 'external-sam' # ignore hcrs on finish
-				? ()
-				: ('--ref' 		=> $TC == 1
-							 	 ? task_file_name(".f[aq]", task => $TASKS[$TC-1] )
-							 	 : task_file_name(".fq", task => $TASKS[$TC-1] )),
 			'--sam-offset' => $sam_chunk_offsets->[$ci], 
 			'--ref-offset' => $lr_chunk_offsets->[$ci],
 		);
 		
 		# params
-		my @pbc_cmd;
-		foreach my $k (@pbc_keys){
-			my $v = $pbc_config{$k};
-			# flag only is undef or '', NOT '0' !!!
-			push @pbc_cmd, (defined($v) && $v ne '') ? ($k, $v) : $k;
-		}
-		$pbc_cmds .= join(" ", @pbc_cmd)."\n";
+		$pbc_cmds.= param_join(\%pbc_config)."\n";
 	}
 	
 	# write cmd file
@@ -1281,17 +1294,8 @@ Run FastqFilter.pl on raw output
 =cut
 
 sub fastq_filter{
-	# params
-	my @params;
-	my $params;
-	foreach my $k (keys %{$cfg{'fastq-filter'}}){
-		my $v = $cfg{'fastq-filter'}{$k};
-		# flag only is '', NOT '0' !!!
-		next unless defined ($v);
-		push @params, ($v ne '') ? ($k, $v) : $k;
-	}
-	$params .= join(" ", @params);
 
+	my $params = param_join(\%{$cfg{'fastq-filter'}});
 
 	my $cmd_fa_fil = "$RealBin/FastqFilter.pl $params --in $opt_fq_raw --fasta --out $opt_fa_fil\n";
 	my $cmd_fq_fil = "$RealBin/FastqFilter.pl $params --in $opt_fq_raw --out $opt_fq_fil\n";
@@ -1345,8 +1349,35 @@ sub is_empty_dir {
 }
 
 
+=head2 param_join (HASHREF, JOIN=STRING)
 
+Joins a HASHREF to a parameter string with JOIN [" "], ignoring keys with 
+ undef values and creating flag only values for ''.
 
+  param_join(HASHREF); # join with space
+  param_join(HASHREF, join => "\n") # join with newline
+
+=cut
+
+sub param_join{
+	my %params = %{shift @_};
+	my $p = {
+		'join' => " ",
+		@_
+	};
+	
+	# params
+	my @params;
+	my $params;
+	foreach my $k (sort keys %params){
+		my $v = $params{$k};
+		# flag only is '', NOT '0' !!!
+		next unless defined ($v);
+		push @params, ($v ne '') ? ($k, $v) : $k;
+	}
+	$params .= join($p->{'join'}, @params);
+	return $params;
+}
 
 
 ################
