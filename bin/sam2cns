@@ -281,13 +281,6 @@ Sam::Seq->InDelTaboo($cfg{'sr-indel-taboo'});
 Sam::Seq->MaxCoverage($opt_cov);
 Sam::Seq->BinSize($cfg{'bin-size'});
 
-
-# qual_lcs is used on cov seq to mask high cov regions, min cov 10
-
-##########################################
-# TODO: mask hcr based on phreds
-##########################################
-
 Fastq::Seq->Qual_lcs_range(10, 40, $opt_qv_offset);  
 # 80 chars are cutoff at each side to keep overlaps => min length 160, better 200
 Fastq::Seq->Qual_lcs_min_length($opt_hcr_mask_length + (2 * $opt_hcr_sticky_length)); 
@@ -400,9 +393,6 @@ foreach my $pb_id(@PB_IDS){
 	# undef state matrix to make memory availabe again
 	$PB{$pb_id}{_state_matrix} = {}; 
 	
-	# use cov seq instead of qual seq in Fastq::Seq, mask based on cov
-	# $con_mask->{qual} = $con_mask->{cov};
-
 	if($opt_hcr_mask_length){
 		# compute high coverage regions 
 		my @hcrs = ($con_mask->qual_lcs());
