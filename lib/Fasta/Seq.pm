@@ -11,7 +11,7 @@ use lib '../';
 use Verbose;
 
 
-our $VERSION = '0.05';
+our $VERSION = '0.06';
 our ($REVISION) = '$Revision$' =~ /(\d+)/;
 our ($MODIFIED) = '$Date$' =~ /Date: (\S+\s\S+)/;
 
@@ -32,6 +32,16 @@ Class for handling FASTA sequences.
 =cut
 
 =head1 CHANGELOG
+
+=head2 0.06
+
+=over
+
+=item [Feature] Added class methods C<< Fastq::Seq->Reverse_complement >> 
+ and C<< Fastq::Seq->Complement >>, as well as object methods 
+ C<< $fa->reverse_complement >> and C<< $fa->complement >>.
+
+=back
 
 =head2 0.05
 
@@ -122,7 +132,21 @@ sub Add_base_content_scan{
 	$Base_content_scans->{$patt} = eval 'sub{ return $_[0] =~ tr/'.$patt.'//; }';
 }
 
+=head2 Complement
 
+=cut
+
+sub Complement{	
+	$_[1] =~ tr/ATGCatgc/TACGtacg/r 
+} 
+
+=head2 Reverse_complement
+
+=cut
+
+sub Reverse_complement{
+	scalar reverse $_[1] =~ tr/ATGCatgc/TACGtacg/r;
+}
 
 ##------------------------------------------------------------------------##
 
@@ -241,7 +265,27 @@ sub base_content{
 	return &{$Base_content_scans->{$patt}}($self->seq)
 }
 
+=head2 reverse_complement
 
+Reverse complement the sequence.
+
+=cut
+
+sub reverse_complement{
+	my $self = shift;
+	$self->{seq} = ref($self)->Reverse_complement($self->{seq});
+}
+
+=head2 reverse_complement
+
+Complement the sequence.
+
+=cut
+
+sub complement{
+	my $self = shift;
+	$self->{seq} = ref($self)->Complement($self->{seq});
+}
 
 
 ##------------------------------------------------------------------------##

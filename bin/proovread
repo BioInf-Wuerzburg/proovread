@@ -43,7 +43,7 @@ use Time::HiRes qw(usleep);
 
 use Data::Dumper;
 
-our $VERSION = '0.82';
+our $VERSION = '0.83';
 our ($REVISION) = '$Revision$' =~ /(\d+)/;
 our ($MODIFIED) = '$Date$' =~ /Date: (\S+\s\S+)/;
 
@@ -62,6 +62,17 @@ Correct single molecule sequencing reads by iterative mapping of high
 =cut
 
 =head1 CHANGELOG
+
+=head2 0.83
+
+=over
+
+=item [Feature] Chimera detection.
+
+=item [BugFix] Correct usage of multiple short read files for iterations
+ as well as finishing step.
+
+=back
 
 =head2 0.82
 
@@ -1143,6 +1154,9 @@ sub correct_sr_mt{
 		$TASKS[$TC] eq 'shrimp-iter-1' # calculate hcrs on first iter for second iter
 			? ('--min-lcr-length' => $min_lcr_length) # params from config
 			: ('--min-hcr-length' => 0),
+		$TASKS[$TC] eq 'shrimp-finish' # calculate hcrs on first iter for second iter
+			? ('--ignore-hcr' => 1, $cfg{'detect-chimera'} ? ('--detect-chimera' => 1) : ()) # params from config
+			: (),
 		$cfg
 		 	? ('--cfg'	=> $cfg) 
 		 	: (),
@@ -1202,13 +1216,17 @@ sub correct_sr_mt{
 	my $fa_glob = task_file_name(".[0-9]*.fa");
 	my $fm_file = task_file_name(".fm");
 	my $fm_glob = task_file_name(".[0-9]*.fm");
+	my $fc_file = task_file_name(".fc");
+	my $fc_glob = task_file_name(".[0-9]*.fc");
 	
 	my @fq_glob = sort byfile glob $fq_glob;
 	my @fa_glob = sort byfile glob $fa_glob;
 	my @fm_glob = sort byfile glob $fm_glob;
+	my @fc_glob = sort byfile glob $fc_glob;
 	my $fq_glob_sorted = join(" ", @fq_glob);
 	my $fa_glob_sorted = join(" ", @fa_glob);
 	my $fm_glob_sorted = join(" ", @fm_glob);
+	my $fc_glob_sorted = join(" ", @fc_glob);
 	
 	# create offset idx for reference
 	my @ref_idxs = (0);
@@ -1225,10 +1243,12 @@ sub correct_sr_mt{
 	qx(cat $fq_glob_sorted > $fq_file);
 	qx(cat $fa_glob_sorted > $fa_file);
 	qx(cat $fm_glob_sorted > $fm_file);
+	qx(cat $fc_glob_sorted > $fc_file);
 	
 	unlink @fq_glob unless $opt_keep > 1;
 	unlink @fa_glob unless $opt_keep > 1;
 	unlink @fm_glob unless $opt_keep > 1;
+	unlink @fc_glob unless $opt_keep > 1;
 	
 	return \@ref_idxs;
 }

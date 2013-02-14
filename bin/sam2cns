@@ -215,8 +215,15 @@ Boolean. Do not parse and use HCRs from reference file in consensus calls.
 
 =cut
 
-$opt{'ignore-hcr!'} = \(my $opt_ignore_hcr);
+$opt{'ignore-hcr'} = \(my $opt_ignore_hcr);
 
+=item [--[no]detect-chimera] [OFF]
+
+Boolean. Dectect, tag, and if possible resolve chimeric sequences.
+
+=cut
+
+$opt{'detect-chimera'} = \(my $opt_detect_chimera);
 
 =item [--append] [OFF]
 
@@ -307,6 +314,7 @@ if($opt_ref_pat){
 my $fq_out = $opt_pre.'.fq';
 my $fa_out = $opt_pre.'.fa';
 my $fm_out = $opt_pre.'.fm';
+my $fc_out = $opt_pre.'.fc';
 
 my $mode = $opt_append ? ">>" : ">";
 
@@ -316,6 +324,8 @@ my $fah;
 open($fah, $mode, $fa_out) || $v->exit("Can't open output read file: '$fa_out'");
 my $fmh;
 open($fmh, $mode, $fm_out) || $v->exit("Can't open output read file: '$fm_out'");
+my $fch;
+open($fch, $mode, $fc_out) || $v->exit("Can't open output read file: '$fc_out'");
 
 
 
@@ -388,12 +398,13 @@ foreach my $pb_id(@PB_IDS){
 	}
 	
 	my $con = $PB{$pb_id}->consensus(@hcrs);
-	# clone
-	my $con_mask = $con->new;
+	
 	# undef state matrix to make memory availabe again
 	$PB{$pb_id}{_state_matrix} = {}; 
-	
+
 	if($opt_hcr_mask_length){
+		# clone
+		my $con_mask = $con->new;
 		# compute high coverage regions 
 		my @hcrs = ($con_mask->qual_lcs());
 		if(@hcrs){
@@ -483,12 +494,29 @@ foreach my $pb_id(@PB_IDS){
 
 			#$v->hline;
 
-			
 			$con_mask->mask_seq(@hcrs) if @hcrs;
 		}
 	
 		# write (masked) FASTA for next pass
 		printf $fmh (">%s\n%s\n", substr($con->seq_head, 1), $con_mask->seq);
+	}
+
+	if($opt_detect_chimera){
+		my ($pos, $dev) = $PB{$pb_id}->check_chimera();
+		if($pos && $dev < 20){
+			# most likely a chimera with distinct breakpoint
+			# tag description
+			$con->{seq_head}.= " CHIMERA:$pos+-$dev";
+			# adjust qual string at breakpoint position
+			substr($con->{qual}, $pos-10, 20, chr($opt_qv_offset)x20);
+		}elsif(defined $pos){
+			# TODO: unresolved chimera possibles
+			# possible chimera, but not resolvable
+			$con->{seq_head}.= " CHIMERA:unresolved";
+			# write current fastq
+			print $fch $con->string;
+			next;
+		}
 	}
 	
 	# write current fastq

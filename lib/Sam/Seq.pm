@@ -5,7 +5,6 @@ use strict;
 
 # $Id$
 
-use 5.014;  # each on HASHREF
 use List::Util;
 
 # preference libs in same folder over @INC
@@ -14,13 +13,13 @@ use lib '../';
 use Verbose;
 
 use Sam::Parser;
-use Sam::Alignment;
+use Sam::Alignment ':flags';
 
 use Fastq::Seq;
 use Fasta::Seq;
 
 
-our $VERSION = '0.08';
+our $VERSION = '0.09';
 our ($REVISION) = '$Revision$' =~ /(\d+)/;
 our ($MODIFIED) = '$Date$' =~ /Date: (\S+\s\S+)/;
 
@@ -42,6 +41,18 @@ Class for handling sam reference sequences and its aligned reads.
 =cut
 
 =head1 CHANGELOG
+
+=head2 0.09
+
+=over
+
+=item [Feature] Chimera detection
+
+=item [Change] Replaced C<each> and C<keys> statements on reference
+ values, which are considered experimental features and would 
+ require Perl 5.014. Also removed C<use 5.014>. 
+
+=back
 
 =head2 0.08
 
@@ -574,8 +585,70 @@ sub coverage{
 	return @covs;
 }
 
+=DEPRECATED freq2phred
+#=head2 freq2phred
+#
+#Uses square root of the coverage probability of the most prominent
+# state to compute phred like score,ranging from 0 to 40.
+#
+#  p(cov)  phred   Base call accuracy
+#  0.0      0.00    0.00 %
+#  0.1     12.65   94.57 %
+#  0.2     17.88   98.37 %
+#  0.4     25.29   99.70 %
+#  0.6     30.98   99.92 %
+#  0.8     35.77   99.97 %
+#  1.0     40.00   99.99 %
+#
+#=cut
+#
+#sub freq2phred{
+#	my ($self, $freq) = @_;
+#	return 0  unless $freq;
+#	# probability of state
+#	my $p = $freq/$self->{max_coverage};
+#	$p = 1 if $p > 1;
+#	return int((sqrt($p) * 40) + .5); # phred
+#}
+#
+#=head2 phred2freq
+#
+#Takes phred ranging from 0 to 40 and returns probable frequency of
+# the state, used for phred calculation.
+#
+#=cut
+#
+#sub phred2freq{
+#	my ($self, $phred) = @_;
+#	return 0 unless $phred;
+#	# phred = sqrt($p) * 40 => (phred /40)**29 = $p 
+#	my $p = ($phred/40)**2;
+#	return int(($p * $self->{max_coverage}) + 0.5);
+#}
+#
+#
+#=head2 char2phred
+#
+#
+#=cut
+#
+#sub char2phred{
+#	
+#}
+#
+#=head2 phred2char
+#
+#
+#
+#=cut
+#
+#sub phred2char{
+#	my ($self, $phred) = @_;
+#	return chr($phred+$self->{phred_offset});
+#}
+=cut
 
-# DEPRECATED
+=DEPRECATED approx_coverage
 #=head2 approx_coverage
 #
 #Calculate and returns a LIST of coverage values, one value every $BinSize
@@ -660,6 +733,64 @@ sub coverage{
 #	print "\n";
 #	return @hcr;
 #}
+=cut
+
+=head2 chimera
+
+Simple chimera detection. Searches for two hits of identical 
+ reads in opposite orientation on the same reference sequences. Calculates
+ a breakpoint for the chimera folding based on the distance between 
+ multiple such twice mapping reads and returns the exstimated position
+ of this breakpoint and the stddev from this point, in case enough evidence 
+ has been found ($MaxCoverage/4 twice mapping reads) or undef otherwise.
+ 
+           |
+  0--->        10<---
+     3<---   8--->
+
+
+=cut
+
+sub check_chimera{
+	my $self = shift;
+	my @alns = $self->alns();
+	
+	my %alns_by_id;
+	my @breakpoints;
+	my $bp_sum;
+	
+	# 
+	foreach my $aln (@alns){
+		push @{$alns_by_id{$aln->qname}}, $aln;
+	}
+	
+	while(my ($k, $v) = each %alns_by_id){
+		# two hits
+		# three hits is strange...
+		unless (@$v == 2){
+			delete $alns_by_id{$k}; 
+			next;		
+		}; 
+
+		# opposite direction
+		my ($aln1, $aln2) = sort{$a->pos <=> $b->pos}@$v; # sort alns by pos
+		unless ($aln1->is(REVERSE_COMPLEMENT) xor $aln2->is(REVERSE_COMPLEMENT)){
+			delete $alns_by_id{$k} 
+		}
+		my $bp = $aln1->pos + (($aln2->pos - $aln1->pos +length($aln1->seq))/2); 
+		push @breakpoints, $bp;
+		$bp_sum+=$bp;
+	}
+	
+	return undef unless @breakpoints > $MaxCoverage/4;
+
+	print Dumper(\@breakpoints);
+	
+	my $bp_mean = $bp_sum/@breakpoints;
+	my $bp_dev = _stddev(\@breakpoints, $bp_mean);
+	# round mean
+	return (int($bp_mean + 0.5), int($bp_dev + 0.5)); 
+}
 
 
 ##------------------------------------------------------------------------##
@@ -739,12 +870,12 @@ sub next_aln{
 	my $aln;
 	while(1){
 		if($self->{sam}){
-			my $pos = (each $self->{_alns})[1];
+			my $pos = (each %{$self->{_alns}})[1];
 			return undef unless defined $pos;
 			$aln = $self->{sam}->aln_by_pos($pos);	#
 			
 		}else{
-			$aln = (each $self->{_alns})[1];
+			$aln = (each %{$self->{_alns}})[1];
 		}
 		return undef unless defined($aln);
 		last if &{$self->{_is}}($aln);
@@ -771,7 +902,7 @@ Returns number of Sam::Alignments of the Sam::Seq in scalar context, a list
 
 sub alns{
 	my ($self, $sorted_by_pos) = @_;
-	wantarray || return scalar keys $self->{_alns};
+	wantarray || return scalar keys %{$self->{_alns}};
 	if($self->{sam}){
 		# get indices from _aln and retrieve objects from parser
 		if($sorted_by_pos){
@@ -982,9 +1113,7 @@ sub _state_matrix{
 			next if length($seq) < 50  || (length($seq)/$orig_seq_length) < 0.7;
 		}
 		
-		#		##################
-		#		### DEPRECATED ### 
-		#		### leading/trailing long indel removal
+=DEPRECATED leading/trailing long indel removal
 		#		# remove leading/trailing I
 		#		# there should be no l/t D since the reads are aligned semiglobal
 		#		# leading
@@ -1019,7 +1148,7 @@ sub _state_matrix{
 		#				splice(@cigar,0,4); # adjust cigar
 		#			}
 		#		}
-		
+=cut		
 		
 		
 		
@@ -1062,9 +1191,7 @@ sub _state_matrix{
 		}
 
 	
-		#	##################
-		#	### DEPRECATED ###
-		#	### simultaneous cigar parsing and state matrix counting
+=DEPRECATED simultaneous cigar parsing and state matrix counting
 		#	my $state; # buffer last match, required if followed by insertion
 		#		for(my $i=0; $i<@cigar;$i+=2){
 		#			if($cigar[$i+1] eq 'M'){
@@ -1105,7 +1232,7 @@ sub _state_matrix{
 		#				$V->exit("Unknown Cigar '".$cigar[$i+1]."'");
 		#			}
 		#		}
-
+=cut
 
 	}
 	
@@ -1311,68 +1438,40 @@ sub _phred_Hx{
 
 
 
+=head2 _stddev
 
-
-=head2 freq2phred
-
-Uses square root of the coverage probability of the most prominent
- state to compute phred like score,ranging from 0 to 40.
-
-  p(cov)  phred   Base call accuracy
-  0.0      0.00    0.00 %
-  0.1     12.65   94.57 %
-  0.2     17.88   98.37 %
-  0.4     25.29   99.70 %
-  0.6     30.98   99.92 %
-  0.8     35.77   99.97 %
-  1.0     40.00   99.99 %
+Takes a reference to a list of values and returns mean and stddev of the
+ list. Additionally takes the mean of the list as second parameter, in it
+ has been calculated before to speed up computation.
 
 =cut
 
-sub freq2phred{
-	my ($self, $freq) = @_;
-	return 0  unless $freq;
-	# probability of state
-	my $p = $freq/$self->{max_coverage};
-	$p = 1 if $p > 1;
-	return int((sqrt($p) * 40) + .5); # phred
-}
-
-=head2 phred2freq
-
-Takes phred ranging from 0 to 40 and returns probable frequency of
- the state, used for phred calculation.
-
-=cut
-
-sub phred2freq{
-	my ($self, $phred) = @_;
-	return 0 unless $phred;
-	# phred = sqrt($p) * 40 => (phred /40)**29 = $p 
-	my $p = ($phred/40)**2;
-	return int(($p * $self->{max_coverage}) + 0.5);
-}
-
-
-=head2 char2phred
-
-
-=cut
-
-sub char2phred{
+sub _stddev{
+	my($values, $mean1) = (@_);
+	#Prevent division by 0 error in case you get junk data
+	return undef unless scalar @$values;
 	
+	# calculate mean unless given
+	unless(defined $mean1){
+		# Step 1, find the mean of the numbers
+		my $total1 = 0;
+		$total1 += $_  for @$values;
+		my $mean1 = $total1 / (scalar @$values);
+	}
+	
+	
+	# find the mean of the squares of the differences
+	# between each number and the mean
+	my $total2 = 0;
+	$total2 += ($mean1-$_)**2 for @$values;
+	my $mean2 = $total2 / (scalar @$values);
+	
+	# standard deviation is the square root of the
+	# above mean
+	return sqrt($mean2);
 }
 
-=head2 phred2char
 
-
-
-=cut
-
-sub phred2char{
-	my ($self, $phred) = @_;
-	return chr($phred+$self->{phred_offset});
-}
 
 
 
