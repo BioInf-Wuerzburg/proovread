@@ -12,7 +12,7 @@ use lib './';
 
 use Verbose;
 
-our $VERSION = '0.05';
+our $VERSION = '0.06';
 our ($REVISION) = '$Revision$' =~ /(\d+)/;
 our ($MODIFIED) = '$Date$' =~ /Date: (\S+\s\S+)/;
 
@@ -34,10 +34,46 @@ SHRiMP (2.2.0) gmapper interface.
 =head1 SYNOPSIS
 
   use Shrimp;
+  
+  my $shrimp = Shrimp->new(
+    ref => 'genome.fa'
+    reads => 'reads.fa'
+  );
+  
+  my $shrimp->run;
+  
+  # read output on the fly
+  use Sam::Parser;
+  my $sp = Sam::Parser->new(
+    fh => $shrimp->oh
+  );
+  
+  while(my $aln = $sp->next_aln()){
+    # do something with the output
+  }
+  
+  $shrimp->finish;
+
 
 =cut
 
 =head1 CHANGELOG
+
+=head2 0.06
+
+=over
+
+=item [BugFix] Correctly creating flag only parameter if specified with 
+ value '' and ignoring them if specified as undef. 
+
+=item [Change] Changed keywords: -ref -> ref, -1 -> reads, -2 -> mates
+
+=item [Feature] '--save' now only runs with its three relevant parameters
+ and the reference file.
+
+=item [Docu] Added some synopsis and adjusted parameter docu off C<< $shrimp->new >>
+
+=back
 
 =head2 0.05
 
@@ -125,12 +161,75 @@ our $VB = Verbose->new(
   verbose => BOOL  # Default TRUE
   timeout => INT   # Number of seconds before canceling run by timeout
   bin => 'gmapper-ls'
+                   # use explicit path, in case gmapper-ls cannot be found in
+                   #  the path, use gmapper-cs for color space
+  ref => [FILE, FILE,...]
+                   # file or list of files containing reference sequences
+  reads => 'FILE'  # file containing short reads
+  mates => 'FILE'  # file containing mate reads in case paired mapping is performed
+
+NOTE: Do not supply read files with '-1/--upstream/-2/--downstream' but use
+ 'reads/mates' insteads.
+
+  -S/--save            Save Genome Proj. in File     (default: no)
+
+NOTE: when used with this parameter, only -s, -H, and -z are additionally
+ revelvant parameters and no short reads are required at all.
+
+  -s/--seeds           Spaced Seed(s)                (default: 11110111101111,
+                                                      1111011100100001111,
+                                                      1111000011001101111)
+  -o/--report          Maximum Hits per Read         (default: 10)
+     --max-alignments  Max. align. per read  (0=all) (default: 0)
+  -w/--match-window    Match Window Length           (default: 140.00%)
+  -n/--cmw-mode        Match Mode                    (default: unpaired:2 paired:4)
+  -l/--cmw-overlap     Match Window Overlap Length   (default: 90.00%)
+  -a/--anchor-width    Anchor Width Limiting Full SW (default: 8; disable: -1)
+  
+  -L/--load            Load Genome Proj. from File   (default: no)
+  -z/--cutoff          Projection List Cut-off Len.  (default: 4294967295)
+  
+  -m/--match           SW Match Score                (default: 10)
+  -i/--mismatch        SW Mismatch Score             (default: -15)
+  -g/--open-r          SW Gap Open Score (Reference) (default: -33)
+  -q/--open-q          SW Gap Open Score (Query)     (default: -33)
+  -e/--ext-r           SW Gap Extend Score(Reference)(default: -7)
+  -f/--ext-q           SW Gap Extend Score (Query)   (default: -3)
+  -r/--cmw-threshold   Window Generation Threshold   (default: 55.00%)
+  -h/--full-threshold  SW Full Hit Threshold         (default: 50.00%)
+  
+  -N/--threads         Number of Threads             (default: 1)
+  -K/--thread-chunk    Thread Chunk Size             (default: 1000)
+  
+  -p/--pair-mode       Paired Mode                   (default: none)
+  -I/--isize           Min and Max Insert Size       (default: 0,1000)
+     --longest-read    Maximum read length           (default: 1000)
+     --un              Dump unaligned reads to file
+     --al              Dump aligned reads to file
+     --read-group      Attach SAM Read Group name
+     --sam-header      Use file as SAM header
+     --single-best-mapping Report only the best mapping(s), this is not strata (see README)
+     --all-contigs     Report a maximum of 1 mapping for each read.
+     --no-mapping-qualities Do not compute mapping qualities
+     --insert-size-dist Specifies the mean and stddev of the insert sizes
+     --no-improper-mappings (see README)
+     --trim-front      Trim front of reads by this amount
+     --trim-end        Trim end of reads by this amount
+     --trim-first      Trim only first read in pair
+     --trim-second     Trim only second read in pair
+     --min-avg-qv      The minimum average quality value of a read
+     --progress        Display a progress line each <value> reads. (default 100000)
+
+
+
+
 
 =cut
 
 
 sub new {
 	my ($class) = shift;
+    
 	my $self = {
 		# defaults
 		command => undef,
@@ -138,7 +237,10 @@ sub new {
 		verbose => 1,
 		timeout => 0,
 		out => undef,
-		log => undef,
+		'log' => undef,
+		'ref' => undef,
+		reads => undef,
+		mates => undef,
 		# overwrites
 		@_,
 		
@@ -169,71 +271,9 @@ sub DESTROY{
 
 =head2 run
 
-Public Method. Runs the blast search calling L<_run_ipc_open> or L<_run_pipe_open> if C<no_ipc = 1> is set. 
-Returns the blast object.
+Start shrimp run with parameters provided to new method. Returns shrimp object.
 
-  my $shrimp->run;
-
-  --------------------------------------------------------------------------------
-  gmapper: LETTER SPACE (454,Illumina/Solexa,etc.).
-  SHRiMP 2.2.3
-  [GCC 4.6.3; CXXFLAGS="-O3 -DNDEBUG -mmmx -msse -msse2 -fopenmp -Wall -Wno-deprecated -D__STDC_FORMAT_MACROS -D__STDC_LIMIT_MACROS -DGIT_VERSION=missing_git_version"]
-  --------------------------------------------------------------------------------
-  usage: gmapper-ls [options/parameters] { <r> | -1 <r1> -2 <r2> } <g1> <g2>...
-     <r>                  Reads filename, paired or unpaired
-     <r1>                 Upstream reads filename
-     <r2>                 Downstream reads filename
-     <g1> <g2>...         Space seperated list of genome filenames
-  Parameters:
-     -s/--seeds           Spaced Seed(s)                (default: 11110111101111,
-                                                         1111011100100001111,
-                                                         1111000011001101111)
-     -o/--report          Maximum Hits per Read         (default: 10)
-        --max-alignments  Max. align. per read  (0=all) (default: 0)
-     -w/--match-window    Match Window Length           (default: 140.00%)
-     -n/--cmw-mode        Match Mode                    (default: unpaired:2 paired:4)
-     -l/--cmw-overlap     Match Window Overlap Length   (default: 90.00%)
-     -a/--anchor-width    Anchor Width Limiting Full SW (default: 8; disable: -1)
-
-     -S/--save            Save Genome Proj. in File     (default: no)
-     -L/--load            Load Genome Proj. from File   (default: no)
-     -z/--cutoff          Projection List Cut-off Len.  (default: 4294967295)
-
-     -m/--match           SW Match Score                (default: 10)
-     -i/--mismatch        SW Mismatch Score             (default: -15)
-     -g/--open-r          SW Gap Open Score (Reference) (default: -33)
-     -q/--open-q          SW Gap Open Score (Query)     (default: -33)
-     -e/--ext-r           SW Gap Extend Score(Reference)(default: -7)
-     -f/--ext-q           SW Gap Extend Score (Query)   (default: -3)
-     -r/--cmw-threshold   Window Generation Threshold   (default: 55.00%)
-     -h/--full-threshold  SW Full Hit Threshold         (default: 50.00%)
-
-     -N/--threads         Number of Threads             (default: 1)
-     -K/--thread-chunk    Thread Chunk Size             (default: 1000)
-
-     -p/--pair-mode       Paired Mode                   (default: none)
-     -I/--isize           Min and Max Insert Size       (default: 0,1000)
-        --longest-read    Maximum read length           (default: 1000)
-     -1/--upstream        Upstream read pair file
-     -2/--downstream      Downstream read pair file
-        --un              Dump unaligned reads to file
-        --al              Dump aligned reads to file
-        --read-group      Attach SAM Read Group name
-        --sam-header      Use file as SAM header
-        --single-best-mapping Report only the best mapping(s), this is not strata (see README)
-        --all-contigs     Report a maximum of 1 mapping for each read.
-        --no-mapping-qualities Do not compute mapping qualities
-        --insert-size-dist Specifies the mean and stddev of the insert sizes
-        --no-improper-mappings (see README)
-        --trim-front      Trim front of reads by this amount
-        --trim-end        Trim end of reads by this amount
-        --trim-first      Trim only first read in pair
-        --trim-second     Trim only second read in pair
-        --min-avg-qv      The minimum average quality value of a read
-        --progress        Display a progress line each <value> reads. (default 100000)
-
-
-
+  my $shrimp = $shrimp->run;
 
 =cut
 
@@ -270,6 +310,12 @@ sub finish{
 	my ($self) = @_; 
 	unless (ref $self || ref $self !~ /^Shrimp/ ){
 		die "Shrimp not initialized!\n";
+	}
+	
+	# to make sure, shrimp is finished, read its STDOUT until eof
+	unless($self->{out}){
+		my $tmp;
+		1 while read($self->{_result_reader},$tmp,10000000);
 	}
 	
 	my $err;
@@ -441,25 +487,45 @@ sub _build_command{
 		}
 	}
 	
-	# params
-	while(my($k, $v) = each %$self){
-		next unless $k =~ /^-/;
-		next if grep{$k eq $_}qw(-ref -1 -2); 
-		# flag only is undef or '', NOT '0' !!!
-		push @command, (defined($v) && $v ne '') ? ($k, $v) : $k;
-	}
-	
-	# reads
-	$V->exit("reads missing (-1, -2)") unless $self->{'-1'};
-	if($self->{'-2'}){
-		push @command, '-1', $self->{'-1'}, '-2', $self->{'-2'};
+	# save genome index projection
+	# [ -S/--save <filename> ]
+	#    With this parameter,  gmapper projects and indexes  the genome, and saves it
+	#    in several  files for  future use.  No read mapping   is performed. The only
+	#    other relevant parameters in this mode of operation are: -s, -H, and -z.
+	my $save;
+	if((exists $self->{'--save'} && ($save = $self->{'--save'})) || (exists $self->{'-S'} && ($save = $self->{'-S'}))){
+		push @command, '--save', $save; 
+		push @command, '--hash-spaced-kmers' if (defined $self->{'--hash-spaced-kmers'} || defined $self->{'-H'});
+		foreach (qw(-s --seeds -z --cutoff)){
+			next unless exists $self->{$_} || $self->{$_};
+			push @command, $_, $self->{$_}
+		}
+	# regular run
 	}else{
-		push @command, $self->{'-1'}
+		# params
+		while(my($k, $v) = each %$self){
+			next unless $k =~ /^-/;
+			next unless defined $v;
+			# flag only is undef or '', NOT '0' !!!
+			push @command, ($v ne '') ? ($k, $v) : $k;
+		}
+		
+		# reads
+		$V->exit("reads (and mates) missing") unless $self->{'reads'};
+		if($self->{'mates'}){
+			push @command, '-1', $self->{'reads'}, '-2', $self->{'mates'};
+		}else{
+			push @command, $self->{'reads'};
+		}
 	}
 	
 	# genome
-	$V->exit("Reference missing (-ref)") unless $self->{'-ref'};
-	push @command, ref $self->{'-ref'} ? join(" ", @{$self->{'-ref'}}) : $self->{'-ref'};
+	if($self->{'-L'} or $self->{'--load'}){
+	}elsif($self->{'ref'}){
+		push @command, ref $self->{'ref'} ? join(" ", @{$self->{'ref'}}) : $self->{'ref'};
+	}else{
+		$V->exit("Reference missing (ref)") 
+	};
 	
 	$self->{command} = join(" ", @command);	
 }
@@ -551,9 +617,6 @@ sub _timeout {
 	}
 	exit(0);
 }
-
-
-
 
 
 

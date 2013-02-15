@@ -54,6 +54,8 @@ Collection of generic function for progress calculation and visualisation
 
 =over
 
+=item [BugFix] TSS is now always printed in case finish is called.
+
 =item [Change] Preference libs in same folder over @INC
 
 =item [Change] Added svn:keywords
@@ -177,7 +179,7 @@ sub update{
 		my $bin = int($self->{value} /$self->{size} * $self->{_bins});
 
 		# return unless new bin
-		return if $bin <= $self->{_bin};
+		return if $bin <= $self->{_bin} && $self->{_time} > -1;
 		$self->{_bin} = $bin;
 		
 		# initialize
@@ -189,7 +191,7 @@ sub update{
 		
 		# (re)calculate bin time
 		$self->{_bin_time} = ($time-$self->{_start_time})/$bin;
-		unless($self->{_time}){ # reset by finish
+		if($self->{_time} < 0){ # reset by finish
 			$eta = sprintf(" TTS %02d:%02d:%02d", (gmtime($time-$self->{_start_time}))[2,1,0])
 		}elsif($eta = ($self->{_bins}-$bin) * $self->{_bin_time}){
 			$eta = sprintf(" ETA %02d:%02d:%02d", (gmtime($eta))[2,1,0])
@@ -244,7 +246,7 @@ sub finish{
 	my ($self, $value) = @_;
 	# run the last bin, if it hasn't been run. Can happen if resolution is
 	# small und update on the final bin is not triggered
-	$self->{_time} = 0; # disable short circuit
+	$self->{_time} = -1; # disable short circuit
 	$self->update($value);
 	print {$self->{fh}} "\n";
 	my @re = ($self->{value}, time()-$self->{_start_time});

@@ -35,7 +35,7 @@ use Sam::Parser;
 use Sam::Alignment;
 use Sam::Seq 0.08;
 
-use Shrimp;
+use Shrimp 0.06;
 
 use threads;
 use Thread::Queue;
@@ -67,10 +67,11 @@ Correct single molecule sequencing reads by iterative mapping of high
 
 =over
 
-=item [Feature] Chimera detection.
+=item [BugFix] Only processed first of multiple short read files in mapping.
+ Fixed this here, requires Shrimp-0.06, to store genome projections in between
+ short read runs.
 
-=item [BugFix] Correct usage of multiple short read files for iterations
- as well as finishing step.
+=item [Feature] Chimera detection.
 
 =back
 
@@ -493,6 +494,18 @@ $opt_sam_file && ! -f $opt_sam_file && pod2usage("Cannot find $opt_sam_file");
 
 
 ##------------------------------------------------------------------------##
+# print parameter
+
+$V->nline;
+$VS->verbose("Custom config parameter\n"
+	. (Dumper(\%cfg) =~ s/^.*\n//r) =~ s/\n.*$//r) ;
+
+$V->nline;
+$VS->verbose("Command line parameter\n"
+	. (Dumper(\%opt) =~ s/^.*\n//r) =~ s/\n.*$//r) ;
+
+
+##------------------------------------------------------------------------##
 
 # long read files
 foreach(@$opt_lr_file){
@@ -504,6 +517,7 @@ my @sr_length_dev;
 my @sr_count;
 my $sr_count_total;
 my $sr_qv_offset_total;
+my @sr_matched;
 
 $VS->verbose("Checking short read files");
 
@@ -593,6 +607,7 @@ foreach(@$opt_sr_file){
 	# push
 	push @sr_length, $sr_length;
 	push @sr_length_dev, $sr_length_dev;
+	push @sr_count, $sr_count;
 	$sr_count_total+= $sr_count;
 }
 
@@ -609,17 +624,6 @@ $mean_sr_dev /= @sr_length_dev;
 my $min_lcr_length = $mean_sr_length + $mean_sr_dev;
 $min_lcr_length += $min_lcr_length * 0.15; # add another 15 percent
 $min_lcr_length = int($min_lcr_length + 0.5);
-
-##------------------------------------------------------------------------##
-# print parameter
-
-$V->nline;
-$VS->verbose("Custom config parameter\n"
-	. (Dumper(\%cfg) =~ s/^.*\n//r) =~ s/\n.*$//r) ;
-
-$V->nline;
-$VS->verbose("Command line parameter\n"
-	. (Dumper(\%opt) =~ s/^.*\n//r) =~ s/\n.*$//r) ;
 
 
 ##------------------------------------------------------------------------##
@@ -705,13 +709,13 @@ foreach my $task(@TASKS){
 	}elsif($task eq 'shrimp-iter-1'){
 
 		run_shrimp(
+			sr_files => $opt_sr_file,
 			shrimp => {
 				%{$cfg{$task}}, # basic shrimp params from cfg
-				verbose => 1,
-				'--al' => task_file_name(suffix => "_sr.fq"),
+				'verbose' => 1,
 				'log' => task_file_name(suffix => "_shrimp.log"),
-				'-ref' => task_file_name('.fa', task => $TASKS[$TC-1] ),
-				'-1' => join(" ",@$opt_sr_file),
+				'ref' => task_file_name('.fa', task => $TASKS[$TC-1] ),
+				#'--al' => task_file_name(suffix => "_sr.fq"),
 				'--threads' => $opt_threads,
 				'--qv-offset' => $sr_qv_offset_total,
 			}
@@ -726,13 +730,13 @@ foreach my $task(@TASKS){
 	}elsif($task eq 'shrimp-iter-2'){
 
 		run_shrimp(
+			sr_files => $opt_sr_file,
 			shrimp => {
 				%{$cfg{$task}}, # basic shrimp params from cfg
-				verbose => 1,
-				'--al' => task_file_name(suffix => "_sr.fq"),
+				'verbose' => 1,
 				'log' => task_file_name(suffix => "_shrimp.log"),
-				'-ref' => task_file_name(".fm", task => $TASKS[$TC-1] ),
-				'-1' => join(" ",@$opt_sr_file),
+				'ref' => task_file_name(".fm", task => $TASKS[$TC-1] ),
+				#'--al' => task_file_name(suffix => "_sr.fq"),
 				'--threads' => $opt_threads,
 				'--qv-offset' => $sr_qv_offset_total,
 			}
@@ -746,14 +750,14 @@ foreach my $task(@TASKS){
 		
 	}elsif($task eq 'shrimp-ccs'){
 
-		run_shrimp(
+		run_shrimp(			
+			sr_files => $opt_sr_file,
 			shrimp => {
 				%{$cfg{$task}}, # basic shrimp params from cfg
-				verbose => 1,
-				'--al' => task_file_name(suffix => "_sr.fq"),
+				'verbose' => 1,
 				'log' => task_file_name(suffix => "_shrimp.log"),
-				'-ref' => task_file_name('.fa', task => $TASKS[$TC-1] ),
-				'-1' => join(" ",@$opt_sr_file),
+				'ref' => task_file_name('.fa', task => $TASKS[$TC-1] ),
+				#'--al' => task_file_name(suffix => "_sr.fq"),
 				'--threads' => $opt_threads,
 				'--qv-offset' => $sr_qv_offset_total,
 			}
@@ -766,19 +770,23 @@ foreach my $task(@TASKS){
 		$LR = undef;
 		
 	}elsif($task eq 'shrimp-finish'){
+		
+		# collect all dumped short read files from previous iterations
+		my @sr_files;
+		foreach my $task (@TASKS[1..$TC-1]){
+			push @sr_files, map{
+				task_file_name(task => $task, suffix=> "_sr".$_.".fq")
+			}(0..$#sr_count);
+		}
 
-	
 		run_shrimp(
+			sr_files => \@sr_files,
 			shrimp => {
 				%{$cfg{$task}}, # basic shrimp params from cfg
-				verbose => 1,
-				'log' => task_file_name(suffix => "_shrimp.log"),
-				'-ref' => task_file_name('.fa', task => $TASKS[$TC-1] ),
+				'verbose' => 1,
+				'ref' => task_file_name('.fa', task => $TASKS[$TC-1] ),
 				'--threads' => $opt_threads,
 				'--qv-offset' => $sr_qv_offset_total,
-				'-1' => join(" ",map{
-					task_file_name(task => $_, suffix=> "_sr.fq")
-				}(@TASKS[1..$TC-1])),
 			}
 		);
 		
@@ -911,6 +919,7 @@ Run and process shrimp
 
 sub run_shrimp{
 	my $p = {
+		sr_files => [],
 		shrimp => {},
 		tmp_sam => task_file_name("_tmp.sam"),
 		ram_sam => $opt_ram_sam,
@@ -918,98 +927,166 @@ sub run_shrimp{
 	};
 	
 	$V->nline;
-	$VS->verbose("Run and process Shrimp task $TC output");
+	$VS->verbose("Run and process Shrimp task ".$TASKS[$TC]."output");
 	
-	# init input stream parser progess bar	
-	my $pg_rsp = Verbose::ProgressBar->new(size => $sr_count_total);
-	my $pg_step = int(($sr_count_total/100)+0.5) || 1; # never be zero
+	
+	# Index genome file first and save projection for multiple short read
+	#  files
+	$VS->verbose("Indexing Long reads");
 	
 	# init shrimp handler
-	my $shrimp = Shrimp->new( 
-		'--progress' => $pg_step,
-		%{$p->{shrimp}}, 
+	my $shrimp_ldx = Shrimp->new( 
+		%{$p->{shrimp}},
+		'--save' => task_file_name("_shrimp_idx"),
+		'log' => task_file_name(suffix => "_shrimp_idx.log"),
 	);
 
 	$VB->hline();
-	$VB->verbose($shrimp->command());
+	$VB->verbose($shrimp_ldx->command());
 	$VB->hline();
 	
 	# run shrimp
-	$shrimp->run;
+	$shrimp_ldx->run->finish;
 
-	# init input stream parser
-	my $rsp = Sam::Parser->new(
-		fh => $shrimp->oh
+
+
+
 	# init temporary sam writer
-	);
-	
 	my $tsp = $p->{ram_sam} ? undef : Sam::Parser->new(
 		file => $p->{tmp_sam},
 		mode => '+>',
 	);
+
+
+	my $sr_file_c = 0;
+	my $pg_rsp;
+	my $pg_step;
 	
-	# TODO: unless already indexed
-	$VS->verbose("Indexing Long reads");
-	# read SAM header
-	while(my %h = $rsp->next_header_line('SQ|PG')){
-		# @PG
-		if($h{tag} eq '@PG'){
-			$PG_line = $h{raw};
-			next;
+	### foreach sr file read mappings	
+	foreach my $sr_file (@{$p->{sr_files}}){
+
+		if($TASKS[$TC] ne 'shrimp-finish'){
+			# init input stream parser progess bar	
+			$pg_rsp = Verbose::ProgressBar->new(size => $sr_count[$sr_file_c]);
+			$pg_step = int(($sr_count[$sr_file_c]/10000)+0.5) || 1; # never be zero
+		}else{
+			$pg_rsp = Verbose::ProgressBar->new(size => $sr_matched[$sr_file_c]);
+			$pg_step = int(($sr_matched[$sr_file_c]/10000)+0.5) || 1; # never be zero
 		}
-		$LR->{$h{'SN'}} = Sam::Seq->new(
-			id => $h{SN}, 
-			len => $h{LN},
-			sam => $tsp,	# indexed sam file, containing aln data
+		
+		$VS->verbose("Mapping short reads $sr_file");
+
+		# init shrimp handler
+		my $shrimp = Shrimp->new( 
+			%{$p->{shrimp}},
+			'ref' => undef,
+			'reads' => $sr_file,
+			'log' => task_file_name("_shrimp_sr".$sr_file_c.".log"),
+			'--al' => task_file_name(suffix => "_sr".$sr_file_c.".fq"),
+			'--progress' => $pg_step,
+			'--load' => task_file_name("_shrimp_idx"),
+			'-s' => undef, # cannot specify seeds when loading genome
 		);
+	
+		$VB->hline();
+		$VB->verbose($shrimp->command());
+		$VB->hline();
+		
+		# run shrimp
+		$shrimp->run;
+	
+		# init input stream parser
+		my $rsp = Sam::Parser->new(
+			fh => $shrimp->oh
+		);
+		
+		# read SAM header
+		while(my %h = $rsp->next_header_line('SQ|PG')){
+			# @PG
+			if($h{tag} eq '@PG'){
+				$PG_line = $h{raw};
+				next;
+			}
+			$LR->{$h{'SN'}} = Sam::Seq->new(
+				id => $h{SN}, 
+				len => $h{LN},
+				sam => $tsp,	# indexed sam file, containing aln data
+			);
+		}
+	
+		$PG_line = '@PG ID:unknown' unless $PG_line;
+	
+		# read SAM alignmetn section
+		my $rsp_c = 0;
+		my $add_c = 0;
+		my $src_lib_sum = 0;
+		my $src;
+		# shrimp log
+		my $slh = $shrimp->logh;
+		
+		if($p->{ram_sam}){
+			while(my $aln = $rsp->next_aln()){
+				# try to add aln
+				$add_c++ if($LR->{$aln->rname}->add_aln_by_score($aln));
+				# monitor shrimp progress
+				unless($rsp_c% $pg_step){
+					seek($slh, -50, 2); # get, ..
+					read($slh, my $tail, 50); # .. read, .. 
+					# .. and parse last 50 chars of shrimp log for number of processed reads
+					($src) = $tail =~ /(\d+)\s+\S+\s+\S+\s*$/;
+					$pg_rsp->update($src) if defined $src; 
+				}
+				$rsp_c++;
+			}
+			
+			seek($slh, -1500, 2); # get, ..
+			read($slh, my $tail, 1500); # .. read, .. 
+			# .. and parse last 1500 chars of shrimp log for number of processed reads
+			my ($reads_matched) = $tail =~ /Reads Matched:\s+(\S+)/;
+			$reads_matched =~ tr/,//d;
+			push @sr_matched, $reads_matched;
+
+		}else{ # create tmp sam
+			while(my $aln = $rsp->next_aln()){
+				# try to add aln, if sufficient score, add to temporary sam file
+				if($LR->{$aln->rname}->add_aln_by_score($aln)){
+					$add_c++; 
+					$tsp->append_aln($aln);
+				};
+				# monitor shrimp progress
+				unless($rsp_c% $pg_step){
+					seek($slh, -50, 2); # get, ..
+					read($slh, my $tail, 50); # .. read, .. 
+					# .. and parse last 50 chars of shrimp log for number of processed reads
+					($src) = $tail =~ /(\d+)\s+\S+\s+\S+\s*$/;
+					$pg_rsp->update($src) if defined $src; 
+				}
+				$rsp_c++;
+			}
+
+			seek($slh, -1500, 2); # get, ..
+			read($slh, my $tail, 1500); # .. read, .. 
+			# .. and parse last 1500 chars of shrimp log for number of processed reads
+			my ($reads_matched) = $tail =~ /Reads Matched:\s+(\S+)/;
+			$reads_matched =~ tr/,//d;
+			push @sr_matched, $reads_matched;
+		}
+
+
+		# get final short read count of this file
+		if($TASKS[$TC] ne 'shrimp-finish'){
+			$pg_rsp->finish($sr_count[$sr_file_c]);
+		}else{
+			$pg_rsp->finish($sr_matched[$sr_file_c]);
+		}
+
+		# finish shrimp run
+		$shrimp->finish;
+		$sr_file_c++;
 	}
 
-	$PG_line = '@PG ID:unknown' unless $PG_line;
-
-	$VS->verbose("Mapping short reads");
-
-	# read SAM alignmetn section
-	my $rsp_c = 0;
-	my $add_c = 0;
-	my $cur_c = 0;
-	# shrimp log
-	my $slh = $shrimp->logh;
+#	$pg_rsp->finish($sr_count_total);
 	
-	if($p->{ram_sam}){
-		while(my $aln = $rsp->next_aln()){
-			# try to add aln
-			$add_c++ if($LR->{$aln->rname}->add_aln_by_score($aln));
-			# monitor shrimp progress
-			unless($rsp_c% $pg_step){
-				seek($slh, -50, 2); # get, ..
-				read($slh, my $tail, 50); # .. read, .. 
-				# .. and parse last 50 chars of shrimp log for number of processed reads
-				$pg_rsp->update($tail =~ /(\d+)\s+\S+\s+\S+\s*$/); 
-			}
-			$rsp_c++;
-		}
-	}else{ # create tmp sam
-		while(my $aln = $rsp->next_aln()){
-			# try to add aln, if sufficient score, add to temporary sam file
-			if($LR->{$aln->rname}->add_aln_by_score($aln)){
-				$add_c++; 
-				$tsp->append_aln($aln);
-			};
-			# monitor shrimp progress
-			unless($rsp_c% $pg_step){
-				seek($slh, -50, 2); # get, ..
-				read($slh, my $tail, 50); # .. read, .. 
-				# .. and parse last 50 chars of shrimp log for number of processed reads
-				$pg_rsp->update($tail =~ /(\d+)\s+\S+\s+\S+\s*$/); 
-			}
-			$rsp_c++;
-		}
-	}
-	
-	$pg_rsp->finish($sr_count_total);
-	
-	# finish shrimp run
-	return $shrimp->finish;
 }
 
 
