@@ -10,6 +10,7 @@ use lib '../';
 
 use Fastq::Seq 0.03;
 
+use List::Util;
 
 our $VERSION = '0.07';
 our ($REVISION) = '$Revision$' =~ /(\d+)/;
@@ -376,8 +377,9 @@ sub append_tell{
 
 Sample reads from file. If used on pipe, returns N reads from the current
  position, while keeping them in the buffer for further processing. Takes 
- one argument, the number of reads to sample, default 1000. Returns LIST
- of Fastq::Seq objects.
+ one argument, the number of reads to sample, default 1000. If the file is
+ smaller than 10MB, the file is read entirely, else reads from random 
+ positions are read. Returns LIST of Fastq::Seq objects.
  
 NOTE: The set of samples reads is entirely kept in memory, therefore this
  method is not suited to sample large amount of reads from a large file.
@@ -423,17 +425,33 @@ sub sample_seq{
 		my $file_pos = tell($fh);
 		# can seek on file: sample random reads
 		my $size = -s $fh;
-		$size -= $size/100; # reduce size by 1% to prevent sampling eof
 
-		for($i=$n;$i;$i--){
-			$self->seek(int(rand($size))); # jump to random pos
-			my $fq = $self->next_seq(1); # get next reads with safe start
-			if($fq){
-				push @reads, $fq;
-			}else{	# eof
-				$i++; # do one more iteration
-			}; 
+		if($size < 10_000_000){
+			$self->seek(0);
+			my $fq;
+			my @fqs;
+			push @fqs, $fq while $fq = $self->next_seq();
+			my @shuffled_fqs = List::Util::shuffle(@fqs);
+			@reads = @shuffled_fqs > $n
+				? @shuffled_fqs[0..$n] 
+				: @shuffled_fqs; 
+			use Data::Dumper;
+			print Dumper(scalar @reads);
+		}else{
+
+			$size -= $size/100; # reduce size by 1% to prevent sampling eof
+	
+			for($i=$n;$i;$i--){
+				$self->seek(int(rand($size))); # jump to random pos
+				my $fq = $self->next_seq(1); # get next reads with safe start
+				if($fq){
+					push @reads, $fq;
+				}else{	# eof
+					$i++; # do one more iteration
+				}; 
+			}
 		}
+		
 		# restore file handle
 		$self->seek($file_pos);
 		$self->{_buffer} = $buffer; # restore buffer
@@ -459,13 +477,15 @@ sub guess_seq_length{
 	
 	my @sample_seq = $self->sample_seq($n);
 	
+	return undef unless @sample_seq;
+	
 	my $l_total;
 	my @lengths = map{my $l = length($_->seq); $l_total+=$l; $l}@sample_seq;
 	
 	# empty file
 	return undef unless $l_total;
 	
-	my $mean_l = $l_total/$n;
+	my $mean_l = $l_total/@sample_seq;
 	my $stddev = _stddev(\@lengths, $mean_l);
 	# round mean
 	return (int($mean_l + 0.5), int($stddev + 0.5)); 
@@ -545,10 +565,13 @@ sub guess_seq_count{
 	my $file_size = -s $fh;
 	# empty file
 	return 0 unless $file_size;
-
-	$size+= length($_->string)for $self->sample_seq($n);
+	
+	my @sample_seqs = $self->sample_seq($n);
+	return undef unless @sample_seqs;
+	
+	$size+= length($_->string) for @sample_seqs;
 	#print $median_size;
-	return int(($file_size/$size*$n)+0.5);
+	return int(($file_size/$size* @sample_seqs)+0.5);
 }
 
 =head2 check_fh_is_pipe

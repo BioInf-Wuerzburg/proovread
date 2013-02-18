@@ -288,7 +288,7 @@ Sam::Seq->InDelTaboo($cfg{'sr-indel-taboo'});
 Sam::Seq->MaxCoverage($opt_cov);
 Sam::Seq->BinSize($cfg{'bin-size'});
 
-Fastq::Seq->Qual_lcs_range(10, 40, $opt_qv_offset);  
+Fastq::Seq->Qual_lcs_range(20, 40, $opt_qv_offset);  
 # 80 chars are cutoff at each side to keep overlaps => min length 160, better 200
 Fastq::Seq->Qual_lcs_min_length($opt_hcr_mask_length + (2 * $opt_hcr_sticky_length)); 
 

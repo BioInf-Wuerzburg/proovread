@@ -775,7 +775,8 @@ sub check_chimera{
 		# opposite direction
 		my ($aln1, $aln2) = sort{$a->pos <=> $b->pos}@$v; # sort alns by pos
 		unless ($aln1->is(REVERSE_COMPLEMENT) xor $aln2->is(REVERSE_COMPLEMENT)){
-			delete $alns_by_id{$k} 
+			delete $alns_by_id{$k};
+			next;
 		}
 		my $bp = $aln1->pos + (($aln2->pos - $aln1->pos +length($aln1->seq))/2); 
 		push @breakpoints, $bp;

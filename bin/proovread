@@ -419,12 +419,7 @@ Sort the filtered SAM files by coordinates in addition to the
  a convenience if you need the files for something else.
 
 =cut
-=item [--sr-qv-offset] [auto-detect]
 
-Short read quality offset, usually 64 or 33, use 0 for FASTA. Defaults to 
- auto-detect, specify value if detection fails.
-
-=cut
 $opt{'sort-sam-by-coordinates'} = \(my $opt_sort_sam_by_coords = $cfg{'sort-sam-by-coordinates'});
 
 =item [--keep-temporary-files] [OFF]
@@ -435,7 +430,6 @@ Specify once, to keep temporary file of each task, twice to also keep the
 =cut
 
 $opt{'keep-temporary-files+'} = \(my $opt_keep = $cfg{'keep-temporary-files'});
-
 
 =item [--ignore-sr-length]
 
@@ -495,7 +489,7 @@ $opt_sam_file && ! -f $opt_sam_file && pod2usage("Cannot find $opt_sam_file");
 
 ##------------------------------------------------------------------------##
 # print parameter
-
+# 'cause I'm lazy
 $V->nline;
 $VS->verbose("Custom config parameter\n"
 	. (Dumper(\%cfg) =~ s/^.*\n//r) =~ s/\n.*$//r) ;
@@ -507,17 +501,13 @@ $VS->verbose("Command line parameter\n"
 
 ##------------------------------------------------------------------------##
 
-# long read files
-foreach(@$opt_lr_file){
-	-e $_ || $VS->exit("Cannot find long read file: $_");
-}
-
 my @sr_length;
 my @sr_length_dev;
 my @sr_count;
 my $sr_count_total;
 my $sr_qv_offset_total;
 my @sr_matched;
+my @sr_bps;
 
 $VS->verbose("Checking short read files");
 
@@ -608,6 +598,7 @@ foreach(@$opt_sr_file){
 	push @sr_length, $sr_length;
 	push @sr_length_dev, $sr_length_dev;
 	push @sr_count, $sr_count;
+	push @sr_bps, ($sr_count * $sr_length);
 	$sr_count_total+= $sr_count;
 }
 
@@ -662,6 +653,8 @@ if($opt_sam_file){
 	}
 }
 
+
+
 $V->nline;
 $VS->verbose('Running mode: '.$opt_mode);
 
@@ -691,7 +684,14 @@ make_path($opt_prefix, @tmp_dirs);
 my $LR;
 my @LR_IDS;
 my $lr_chunk_offsets;
+my @lr_count;
+my @lr_length;
+my @lr_bps;
+my $sr_bps_total;
+my $lr_bps_total;
 my $sam_chunk_offsets;
+my $opt_finish_aligned_only = $cfg{'finish-aligned-only'};
+my $estimated_coverage;
 
 foreach my $task(@TASKS){
 	$TC++;
@@ -704,7 +704,26 @@ foreach my $task(@TASKS){
 		
 	}elsif($task eq 'read-long'){
 		
+		# long read files
+		foreach(@$opt_lr_file){
+			-e $_ || $VS->exit("Cannot find long read file: $_");
+		}
+		
 		$lr_chunk_offsets = prepare_lr();
+		
+		# decide how to finish (realign mapped only or everything)
+		unless(defined $opt_finish_aligned_only){
+			# compute long-read - short-read coverage
+			$lr_bps_total += $_ for @lr_bps;
+			$sr_bps_total += $_ for @sr_bps;
+			$estimated_coverage = sprintf("%02d", $sr_bps_total/$lr_bps_total);
+			$opt_finish_aligned_only = $estimated_coverage > 100;
+			$V->verbose('Estimated short-read/long-read base pair ratio: '.$estimated_coverage);
+			$opt_finish_aligned_only 
+				? $V->verbose('Finishing with previously aligned reads only')
+				: $V->verbose('Finishing by mapping all short reads');
+		}
+		
 		
 	}elsif($task eq 'shrimp-iter-1'){
 
@@ -757,7 +776,6 @@ foreach my $task(@TASKS){
 				'verbose' => 1,
 				'log' => task_file_name(suffix => "_shrimp.log"),
 				'ref' => task_file_name('.fa', task => $TASKS[$TC-1] ),
-				#'--al' => task_file_name(suffix => "_sr.fq"),
 				'--threads' => $opt_threads,
 				'--qv-offset' => $sr_qv_offset_total,
 			}
@@ -770,17 +788,25 @@ foreach my $task(@TASKS){
 		$LR = undef;
 		
 	}elsif($task eq 'shrimp-finish'){
-		
-		# collect all dumped short read files from previous iterations
-		my @sr_files;
-		foreach my $task (@TASKS[1..$TC-1]){
-			push @sr_files, map{
-				task_file_name(task => $task, suffix=> "_sr".$_.".fq")
-			}(0..$#sr_count);
-		}
 
+		my $sr_finish_files;
+
+		if($opt_finish_aligned_only){
+			my @sr_files;
+			# collect all dumped short read files from previous iterations
+			foreach my $task (@TASKS[1..$TC-1]){
+				push @sr_files, map{
+					task_file_name(task => $task, suffix=> "_sr".$_.".fq")
+				}(0..$#sr_count);
+			}
+			$sr_finish_files = \@sr_files;
+		}else{
+			$sr_finish_files = $opt_sr_file;
+		}
+	
+		
 		run_shrimp(
-			sr_files => \@sr_files,
+			sr_files => $sr_finish_files,
 			shrimp => {
 				%{$cfg{$task}}, # basic shrimp params from cfg
 				'verbose' => 1,
@@ -927,7 +953,8 @@ sub run_shrimp{
 	};
 	
 	$V->nline;
-	$VS->verbose("Run and process Shrimp task ".$TASKS[$TC]."output");
+	$V->nline;
+	$VS->verbose("Running task ".$TASKS[$TC]);
 	
 	
 	# Index genome file first and save projection for multiple short read
@@ -965,13 +992,13 @@ sub run_shrimp{
 	### foreach sr file read mappings	
 	foreach my $sr_file (@{$p->{sr_files}}){
 
-		if($TASKS[$TC] ne 'shrimp-finish'){
-			# init input stream parser progess bar	
-			$pg_rsp = Verbose::ProgressBar->new(size => $sr_count[$sr_file_c]);
-			$pg_step = int(($sr_count[$sr_file_c]/10000)+0.5) || 1; # never be zero
-		}else{
+		# init input stream parser progess bar	
+		if($TASKS[$TC] eq 'shrimp-finish' && $opt_finish_aligned_only){
 			$pg_rsp = Verbose::ProgressBar->new(size => $sr_matched[$sr_file_c]);
 			$pg_step = int(($sr_matched[$sr_file_c]/10000)+0.5) || 1; # never be zero
+		}else{
+			$pg_rsp = Verbose::ProgressBar->new(size => $sr_count[$sr_file_c]);
+			$pg_step = int(($sr_count[$sr_file_c]/10000)+0.5) || 1; # never be zero
 		}
 		
 		$VS->verbose("Mapping short reads $sr_file");
@@ -982,10 +1009,12 @@ sub run_shrimp{
 			'ref' => undef,
 			'reads' => $sr_file,
 			'log' => task_file_name("_shrimp_sr".$sr_file_c.".log"),
-			'--al' => task_file_name(suffix => "_sr".$sr_file_c.".fq"),
 			'--progress' => $pg_step,
 			'--load' => task_file_name("_shrimp_idx"),
 			'-s' => undef, # cannot specify seeds when loading genome
+			$opt_finish_aligned_only && $TASKS[$TC] ne 'shrimp-finish'
+				? ('--al' => task_file_name(suffix => "_sr".$sr_file_c.".fq"))
+				: (),
 		);
 	
 		$VB->hline();
@@ -1000,21 +1029,24 @@ sub run_shrimp{
 			fh => $shrimp->oh
 		);
 		
-		# read SAM header
-		while(my %h = $rsp->next_header_line('SQ|PG')){
-			# @PG
-			if($h{tag} eq '@PG'){
-				$PG_line = $h{raw};
-				next;
+		# read the header and create $LR only on first short read file
+		if($sr_file_c == 0){
+			# read SAM header
+			while(my %h = $rsp->next_header_line('SQ|PG')){
+				# @PG
+				if($h{tag} eq '@PG'){
+					$PG_line = $h{raw};
+					next;
+				}
+				$LR->{$h{'SN'}} = Sam::Seq->new(
+					id => $h{SN}, 
+					len => $h{LN},
+					sam => $tsp,	# indexed sam file, containing aln data
+				);
 			}
-			$LR->{$h{'SN'}} = Sam::Seq->new(
-				id => $h{SN}, 
-				len => $h{LN},
-				sam => $tsp,	# indexed sam file, containing aln data
-			);
+		
+			$PG_line = '@PG ID:unknown' unless $PG_line;
 		}
-	
-		$PG_line = '@PG ID:unknown' unless $PG_line;
 	
 		# read SAM alignmetn section
 		my $rsp_c = 0;
@@ -1074,10 +1106,10 @@ sub run_shrimp{
 
 
 		# get final short read count of this file
-		if($TASKS[$TC] ne 'shrimp-finish'){
-			$pg_rsp->finish($sr_count[$sr_file_c]);
-		}else{
+		if($TASKS[$TC] eq 'shrimp-finish' && $opt_finish_aligned_only){
 			$pg_rsp->finish($sr_matched[$sr_file_c]);
+		}else{
+			$pg_rsp->finish($sr_count[$sr_file_c]);
 		}
 
 		# finish shrimp run
@@ -1167,6 +1199,15 @@ sub prepare_lr{
 		$lrpr = Fasta::Parser->new(file => $_)->check_format();
 		$lrpr = Fastq::Parser->new(file => $_)->check_format() unless $lrpr;
 		$lrpr || $VS->exit("Unknown format in '--long-read' file: ".$_);
+	
+		my $lr_count = $lrpr->guess_seq_count();
+		print $lr_count, "\n";
+		push @lr_count, $lr_count;
+		my ($lr_length, $lr_dev) =  $lrpr->guess_seq_length;
+		print $lr_length, "\n";
+		push @lr_length, $lr_length;
+		push @lr_bps, ($lr_length * $lr_count);
+		
 	
 		if(ref $lrpr eq 'Fasta::Parser'){
 			while(my $lr = $lrpr->next_seq){
