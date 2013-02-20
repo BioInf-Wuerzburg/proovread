@@ -613,7 +613,7 @@ sub chimera{
 	# compute state_matrix if required/wanted
 	$self->_state_matrix() unless ($self->_state_matrix() || !$reuse_matrix);
 	
-	my @bin_bases = @{$self->{bin_bases}};
+	my @bin_bases = @{$self->{_bin_bases}};
 	return unless @bin_bases > 20; # need at least 20 bins to make sense
 
 	# low coverage bin: bin_bases[bin] << bin_max_bases
