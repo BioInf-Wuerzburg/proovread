@@ -400,7 +400,7 @@ foreach my $pb_id(@PB_IDS){
 	my $con = $PB{$pb_id}->consensus(@hcrs);
 	
 	if($opt_detect_chimera){
-		my ($pos, $dev) = $PB{$pb_id}->check_chimera();
+		my ($pos, $dev) = $PB{$pb_id}->chimera();
 #		if($pos && $dev < 20){
 #			# most likely a chimera with distinct breakpoint
 #			# tag description
