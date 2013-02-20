@@ -399,6 +399,25 @@ foreach my $pb_id(@PB_IDS){
 	
 	my $con = $PB{$pb_id}->consensus(@hcrs);
 	
+	if($opt_detect_chimera){
+		my ($pos, $dev) = $PB{$pb_id}->check_chimera();
+#		if($pos && $dev < 20){
+#			# most likely a chimera with distinct breakpoint
+#			# tag description
+#			$con->{seq_head}.= " CHIMERA:$pos+-$dev";
+#			# adjust qual string at breakpoint position
+#			substr($con->{qual}, $pos-10, 20, chr($opt_qv_offset)x20);
+#		}elsif(defined $pos){
+#			# TODO: unresolved chimera possibles
+#			# possible chimera, but not resolvable
+#			$con->{seq_head}.= " CHIMERA:unresolved";
+#			# write current fastq
+#			print $fch $con->string;
+#			next;
+#		}
+	}
+	
+	
 	# undef state matrix to make memory availabe again
 	$PB{$pb_id}{_state_matrix} = {}; 
 
@@ -501,23 +520,7 @@ foreach my $pb_id(@PB_IDS){
 		printf $fmh (">%s\n%s\n", substr($con->seq_head, 1), $con_mask->seq);
 	}
 
-	if($opt_detect_chimera){
-		my ($pos, $dev) = $PB{$pb_id}->check_chimera();
-		if($pos && $dev < 20){
-			# most likely a chimera with distinct breakpoint
-			# tag description
-			$con->{seq_head}.= " CHIMERA:$pos+-$dev";
-			# adjust qual string at breakpoint position
-			substr($con->{qual}, $pos-10, 20, chr($opt_qv_offset)x20);
-		}elsif(defined $pos){
-			# TODO: unresolved chimera possibles
-			# possible chimera, but not resolvable
-			$con->{seq_head}.= " CHIMERA:unresolved";
-			# write current fastq
-			print $fch $con->string;
-			next;
-		}
-	}
+
 	
 	# write current fastq
 	print $fqh $con->string;

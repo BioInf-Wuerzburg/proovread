@@ -46,6 +46,9 @@ Class for handling sam reference sequences and its aligned reads.
 
 =over
 
+=item [Change] State matrix is now by default reinitialized by 
+ _state_matrix call, unless $append_matrix is set to TRUE.
+
 =item [Feature] Chimera detection
 
 =item [Change] Replaced C<each> and C<keys> statements on reference
@@ -411,7 +414,6 @@ sub new{
 	
 	# init bins
 	$self->_init_read_bins;
-
 	return $self;
 }
 
@@ -542,8 +544,6 @@ Calculate and the consensus sequence from state matrix. Returns a Fastq::Seq
 sub consensus{
 	my $self = shift;
 	my @hcrs = @_;
-	# init state matrix
-	$self->{_state_matrix} = [map{[]}1..$self->len];
 	$self->_state_matrix(@hcrs);# unless $self->_state_matrix();
 	$self->_add_pre_calc_fq(@hcrs) if @hcrs;
 	$self->_consensus;
@@ -553,25 +553,40 @@ sub consensus{
 
 =head2 variants
 
+By default the state matrix is calculated, wether or not it has 
+ been computed before. Set first parameter to TRUE to prevent 
+ unneccessary recalculation.
+
 =cut
 
 sub variants{
-	my ($self) = @_;
-	$self->_state_matrix();# unless $self->_state_matrix();
+	my ($self, $reuse_matrix) = (@_,0);
+	# compute state_matrix if required/wanted
+	unless($self->_state_matrix() || !$reuse_matrix){
+		$self->_state_matrix();
+	}
+	
 	return $self->_variants;
 }
 
 =head2 coverage
 
-Calculate and return LIST of accurate per base coverages.
+Calculate and return LIST of accurate per base coverages. 
+By default the state matrix is calculated, wether or not it has 
+ been computed before. Set first parameter to TRUE to prevent 
+ unneccessary recalculation.
 
 =cut
 
 sub coverage{
-	my ($self) = @_;
+	my ($self, $reuse_matrix) = (@_,0);
 	# calculate from _state_matrix, not the fastest way but accurate and
 	#  already implemented :)
-	$self->_state_matrix();# unless $self->_state_matrix();
+	# compute state_matrix if required/wanted
+	unless($self->_state_matrix() || !$reuse_matrix){
+		$self->_state_matrix();
+	}
+
 	my @covs;
 	foreach my $col(@{$self->{_state_matrix}}){
 		if($col){
@@ -584,6 +599,52 @@ sub coverage{
 	};
 	return @covs;
 }
+
+=head2 chimera
+
+By default the state matrix is calculated, wether or not it has 
+ been computed before. Set first parameter to TRUE to prevent 
+ unneccessary recalculation.
+
+=cut
+
+sub chimera{
+	my ($self, $reuse_matrix) = (@_,0);
+	# compute state_matrix if required/wanted
+	$self->_state_matrix() unless ($self->_state_matrix() || !$reuse_matrix);
+	
+	my @bin_bases = @{$self->{bin_bases}};
+	return unless @bin_bases > 20; # need at least 20 bins to make sense
+
+	# low coverage bin: bin_bases[bin] << bin_max_bases
+	# threshold 10% (educated guess)
+	my $bin_threshold = $self->{bin_max_bases}/10;
+
+	my $lcov_bin_count = 0;
+	my @lcov_bin_idxs = ();
+	# find lcov_bins
+	# skip terminal bins
+	for (my $i=5; $i<@bin_bases-5; $i++){
+		if($bin_bases[$i] <= $bin_threshold){
+			$lcov_bin_count++
+		}elsif($lcov_bin_count){
+			# require at least 2 consecutive low cov bins to trigger chimera check
+			push @lcov_bin_idxs, [($i-$lcov_bin_count,$i-1)] if $lcov_bin_count > 1;
+			$lcov_bin_count = 0; # reset
+		}
+	}
+	
+	#TODO: heterozygosity proof -> left hand and right hand matrix separately
+	
+	# get the state matrix columns 
+	foreach my $lcov_bin_idxs (@lcov_bin_idxs){
+		my @col_idxs = (($lcov_bin_idxs->[0]-1) * $self->{bin_size}) .. (($lcov_bin_idxs->[1]+2) * $self->{bin_size} -1);
+		my @cols = @{$self->{_state_matrix}}[@col_idxs];
+		use Data::Dumper;
+		print Dumper($lcov_bin_idxs,\@cols);
+	}
+}
+
 
 =DEPRECATED freq2phred
 #=head2 freq2phred
@@ -735,63 +796,8 @@ sub coverage{
 #}
 =cut
 
-=head2 chimera
-
-Simple chimera detection. Searches for two hits of identical 
- reads in opposite orientation on the same reference sequences. Calculates
- a breakpoint for the chimera folding based on the distance between 
- multiple such twice mapping reads and returns the exstimated position
- of this breakpoint and the stddev from this point, in case enough evidence 
- has been found ($MaxCoverage/4 twice mapping reads) or undef otherwise.
- 
-           |
-  0--->        10<---
-     3<---   8--->
 
 
-=cut
-
-sub check_chimera{
-	my $self = shift;
-	my @alns = $self->alns();
-	
-	my %alns_by_id;
-	my @breakpoints;
-	my $bp_sum;
-	
-	# 
-	foreach my $aln (@alns){
-		push @{$alns_by_id{$aln->qname}}, $aln;
-	}
-	
-	while(my ($k, $v) = each %alns_by_id){
-		# two hits
-		# three hits is strange...
-		unless (@$v == 2){
-			delete $alns_by_id{$k}; 
-			next;		
-		}; 
-
-		# opposite direction
-		my ($aln1, $aln2) = sort{$a->pos <=> $b->pos}@$v; # sort alns by pos
-		unless ($aln1->is(REVERSE_COMPLEMENT) xor $aln2->is(REVERSE_COMPLEMENT)){
-			delete $alns_by_id{$k};
-			next;
-		}
-		my $bp = $aln1->pos + (($aln2->pos - $aln1->pos +length($aln1->seq))/2); 
-		push @breakpoints, $bp;
-		$bp_sum+=$bp;
-	}
-	
-	return undef unless @breakpoints > $MaxCoverage/4;
-
-	print Dumper(\@breakpoints);
-	
-	my $bp_mean = $bp_sum/@breakpoints;
-	my $bp_dev = _stddev(\@breakpoints, $bp_mean);
-	# round mean
-	return (int($bp_mean + 0.5), int($bp_dev + 0.5)); 
-}
 
 
 ##------------------------------------------------------------------------##
@@ -1022,9 +1028,13 @@ sub _init_read_bins{
 =cut
 
 sub _state_matrix{
-	my $self = shift;
+	my ($self,$append_matrix) = (@_,0);
+	
 	# state matrix
-	my @S = @{$self->{_state_matrix}};
+	my @S = $append_matrix && $self->{_state_matrix}
+		? @{$self->{_state_matrix}}
+		: map{[]}1..$self->len;	# init state matrix
+	
 	# predefined states
 	my %states = %{$self->{_states}};
 	
@@ -1288,12 +1298,9 @@ sub _consensus{
 	my $col_c = -1;
 	foreach my $col (@{$self->{_state_matrix}}){
 		$col_c++;
-		#my $cov = @$col;
 		# uncovered col
 		unless (scalar @$col){
 			$seq.= $self->{ref} ? substr($self->{ref}{seq}, $col_c, 1) : 'n';
-#			$qual.=chr(0+$self->{phred_offset});
-#			$covs.=chr(0+$self->{phred_offset});
 			push @freqs, 0;
 			next;
 		}
@@ -1329,8 +1336,6 @@ sub _consensus{
 		# check $max_freq, necessary due to long gap exception
 		unless ($max_freq){
 			$seq.= $self->{ref} ? substr($self->{ref}{seq}, $col_c, 1) : 'n';
-#			$qual.=chr(0+$self->{phred_offset});
-#			$covs.=chr(0+$self->{phred_offset});
 			push @freqs, 0;
 			next;
 		}
@@ -1341,11 +1346,6 @@ sub _consensus{
 		# get most prominent state
 		my $con = $states_rev{$idx};
 		$seq.= $con;
-		# entropy based quality
-		#$qual.= $self->_phred_Hx($col) x length($con);
-		# coverage based quality
-#		$qual.= chr($self->freq2phred($max_freq) + $self->{phred_offset}) x length($con);
-#		$covs.= chr($cov + $self->{phred_offset}) x length($con);
 		push @freqs, ($max_freq) x length($con);
 	}
 
