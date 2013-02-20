@@ -544,7 +544,7 @@ Calculate and the consensus sequence from state matrix. Returns a Fastq::Seq
 sub consensus{
 	my $self = shift;
 	my @hcrs = @_;
-	$self->_state_matrix(@hcrs);# unless $self->_state_matrix();
+	$self->_state_matrix();# unless $self->_state_matrix();
 	$self->_add_pre_calc_fq(@hcrs) if @hcrs;
 	$self->_consensus;
 	return $self->{con};
