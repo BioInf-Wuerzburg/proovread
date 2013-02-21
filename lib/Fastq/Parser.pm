@@ -435,8 +435,6 @@ sub sample_seq{
 			@reads = @shuffled_fqs > $n
 				? @shuffled_fqs[0..$n] 
 				: @shuffled_fqs; 
-			use Data::Dumper;
-			print Dumper(scalar @reads);
 		}else{
 
 			$size -= $size/100; # reduce size by 1% to prevent sampling eof

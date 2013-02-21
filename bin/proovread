@@ -1201,10 +1201,8 @@ sub prepare_lr{
 		$lrpr || $VS->exit("Unknown format in '--long-read' file: ".$_);
 	
 		my $lr_count = $lrpr->guess_seq_count();
-		print $lr_count, "\n";
 		push @lr_count, $lr_count;
 		my ($lr_length, $lr_dev) =  $lrpr->guess_seq_length;
-		print $lr_length, "\n";
 		push @lr_length, $lr_length;
 		push @lr_bps, ($lr_length * $lr_count);
 		

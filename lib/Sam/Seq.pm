@@ -629,20 +629,31 @@ sub chimera{
 			$lcov_bin_count++
 		}elsif($lcov_bin_count){
 			# require at least 2 consecutive low cov bins to trigger chimera check
-			push @lcov_bin_idxs, [($i-$lcov_bin_count,$i-1)] if $lcov_bin_count > 1;
+			# yet only consider local coverage drops (<5 bins)
+			push @lcov_bin_idxs, [($i-$lcov_bin_count,$i-1)] if ($lcov_bin_count > 1 && $lcov_bin_count < 5);
 			$lcov_bin_count = 0; # reset
 		}
 	}
 	
 	#TODO: heterozygosity proof -> left hand and right hand matrix separately
 	
+	my @coords;
 	# get the state matrix columns 
 	foreach my $lcov_bin_idxs (@lcov_bin_idxs){
-		my @col_idxs = (($lcov_bin_idxs->[0]-1) * $self->{bin_size}) .. (($lcov_bin_idxs->[1]+2) * $self->{bin_size} -1);
-		my @cols = @{$self->{_state_matrix}}[@col_idxs];
-		use Data::Dumper;
-		print Dumper($lcov_bin_idxs,\@cols);
+		my @col_idx_range = (
+			($lcov_bin_idxs->[0]-1) * $self->{bin_size},
+			($lcov_bin_idxs->[1]+2) * $self->{bin_size} -1
+		);
+		my @cols = @{$self->{_state_matrix}}[$col_idx_range[0] .. $col_idx_range[1]];
+		my @hx = map{Hx($_)}@cols;
+		push @coords, {
+			col_range => \@col_idx_range,
+			hx => \@hx
+		}
 	}
+	
+	return @coords;
+
 }
 
 
@@ -1271,11 +1282,9 @@ sub _add_pre_calc_fq{
 		my @seq = split (//, $seq->seq);
 		my @freqs = Sam::Seq->Phreds2Freqs($seq->phreds);
 		
-		use Data::Dumper;
 		for(my $i=0; $i<length($seq->seq); $i++){
 			# never add 0, if nothing more matches, a 0 count might be introduced
 			next unless $freqs[$i];
-			die Dumper($self->ref, $coords) unless defined $self->{_states}{$seq[$i]};
 			($S[$i+$coords->[0]][$self->{_states}{$seq[$i]}])+=	$freqs[$i];
 		}
 	}
@@ -1414,6 +1423,30 @@ sub _variants{
 }
 
 
+=head2 hx
+
+Takes a reference to an ARRAY of counts, converts the counts to probabilities
+ and computes and returns the shannon entropy to describe its composition.
+ Omits undef values.
+  
+  # R
+  hx = function(x){
+  	p = x/sum(x); 
+  	-(sum(sapply(p, function(pi){pi*log2(pi)})))
+  }
+
+=cut
+
+sub Hx{
+	my ($col) = @_;
+	my $total = 0;
+	my @states = grep{$_}@$col;
+	$total += $_ for @states;
+	my @Px = map{$_/$total}@states;
+	my $Hx;
+	$Hx -= $_ for map{$_ * (log($_)/log(2)) }@Px;
+	return $Hx;
+}
 
 sub _phred_Hx{
 	my ($self, $col) = @_;

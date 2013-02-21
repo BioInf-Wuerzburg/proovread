@@ -294,8 +294,6 @@ sub sample_seqs{
 		@seqs = @shuffled_fas > $n
 			? @shuffled_fas[0..$n] 
 			: @shuffled_fas; 
-		use Data::Dumper;
-		print Dumper(scalar @seqs);
 	}else{
 		$size -= $size/100; # reduce size by 1% to prevent sampling eof
 	

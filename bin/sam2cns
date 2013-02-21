@@ -364,7 +364,9 @@ if($rpr){
 	while(my $aln = $sp->next_aln()){
 		# try to add aln, if sufficient score, add to temporary sam file
 		last unless exists $PB{$aln->rname};
-		$PB{$aln->rname}->add_aln($aln);
+		$opt_detect_chimera		# binning required for chimera detection
+			? $PB{$aln->rname}->add_aln_by_score($aln)
+			: $PB{$aln->rname}->add_aln($aln);
 	}
 }else{
 	my $ref_seen = 0; # since we read the entire header to %PB, we need to count ref seqs
@@ -377,7 +379,9 @@ if($rpr){
 			$ref_seen++;
 			last if $ref_seen > $opt_max_reads;
 		}
-		$PB{$aln->rname}->add_aln($aln);
+		$opt_detect_chimera		# binning required for chimera detection
+			? $PB{$aln->rname}->add_aln_by_score($aln)
+			: $PB{$aln->rname}->add_aln($aln);
 	}
 }
 
@@ -399,22 +403,12 @@ foreach my $pb_id(@PB_IDS){
 	
 	my $con = $PB{$pb_id}->consensus(@hcrs);
 	
+	# chimera
 	if($opt_detect_chimera){
-		my ($pos, $dev) = $PB{$pb_id}->chimera();
-#		if($pos && $dev < 20){
-#			# most likely a chimera with distinct breakpoint
-#			# tag description
-#			$con->{seq_head}.= " CHIMERA:$pos+-$dev";
-#			# adjust qual string at breakpoint position
-#			substr($con->{qual}, $pos-10, 20, chr($opt_qv_offset)x20);
-#		}elsif(defined $pos){
-#			# TODO: unresolved chimera possibles
-#			# possible chimera, but not resolvable
-#			$con->{seq_head}.= " CHIMERA:unresolved";
-#			# write current fastq
-#			print $fch $con->string;
-#			next;
-#		}
+		my @chimera_coords = $PB{$pb_id}->chimera();
+		foreach my $c(@chimera_coords){
+			printf $fch ("%s\t%d\t%d\t%s\n", $pb_id, @{$c->{col_range}}, join("\t", @{$c->{hx}}));
+		}
 	}
 	
 	
