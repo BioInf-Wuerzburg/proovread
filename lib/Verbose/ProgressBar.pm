@@ -223,11 +223,10 @@ sub update{
 			$eta = $ela_time >= 86400 
 				? sprintf(" TTS %dd %02d:%02d:%02d", (gmtime($ela_time))[7,2,1,0])
 				: sprintf(" TTS %02d:%02d:%02d", (gmtime($ela_time))[2,1,0])
-		}elsif($eta = ($self->{_bins}-$bin) * $self->{_bin_time}){
-			my $ela_time = $time-$self->{_start_time};
-			$eta = $ela_time >= 86400 
-				? sprintf(" ETA %dd %02d:%02d:%02d", (gmtime($ela_time))[7,2,1,0])
-				: sprintf(" ETA %02d:%02d:%02d", (gmtime($ela_time))[2,1,0])
+		}elsif(my $eta_time = ($self->{_bins}-$bin) * $self->{_bin_time}){
+			$eta = $eta_time >= 86400 
+				? sprintf(" ETA %dd %02d:%02d:%02d", (gmtime($eta_time))[7,2,1,0])
+				: sprintf(" ETA %02d:%02d:%02d", (gmtime($eta_time))[2,1,0])
 		}else{
 			$eta = '';
 		}

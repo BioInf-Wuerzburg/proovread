@@ -491,12 +491,16 @@ $opt_sam_file && ! -f $opt_sam_file && pod2usage("Cannot find $opt_sam_file");
 # print parameter
 # 'cause I'm lazy
 $V->nline;
-$VS->verbose("Custom config parameter\n"
-	. (Dumper(\%cfg) =~ s/^.*\n//r) =~ s/\n.*$//r) ;
+my $cfg_string = Dumper(\%cfg);
+$cfg_string =~ s/^.*\n//;
+$cfg_string =~ s/\n.*$//;
+$VS->verbose("Custom config parameter\n".$cfg_string);
 
 $V->nline;
-$VS->verbose("Command line parameter\n"
-	. (Dumper(\%opt) =~ s/^.*\n//r) =~ s/\n.*$//r) ;
+my $cmd_string = Dumper(\%opt);
+$cmd_string =~ s/^.*\n//;
+$cmd_string =~ s/\n.*$//; 
+$VS->verbose("Command line parameter\n".$cmd_string);
 
 
 ##------------------------------------------------------------------------##
