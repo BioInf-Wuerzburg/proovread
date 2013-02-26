@@ -638,19 +638,21 @@ sub chimera{
 	#TODO: heterozygosity proof -> left hand and right hand matrix separately
 	
 	my @coords;
-	# get the state matrix columns 
+	# get the state matrix columns
 	foreach my $lcov_bin_idxs (@lcov_bin_idxs){
 		my @col_idx_range = (
 			($lcov_bin_idxs->[0]-1) * $self->{bin_size},
 			($lcov_bin_idxs->[1]+2) * $self->{bin_size} -1
 		);
 		my @cols = @{$self->{_state_matrix}}[$col_idx_range[0] .. $col_idx_range[1]];
+		return if grep{!@$_}@cols; # uncovered column is zero quality anyways
 		my @hx = map{Hx($_)}@cols;
+		
 		push @coords, {
 			col_range => \@col_idx_range,
 			hx => \@hx
-		}
-	}
+		} if (sort{$b <=> $a}@hx)[2] # at least 3 mismatching columns 
+	} 
 	
 	return @coords;
 
