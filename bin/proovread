@@ -43,7 +43,7 @@ use Time::HiRes qw(usleep);
 
 use Data::Dumper;
 
-our $VERSION = '0.83';
+our $VERSION = '0.84';
 our ($REVISION) = '$Revision$' =~ /(\d+)/;
 our ($MODIFIED) = '$Date$' =~ /Date: (\S+\s\S+)/;
 
@@ -62,6 +62,14 @@ Correct single molecule sequencing reads by iterative mapping of high
 =cut
 
 =head1 CHANGELOG
+
+=head2 0.84
+
+=over
+
+=item [BugFix] Short reads stats are not computed in case of 'external-sam'. 
+
+=back
 
 =head2 0.83
 
@@ -609,16 +617,20 @@ foreach(@$opt_sr_file){
 $sr_qv_offset_total = $cfg{'sr-qv-offset'} unless defined $sr_qv_offset_total;
 
 my $mean_sr_length;
-$mean_sr_length += $_ for @sr_length;
-$mean_sr_length /= @sr_length;
-
 my $mean_sr_dev;
-$mean_sr_dev += $_ for @sr_length_dev;
-$mean_sr_dev /= @sr_length_dev;
+my $min_lcr_length;
+if(@$opt_sr_file){
+	$mean_sr_length += $_ for @sr_length;
+	$mean_sr_length /= @sr_length;
 
-my $min_lcr_length = $mean_sr_length + $mean_sr_dev;
-$min_lcr_length += $min_lcr_length * 0.15; # add another 15 percent
-$min_lcr_length = int($min_lcr_length + 0.5);
+	$mean_sr_dev += $_ for @sr_length_dev;
+	$mean_sr_dev /= @sr_length_dev;
+
+	$min_lcr_length = $mean_sr_length + $mean_sr_dev;
+	$min_lcr_length += $min_lcr_length * 0.15; # add another 15 percent
+	$min_lcr_length = int($min_lcr_length + 0.5);
+}
+
 
 
 ##------------------------------------------------------------------------##
@@ -1274,7 +1286,7 @@ sub correct_sr_mt{
 		$TASKS[$TC] eq 'shrimp-iter-1' # calculate hcrs on first iter for second iter
 			? ('--min-lcr-length' => $min_lcr_length) # params from config
 			: ('--min-hcr-length' => 0),
-		$TASKS[$TC] eq 'shrimp-finish' # calculate hcrs on first iter for second iter
+		($TASKS[$TC] eq 'shrimp-finish' || $TASKS[$TC] eq 'read-sam') # calculate hcrs on first iter for second iter
 			? ('--ignore-hcr' => 1, $cfg{'detect-chimera'} ? ('--detect-chimera' => 1) : ()) # params from config
 			: (),
 		$cfg

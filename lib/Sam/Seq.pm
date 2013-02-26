@@ -321,6 +321,269 @@ sub Phreds2Freqs{
 	}@_;
 }
 
+=head2 Hx
+
+Takes a reference to an ARRAY of counts, converts the counts to probabilities
+ and computes and returns the shannon entropy to describe its composition.
+ Omits undef values.
+  
+  # R
+  hx = function(x){
+  	p = x/sum(x); 
+  	-(sum(sapply(p, function(pi){pi*log2(pi)})))
+  }
+
+=cut
+
+sub Hx{
+	my ($col) = @_;
+	my $total = 0;
+	my @states = grep{$_}@$col;
+	$total += $_ for @states;
+	my @Px = map{$_/$total}@states;
+	my $Hx;
+	$Hx -= $_ for map{$_ * (log($_)/log(2)) }@Px;
+	return $Hx;
+}
+
+
+=head2 State_matrix
+
+=cut
+
+sub State_matrix{
+	my %p = (
+		alns => undef,
+		'length' => undef,
+		states => {},
+		matrix => undef,
+		@_
+	);
+	
+	die unless defined ($p{alns} and $p{'length'}) || $p{matrix};
+	
+	# state matrix
+	my @S = $p{matrix}
+		? @{$p{matrix}}
+		: map{[]}1..$p{'length'};	# init state matrix
+	
+	# predefined states
+	my %states = %{$p{states}};
+	
+	foreach my $aln (@{$p{alns}}){
+		
+		###################
+		### prepare aln ###
+		# get read seq
+		my $seq = $aln->seq;
+		my $orig_seq_length = length($seq);
+		
+		next unless $orig_seq_length > 50;
+		
+		# get read cigar, eg 80M2D3M1IM4
+		my @cigar = split(/(\d+)/,$aln->cigar);
+		shift @cigar;
+		
+		$V->exit("Empty Cigar") unless @cigar;
+		
+		# reference position
+		my $rpos = $aln->pos-1;
+
+		if($Trim){
+			##################
+			### InDelTaboo ###
+			# this also removes leading/trailing InDels regardless of InDelTaboo
+			# trim head
+			my $mc = 0;
+			my $dc = 0;
+			my $ic = 0;
+			my $InDelTabooLength = int($orig_seq_length * $InDelTaboo + 0.5);
+			for(my $i=0; $i<@cigar;$i+=2){
+				if($cigar[$i+1] eq 'M'){
+					if($mc + $ic + $cigar[$i] > $InDelTabooLength){
+						if($i){# there was something before this match
+							# only cut before this match
+							# trim cigar
+							splice(@cigar, 0, $i);
+							# adjust rpos
+							$rpos+= ($mc+$dc);
+							# trim seq
+							substr($seq, 0, $mc+$ic, '');
+						}
+						last;
+					}
+					$mc+=$cigar[$i];
+				}elsif($cigar[$i+1] eq 'D'){
+					$dc+= $cigar[$i];
+				}elsif($cigar[$i+1] eq 'I'){
+					$ic+= $cigar[$i];
+				}else{
+					$V->exit("Unknown Cigar '".$cigar[$i+1]."'");
+				}
+			}
+			
+			# have to have kept at least 50 bps and 70% of original read length
+			#  to consider read for state matrix
+			next if length($seq) < 50  || (length($seq)/$orig_seq_length) < 0.7;
+			
+			# trim tail
+			my $tail=0;	
+			for(my $i=$#cigar-1; $i;$i-=2){
+				if($cigar[$i+1] eq 'M'){
+					$tail+=$cigar[$i];
+					if($tail > $InDelTabooLength){
+						if($i < $#cigar-1){# there is after this match
+							# only cut before this match
+							my $tail_cut = $tail-$cigar[$i]; 
+							# trim cigar
+							splice(@cigar, -($#cigar-($i+1)));
+							# trim seq
+							substr($seq, -$tail_cut, $tail_cut, '');
+						}
+						last;
+					}
+				}elsif($cigar[$i+1] eq 'D'){ # ignore leading deletions, but adjust rpos
+	
+				}elsif($cigar[$i+1] eq 'I'){
+					$tail+=$cigar[$i];
+				}else{
+					$V->exit("Unknown Cigar '".$cigar[$i+1]."'");
+				}
+			}
+	
+			# have to have kept at least 50 bps and 70% of original read length
+			#  to consider read for state matrix
+			next if length($seq) < 50  || (length($seq)/$orig_seq_length) < 0.7;
+		}
+		
+=DEPRECATED leading/trailing long indel removal
+		#		# remove leading/trailing I
+		#		# there should be no l/t D since the reads are aligned semiglobal
+		#		# leading
+		#		if($cigar[1] eq 'I'){
+		#			#use Data::Dumper; print Dumper("leading I", $aln);
+		#			substr($seq,0,$cigar[0],''); # adjust read
+		#			splice(@cigar,0,2); # adjust cigar
+		#		}
+		#		# trailing
+		#		my $e = $#cigar;
+		#		if($cigar[$e] eq 'I'){
+		#			#use Data::Dumper; print Dumper("trailing I", $aln);
+		#			substr($seq,-$cigar[$e-1],$cigar[$e-1],''); # adjust read
+		#			splice(@cigar,$e-1,2); # adjust cigar
+		#		}
+		#		
+		#		# detect long I/Ds within first 3 M of read
+		#		if($cigar[1] eq 'M' && $cigar[0] < 4 && @cigar > 3){
+		#			if($cigar[3] eq 'I' && $cigar[2] > 2){
+		#				#use Data::Dumper; print Dumper("leading long I", $aln);
+		#				
+		#				# "long" (>= 3bp) I within first 3 matches -> discard read start
+		#				$rpos+=$cigar[0]; # increase rpos of M
+		#				substr($seq,0,$cigar[0]+$cigar[2],''); # remove I and M from read
+		#				splice(@cigar,0,4); # adjust cigar
+		#			}elsif($cigar[3] eq 'D' && $cigar[2] > 2){
+		#				#use Data::Dumper; print Dumper("leading long D", $aln);
+		#				
+		#				# "long" (>= 3bp) D within first 3 M -> discard read start
+		#				$rpos+=($cigar[0]+$cigar[2]); # increase rpos by number of M + D
+		#				substr($seq,0,$cigar[0],''); # remove M from read
+		#				splice(@cigar,0,4); # adjust cigar
+		#			}
+		#		}
+=cut		
+		
+		
+		
+		#######################
+		### cigar to states ###
+		my @states;
+		
+		# cigar counter, increment by 2 to capture count and type of cigar (10,M) (3,I) (5,D) ...
+		
+		my $qpos = 0;
+		for(my $i=0; $i<@cigar;$i+=2){
+			if($cigar[$i+1] eq 'M'){
+				push @states, split(//,substr($seq,$qpos,$cigar[$i]));
+				$qpos += $cigar[$i];
+			}elsif($cigar[$i+1] eq 'D'){
+				push @states, ('-') x $cigar[$i];
+			}elsif($cigar[$i+1] eq 'I'){
+				if($i){
+					# append to prev state
+					$states[$#states] .= substr($seq,$qpos,$cigar[$i]);
+				}else{
+					$states[0] = substr($seq,$qpos,$cigar[$i]);		
+				}
+				$qpos += $cigar[$i];
+			}else{
+				$V->exit("Unknown Cigar '".$cigar[$i+1]."'");
+			}
+		}
+		
+		
+		########################
+		### states to matrix ###
+		
+		foreach my $state (@states){
+			if (length ($state) > 1 && ! exists $states{$state}){
+				$states{$state} = scalar keys %states; 
+			}		
+			($S[$rpos][$states{$state}])++;  # match/gap states always exist
+			$rpos++;
+		}
+
+	
+=DEPRECATED simultaneous cigar parsing and state matrix counting
+		#	my $state; # buffer last match, required if followed by insertion
+		#		for(my $i=0; $i<@cigar;$i+=2){
+		#			if($cigar[$i+1] eq 'M'){
+		#				my @subseq = split(//,substr($seq,0,$cigar[$i],''));
+		#				foreach $_ (@subseq){
+		#					($S[$rpos][$states{$_}])++;  # match states always exist
+		#					$rpos++;
+		#				}
+		#				$state = $subseq[$#subseq];
+		#			}elsif($cigar[$i+1] eq 'D'){
+		#				for(1..$cigar[$i]){
+		#					($S[$rpos][4])++;  # $states{'-'} is always 4 
+		#					$rpos++;
+		#				}
+		#				$state = '-';
+		#			}elsif($cigar[$i+1] eq 'I'){
+		#				#unless ($state){print STDERR $aln->pos," : ",$rpos,"\n"} 
+		#				my $complex_state;
+		#				if($state){
+		#					$complex_state = $state.substr($seq,0,$cigar[$i],'');
+		#					($S[$rpos-1][$states{$state}])--; #
+		#				}else{
+		#					$complex_state = substr($seq,0,$cigar[$i],'');
+		#				}
+		#				# replace by complex state, add state idx to %states if new
+		#				if(exists ($states{$complex_state})){
+		#					#TODO: insertion before first M
+		#					next if ($rpos-1 < 0);
+		#					$S[$rpos-1][$states{$complex_state}]++
+		#				}else{
+		#					next if ($rpos-1 < 0);
+		#					$states{$complex_state} = scalar keys %states;
+		#					$S[$rpos-1][$states{$complex_state}]++;
+		#				}
+		#				#($S[$rpos-1][exists ($states{$complex_state}) ? $states{$complex_state} : $states{$complex_state} = keys %states])++; 
+		#				#$seq[$#seq].= 
+		#			}else{
+		#				$V->exit("Unknown Cigar '".$cigar[$i+1]."'");
+		#			}
+		#		}
+=cut
+
+	
+	}
+	
+	return \@S, \%states;
+	
+}
+
 
 ##------------------------------------------------------------------------##
 
@@ -544,7 +807,7 @@ Calculate and the consensus sequence from state matrix. Returns a Fastq::Seq
 sub consensus{
 	my $self = shift;
 	my @hcrs = @_;
-	$self->_state_matrix();# unless $self->_state_matrix();
+	$self->_init_state_matrix();# unless $self->_init_state_matrix();
 	$self->_add_pre_calc_fq(@hcrs) if @hcrs;
 	$self->_consensus;
 	return $self->{con};
@@ -562,8 +825,8 @@ By default the state matrix is calculated, wether or not it has
 sub variants{
 	my ($self, $reuse_matrix) = (@_,0);
 	# compute state_matrix if required/wanted
-	unless($self->_state_matrix() || !$reuse_matrix){
-		$self->_state_matrix();
+	unless($self->{_state_matrix} || !$reuse_matrix){
+		$self->_init_state_matrix();
 	}
 	
 	return $self->_variants;
@@ -583,8 +846,8 @@ sub coverage{
 	# calculate from _state_matrix, not the fastest way but accurate and
 	#  already implemented :)
 	# compute state_matrix if required/wanted
-	unless($self->_state_matrix() || !$reuse_matrix){
-		$self->_state_matrix();
+	unless($self->{_state_matrix} || !$reuse_matrix){
+		$self->_init_state_matrix();
 	}
 
 	my @covs;
@@ -611,7 +874,7 @@ By default the state matrix is calculated, wether or not it has
 sub chimera{
 	my ($self, $reuse_matrix) = (@_,0);
 	# compute state_matrix if required/wanted
-	$self->_state_matrix() unless ($self->_state_matrix() || !$reuse_matrix);
+	$self->_init_state_matrix() unless ($self->{_state_matrix} || !$reuse_matrix);
 	
 	my @bin_bases = @{$self->{_bin_bases}};
 	return unless @bin_bases > 20; # need at least 20 bins to make sense
@@ -635,23 +898,80 @@ sub chimera{
 		}
 	}
 	
-	#TODO: heterozygosity proof -> left hand and right hand matrix separately
 	
 	my @coords;
-	# get the state matrix columns
+	# get the state matrix columns 
 	foreach my $lcov_bin_idxs (@lcov_bin_idxs){
-		my @col_idx_range = (
-			($lcov_bin_idxs->[0]-1) * $self->{bin_size},
-			($lcov_bin_idxs->[1]+2) * $self->{bin_size} -1
+		# uncovered columns in lcov are zero quality anyways
+		my $mat_from = ($lcov_bin_idxs->[0]-1) * $self->{bin_size};
+		my $mat_to = ($lcov_bin_idxs->[1]+2) * $self->{bin_size} -1;
+		
+		next if grep{!@$_}@{$self->{_state_matrix}}[$mat_from .. $mat_to];
+	
+		#TODO: heterozygosity proof -> left hand and right hand matrix separately
+		my $fl = $lcov_bin_idxs->[0]-4;
+		my $tr = $lcov_bin_idxs->[1]+5;
+		my $delta = int(($tr - $fl - 1)/2);
+		my $tl = $fl + $delta;
+		my $fr = $tr - $delta;
+		
+		my @alns_l_by_bin = $self->alns_by_bins($fl, $tl);
+
+		my @alns_l;
+		foreach(@alns_l_by_bin){
+			push @alns_l, @$_; 
+		};
+		my @alns_r_by_bin = $self->alns_by_bins($fr, $tr);
+		my @alns_r;
+		foreach(@alns_r_by_bin){
+			push @alns_r, @$_; 
+		};
+		
+		my ($mat_l) = State_matrix(
+			alns => \@alns_l,
+			states => $self->{_states},
+			'length' => $self->len,
 		);
-		my @cols = @{$self->{_state_matrix}}[$col_idx_range[0] .. $col_idx_range[1]];
-		return if grep{!@$_}@cols; # uncovered column is zero quality anyways
-		my @hx = map{Hx($_)}@cols;
+		
+		my ($mat_r) = State_matrix(
+			alns => \@alns_r,
+			states => $self->{_states},
+			'length' => $self->len,
+		);
+		
+		my @mat_r = @{$mat_r}[$mat_from .. $mat_to];
+		my @mat_l = @{$mat_l}[$mat_from .. $mat_to];
+		
+		my @hx_delta;
+		for(my $i=0; $i< @mat_r; $i++){
+			my $hx_r = Hx($mat_r[$i]) || 0; 
+			my $hx_l = Hx($mat_l[$i]) || 0;
+			my $hx_gt = $hx_r > $hx_l ? $hx_r : $hx_l;
+
+			my @col;
+			
+			my ($max) = sort{$b <=>$a}(scalar @{$mat_l[$i]}, scalar @{$mat_r[$i]});
+			
+			for(my $j=0; $j<$max; $j++){
+				if($mat_l[$i][$j] && $mat_r[$i][$j]){
+					push @col, $mat_l[$i][$j] + $mat_r[$i][$j]
+				}elsif($mat_l[$i][$j]){
+					push @col, $mat_l[$i][$j];
+				}else{
+					push @col, $mat_r[$i][$j];
+				}
+			}
+
+			push @hx_delta, Hx(\@col) - $hx_gt; 
+			
+		}
 		
 		push @coords, {
-			col_range => \@col_idx_range,
-			hx => \@hx
-		} if (sort{$b <=> $a}@hx)[2] # at least 3 mismatching columns 
+			col_range => [$mat_from, $mat_to],
+			hx => \@hx_delta
+		} if (sort{$b <=> $a}@hx_delta)[3] > 0 # at least 4 mismatching columns 
+
+		#TODO: self chimera
 	} 
 	
 	return @coords;
@@ -945,20 +1265,25 @@ sub alns{
 =head2 alns_by_bins
 
 Returns list of bins, each containing list of Sam::Alignments, decendingly 
- ordered by their score.
+ ordered by their score. Takes FROM (default 0) and TO (default last bin)
+ as optional arguments.
 
 =cut
 
 sub alns_by_bins{
-	my $self = shift;
+	my ($self, $from, $to) = (@_, 0);
+	my $alns = $self->{_bin_alns};
+	$to = @$alns-1 unless defined $to; 
 	my @bins;
-	foreach my $bin (@{$self->{_bin_alns}}){
+	for(my $i=$from; $i <= $to; $i++ ){
 		push @bins, [map{
 			$self->{sam}
 				? $self->{sam}->aln_by_pos( $self->{_alns}{$_} )
 				: $self->{_alns}{$_};
-		}@$bin];
+		}@{$alns->[$i]}];
 	};
+		
+	
 	return @bins;
 }
 
@@ -1036,234 +1361,25 @@ sub _init_read_bins{
 	$self->{_bin_bases} = [(0) x ($last_bin+1)];
 }
 
-=head2 _state_matrix
+=head2 _init_state_matrix
 
 =cut
 
-sub _state_matrix{
+sub _init_state_matrix{
 	my ($self,$append_matrix) = (@_,0);
 	
-	# state matrix
-	my @S = $append_matrix && $self->{_state_matrix}
-		? @{$self->{_state_matrix}}
-		: map{[]}1..$self->len;	# init state matrix
-	
-	# predefined states
-	my %states = %{$self->{_states}};
-	
-	while(my $aln = $self->next_aln){
-		
-		###################
-		### prepare aln ###
-		# get read seq
-		my $seq = $aln->seq;
-		my $orig_seq_length = length($seq);
-		
-		next unless $orig_seq_length > 50;
-		
-		# get read cigar, eg 80M2D3M1IM4
-		my @cigar = split(/(\d+)/,$aln->cigar);
-		shift @cigar;
-		
-		$V->exit("Empty Cigar") unless @cigar;
-		
-		# reference position
-		my $rpos = $aln->pos-1;
+	my ($S, $states) = State_matrix(
+		'alns' => [$self->alns],
+		'states' => $self->{_states},
+		'length' => $self->len,
+		$append_matrix
+			? ('matrix' => $self->{_state_matrix})
+			: (),
+	);
 
-		if($Trim){
-			##################
-			### InDelTaboo ###
-			# this also removes leading/trailing InDels regardless of InDelTaboo
-			# trim head
-			my $mc = 0;
-			my $dc = 0;
-			my $ic = 0;
-			my $InDelTabooLength = int($orig_seq_length * $InDelTaboo + 0.5);
-			for(my $i=0; $i<@cigar;$i+=2){
-				if($cigar[$i+1] eq 'M'){
-					if($mc + $ic + $cigar[$i] > $InDelTabooLength){
-						if($i){# there was something before this match
-							# only cut before this match
-							# trim cigar
-							splice(@cigar, 0, $i);
-							# adjust rpos
-							$rpos+= ($mc+$dc);
-							# trim seq
-							substr($seq, 0, $mc+$ic, '');
-						}
-						last;
-					}
-					$mc+=$cigar[$i];
-				}elsif($cigar[$i+1] eq 'D'){
-					$dc+= $cigar[$i];
-				}elsif($cigar[$i+1] eq 'I'){
-					$ic+= $cigar[$i];
-				}else{
-					$V->exit("Unknown Cigar '".$cigar[$i+1]."'");
-				}
-			}
-			
-			# have to have kept at least 50 bps and 70% of original read length
-			#  to consider read for state matrix
-			next if length($seq) < 50  || (length($seq)/$orig_seq_length) < 0.7;
-			
-			# trim tail
-			my $tail=0;	
-			for(my $i=$#cigar-1; $i;$i-=2){
-				if($cigar[$i+1] eq 'M'){
-					$tail+=$cigar[$i];
-					if($tail > $InDelTabooLength){
-						if($i < $#cigar-1){# there is after this match
-							# only cut before this match
-							my $tail_cut = $tail-$cigar[$i]; 
-							# trim cigar
-							splice(@cigar, -($#cigar-($i+1)));
-							# trim seq
-							substr($seq, -$tail_cut, $tail_cut, '');
-						}
-						last;
-					}
-				}elsif($cigar[$i+1] eq 'D'){ # ignore leading deletions, but adjust rpos
-	
-				}elsif($cigar[$i+1] eq 'I'){
-					$tail+=$cigar[$i];
-				}else{
-					$V->exit("Unknown Cigar '".$cigar[$i+1]."'");
-				}
-			}
-	
-			# have to have kept at least 50 bps and 70% of original read length
-			#  to consider read for state matrix
-			next if length($seq) < 50  || (length($seq)/$orig_seq_length) < 0.7;
-		}
-		
-=DEPRECATED leading/trailing long indel removal
-		#		# remove leading/trailing I
-		#		# there should be no l/t D since the reads are aligned semiglobal
-		#		# leading
-		#		if($cigar[1] eq 'I'){
-		#			#use Data::Dumper; print Dumper("leading I", $aln);
-		#			substr($seq,0,$cigar[0],''); # adjust read
-		#			splice(@cigar,0,2); # adjust cigar
-		#		}
-		#		# trailing
-		#		my $e = $#cigar;
-		#		if($cigar[$e] eq 'I'){
-		#			#use Data::Dumper; print Dumper("trailing I", $aln);
-		#			substr($seq,-$cigar[$e-1],$cigar[$e-1],''); # adjust read
-		#			splice(@cigar,$e-1,2); # adjust cigar
-		#		}
-		#		
-		#		# detect long I/Ds within first 3 M of read
-		#		if($cigar[1] eq 'M' && $cigar[0] < 4 && @cigar > 3){
-		#			if($cigar[3] eq 'I' && $cigar[2] > 2){
-		#				#use Data::Dumper; print Dumper("leading long I", $aln);
-		#				
-		#				# "long" (>= 3bp) I within first 3 matches -> discard read start
-		#				$rpos+=$cigar[0]; # increase rpos of M
-		#				substr($seq,0,$cigar[0]+$cigar[2],''); # remove I and M from read
-		#				splice(@cigar,0,4); # adjust cigar
-		#			}elsif($cigar[3] eq 'D' && $cigar[2] > 2){
-		#				#use Data::Dumper; print Dumper("leading long D", $aln);
-		#				
-		#				# "long" (>= 3bp) D within first 3 M -> discard read start
-		#				$rpos+=($cigar[0]+$cigar[2]); # increase rpos by number of M + D
-		#				substr($seq,0,$cigar[0],''); # remove M from read
-		#				splice(@cigar,0,4); # adjust cigar
-		#			}
-		#		}
-=cut		
-		
-		
-		
-		#######################
-		### cigar to states ###
-		my @states;
-		
-		# cigar counter, increment by 2 to capture count and type of cigar (10,M) (3,I) (5,D) ...
-		
-		my $qpos = 0;
-		for(my $i=0; $i<@cigar;$i+=2){
-			if($cigar[$i+1] eq 'M'){
-				push @states, split(//,substr($seq,$qpos,$cigar[$i]));
-				$qpos += $cigar[$i];
-			}elsif($cigar[$i+1] eq 'D'){
-				push @states, ('-') x $cigar[$i];
-			}elsif($cigar[$i+1] eq 'I'){
-				if($i){
-					# append to prev state
-					$states[$#states] .= substr($seq,$qpos,$cigar[$i]);
-				}else{
-					$states[0] = substr($seq,$qpos,$cigar[$i]);		
-				}
-				$qpos += $cigar[$i];
-			}else{
-				$V->exit("Unknown Cigar '".$cigar[$i+1]."'");
-			}
-		}
-		
-		
-		########################
-		### states to matrix ###
-		
-		foreach my $state (@states){
-			if (length ($state) > 1 && ! exists $states{$state}){
-				$states{$state} = scalar keys %states; 
-			}		
-			($S[$rpos][$states{$state}])++;  # match/gap states always exist
-			$rpos++;
-		}
-
-	
-=DEPRECATED simultaneous cigar parsing and state matrix counting
-		#	my $state; # buffer last match, required if followed by insertion
-		#		for(my $i=0; $i<@cigar;$i+=2){
-		#			if($cigar[$i+1] eq 'M'){
-		#				my @subseq = split(//,substr($seq,0,$cigar[$i],''));
-		#				foreach $_ (@subseq){
-		#					($S[$rpos][$states{$_}])++;  # match states always exist
-		#					$rpos++;
-		#				}
-		#				$state = $subseq[$#subseq];
-		#			}elsif($cigar[$i+1] eq 'D'){
-		#				for(1..$cigar[$i]){
-		#					($S[$rpos][4])++;  # $states{'-'} is always 4 
-		#					$rpos++;
-		#				}
-		#				$state = '-';
-		#			}elsif($cigar[$i+1] eq 'I'){
-		#				#unless ($state){print STDERR $aln->pos," : ",$rpos,"\n"} 
-		#				my $complex_state;
-		#				if($state){
-		#					$complex_state = $state.substr($seq,0,$cigar[$i],'');
-		#					($S[$rpos-1][$states{$state}])--; #
-		#				}else{
-		#					$complex_state = substr($seq,0,$cigar[$i],'');
-		#				}
-		#				# replace by complex state, add state idx to %states if new
-		#				if(exists ($states{$complex_state})){
-		#					#TODO: insertion before first M
-		#					next if ($rpos-1 < 0);
-		#					$S[$rpos-1][$states{$complex_state}]++
-		#				}else{
-		#					next if ($rpos-1 < 0);
-		#					$states{$complex_state} = scalar keys %states;
-		#					$S[$rpos-1][$states{$complex_state}]++;
-		#				}
-		#				#($S[$rpos-1][exists ($states{$complex_state}) ? $states{$complex_state} : $states{$complex_state} = keys %states])++; 
-		#				#$seq[$#seq].= 
-		#			}else{
-		#				$V->exit("Unknown Cigar '".$cigar[$i+1]."'");
-		#			}
-		#		}
-=cut
-
-	}
-	
-	
 	# return state matrix
-	$self->{_state_matrix} = \@S;
-	$self->{_states} = \%states;
+	$self->{_state_matrix} = $S;
+	$self->{_states} = $states;
 	
 	return $self;
 	
@@ -1424,31 +1540,6 @@ sub _variants{
 	return $self;
 }
 
-
-=head2 hx
-
-Takes a reference to an ARRAY of counts, converts the counts to probabilities
- and computes and returns the shannon entropy to describe its composition.
- Omits undef values.
-  
-  # R
-  hx = function(x){
-  	p = x/sum(x); 
-  	-(sum(sapply(p, function(pi){pi*log2(pi)})))
-  }
-
-=cut
-
-sub Hx{
-	my ($col) = @_;
-	my $total = 0;
-	my @states = grep{$_}@$col;
-	$total += $_ for @states;
-	my @Px = map{$_/$total}@states;
-	my $Hx;
-	$Hx -= $_ for map{$_ * (log($_)/log(2)) }@Px;
-	return $Hx;
-}
 
 sub _phred_Hx{
 	my ($self, $col) = @_;
