@@ -20,31 +20,49 @@ $|++;
 
 ##------------------------------------------------------------------------##
 
-=head1 NAME Progress
+=head1 NAME 
+
+Verbose::ProgressBar - Progress Visualisation.
+
+=cut
 
 =head1 DESCRIPTION
 
-Collection of generic function for progress calculation and visualisation
+Visualizes progress in an self-updating pv like ProgressBar, inlcuding ETA
+ calculation.
 
 =cut
 
 =head1 SYNOPSIS
 
-=cut
 
-=head1 TODO
+  # Counter based progress
+  my $iter = 10000;
+  my $pg = Verbose::ProgressBar->new(
+    size => $iter$fh
+  )
+  
+  my $i;
+  for($i=0;$i++;$i<$iter){
+  	$i++;
+  	$pg->update($i)
+  }
+  $pg->finish($i);
+  
+  # File size based progress
+  open(my FILE, "my.file");
+  my $pg = Verbose::ProgressBar->new(
+    size => $fh,
+    line_width => 120,
+  )
+  # parse large file linewise
+  my $c=0;
+  while(<FILE>){
+    # invoke update every 10000th line
+    $pg->update unless $c%10000;
+  };
+  $pg->finish;
 
-=over
-
-=item Docu
-
-=item SYNOPSIS
-
-=item unknown size
-
-=item very small sizes (< bin)
-
-=back
 
 =cut
 
@@ -54,7 +72,12 @@ Collection of generic function for progress calculation and visualisation
 
 =over
 
-=item [BugFix] TSS is now always printed in case finish is called.
+=item [Feature] Added C<level> and C<report_level> feature to modify behaviour
+ according to given verbose level.
+
+=item [BugFix] TTS and ETA now also show number of days, if required.
+
+=item [BugFix] TTS is now always printed in case finish is called.
 
 =item [Change] Preference libs in same folder over @INC
 
@@ -113,7 +136,9 @@ sub new{
 	my $self = {
 		fh => \*STDERR,
 		size => undef,		# number, file or fh
-		line_width => 80,	# 
+		line_width => 80,	#
+		level => 1,
+		report_level => 1, 
 		_fh =>undef, 		# a monitored file handle
 		_bins => undef,
 		_bin => -1,
@@ -163,6 +188,8 @@ sub update{
 	(my $time = time)-$self->{_time} || return;
 	$self->{_start_time} || ($self->{_start_time} = $time);
 	
+	$self->{level} > $self->{report_level} && return;
+	
 	if (!defined ($value) && defined($self->{_fh})){
 		$self->{value} = tell($self->{_fh});
 	}elsif(!$value){
@@ -192,9 +219,15 @@ sub update{
 		# (re)calculate bin time
 		$self->{_bin_time} = ($time-$self->{_start_time})/$bin;
 		if($self->{_time} < 0){ # reset by finish
-			$eta = sprintf(" TTS %02d:%02d:%02d", (gmtime($time-$self->{_start_time}))[2,1,0])
+			my $ela_time = $time-$self->{_start_time};		
+			$eta = $ela_time >= 86400 
+				? sprintf(" TTS %dd %02d:%02d:%02d", (gmtime($ela_time))[7,2,1,0])
+				: sprintf(" TTS %02d:%02d:%02d", (gmtime($ela_time))[2,1,0])
 		}elsif($eta = ($self->{_bins}-$bin) * $self->{_bin_time}){
-			$eta = sprintf(" ETA %02d:%02d:%02d", (gmtime($eta))[2,1,0])
+			my $ela_time = $time-$self->{_start_time};
+			$eta = $ela_time >= 86400 
+				? sprintf(" ETA %dd %02d:%02d:%02d", (gmtime($ela_time))[7,2,1,0])
+				: sprintf(" ETA %02d:%02d:%02d", (gmtime($ela_time))[2,1,0])
 		}else{
 			$eta = '';
 		}
@@ -244,6 +277,7 @@ Returns the final size and the total time required. Resets the bar, so it
 
 sub finish{
 	my ($self, $value) = @_;
+	$self->{level} > $self->{report_level} && return;
 	# run the last bin, if it hasn't been run. Can happen if resolution is
 	# small und update on the final bin is not triggered
 	$self->{_time} = -1; # disable short circuit
