@@ -732,7 +732,7 @@ foreach my $task(@TASKS){
 			# compute long-read - short-read coverage
 			$lr_bps_total += $_ for @lr_bps;
 			$sr_bps_total += $_ for @sr_bps;
-			$estimated_coverage = sprintf("%02d", $sr_bps_total/$lr_bps_total);
+			$estimated_coverage = sprintf("%3.0d", $sr_bps_total/$lr_bps_total);
 			$opt_finish_aligned_only = $estimated_coverage > 100;
 			$V->verbose('Estimated short-read/long-read base pair ratio: '.$estimated_coverage);
 			$opt_finish_aligned_only 

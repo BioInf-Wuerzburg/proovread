@@ -47,6 +47,8 @@ TODO
 
 =over
 
+=item [Rename] C<< $fp->sample_seq >> to C<< $fp->sample_seqs >> 
+
 =item [BugFix] C<< $fp->sample_seq >> backups and restores buffer.
 
 =item [BugFix] C<< $fp->sample_seq >> did not tell file positiion on correct
@@ -231,8 +233,12 @@ sub next_seq{
 				$ns = $qh;
 				$qh = $qs;
 				$qs = <$fh>;
+				
 				# eof
-				return unless defined ($qs);
+				unless (defined $qs){
+					seek($fh,0,0); # reset to file start
+					return;
+				};
 	
 				# corrupt file
 				die	sprintf("%s: %s, %s",(caller 0)[3],$self->{file}, "Couldn't find record start within next 5 lines, possibly corrupted file or wrong format")
@@ -309,10 +315,13 @@ sub next_raw_seq{
 				$ns = $qh;
 				$qh = $qs;
 				$qs = <$fh>;
+				
 				# eof
-				return unless defined ($qs);
-	
-				# corrupt file
+				unless (defined $qs){
+					seek($fh,0,0); # reset to file start
+					return;
+				};
+								# corrupt file
 				die	sprintf("%s: %s, %s",(caller 0)[3],$self->{file}, "Couldn't find record start within next 5 lines, possibly corrupted file or wrong format")
 					if $lines > 4;
 				
@@ -373,7 +382,7 @@ sub append_tell{
 	return tell($self->{fh});
 }
 
-=head2 sample_seq
+=head2 sample_seqs
 
 Sample reads from file. If used on pipe, returns N reads from the current
  position, while keeping them in the buffer for further processing. Takes 
@@ -386,7 +395,7 @@ NOTE: The set of samples reads is entirely kept in memory, therefore this
 
 =cut
 
-sub sample_seq{
+sub sample_seqs{
 	my ($self, $n) = (@_, 1000);
 	my $fh = $self->fh;
 	my $i;
@@ -473,7 +482,7 @@ sub guess_seq_length{
 	my $fh = $self->fh;
 	my $i;
 	
-	my @sample_seq = $self->sample_seq($n);
+	my @sample_seq = $self->sample_seqs($n);
 	
 	return undef unless @sample_seq;
 	
@@ -507,7 +516,7 @@ sub guess_phred_offset{
 	my $fh = $self->fh;
 	my $i;
 	
-	my @sample_seq = $self->sample_seq($n);
+	my @sample_seq = $self->sample_seqs($n);
 	
 	return undef unless @sample_seq;
 	
@@ -564,7 +573,7 @@ sub guess_seq_count{
 	# empty file
 	return 0 unless $file_size;
 	
-	my @sample_seqs = $self->sample_seq($n);
+	my @sample_seqs = $self->sample_seqs($n);
 	return undef unless @sample_seqs;
 	
 	$size+= length($_->string) for @sample_seqs;

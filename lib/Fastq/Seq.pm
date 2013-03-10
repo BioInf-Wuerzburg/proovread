@@ -7,7 +7,12 @@ use strict;
 
 use Verbose;
 
-our $VERSION = '0.09';
+use overload
+	'""' => \&string,
+	'.' => \&cat;
+	
+	
+our $VERSION = '0.10';
 our ($REVISION) = '$Revision$' =~ /(\d+)/;
 our ($MODIFIED) = '$Date$' =~ /Date: (\S+\s\S+)/;
 
@@ -27,6 +32,24 @@ Class for handling FASTQ sequences.
 =cut
 
 =head1 CHANGELOG
+
+=head2 0.10
+
+=over
+
+=item [Feature] C<< Fasta::Seq->Cat >> concatenates seq objects, "." and ".="
+ are overloaded with this method
+
+=item [Change] C<< $fq->qual_seq >> and C<< $fq->qual_lcs >> only return
+ coordinates, not the qual sequence since substr_seq now takes the third
+ argument as a replacement.
+
+=item [Change] C<< $fq->substr_seq >> replaces C<< $fq->slice_seq >>. It 
+ fully supports the syntax of perls C<substr> including replacements.
+ It appends the id by  .COUNTER and adds the coordinates as attribute 
+ SUBSTR:OFFSET,LENGTH to the description.
+
+=back
 
 =head2 0.09
 
@@ -55,7 +78,7 @@ Class for handling FASTQ sequences.
 
 =item 0.07 [Thomas Hackl 2012-11-6]
 
-Bugfix. C<< $fq->slice_seq, $fq->slice_qual_lcs >> now add "_O:<OFFSET>_L:<LENGTH>"
+Bugfix. C<< $fq->substr_seq, $fq->substr_qual_lcs >> now add "_O:<OFFSET>_L:<LENGTH>"
  to the C<id>, not to the C<seq_head> of each newly created object.
 
 =item 0.06 [Thomas Hackl 2012-10-31]
@@ -64,12 +87,12 @@ Bugfix. Faulty regex caused C<< $fq->desc >> to fail.
 
 =item 0.05 [Thomas Hackl 2012-10-02]
 
-C<< $fq->slice_seq, $fq->slice_qual_lcs >> now add "_O:<OFFSET>_L:<LENGTH>"
+C<< $fq->substr_seq, $fq->substr_qual_lcs >> now add "_O:<OFFSET>_L:<LENGTH>"
  to the C<seq_head> of each newly created object.
 
 =item 0.04 [Thomas Hackl 2012-10-01]
 
-Added C<< $fq->slice_seq, $fq->slice_qual_lcs >>. Allows to extract custom
+Added C<< $fq->substr_seq, $fq->substr_qual_lcs >>. Allows to extract custom
  stretches and lcs stretches from sequence object and return them as new
  objects.
 
@@ -107,7 +130,6 @@ Initial Alignment module. Provides Constructor and generic accessor
 =back
 
 =cut
-
 
 
 ##------------------------------------------------------------------------##
@@ -306,6 +328,45 @@ sub Phreds2Char{
 	return pack("W*", map{$_+=$po}@$p);
 }
 
+=head2 cat
+
+Concatenate Fastq::Seq object with each other. Can be used as Class method 
+ as well as Object method.
+Returns a new object. Keeps the id and other attributes from the first 
+ provided object.
+If the third parameter in Class syntax, the second one in object syntax is
+ set to TRUE, the operands are swapped.
+
+Fasta::Seq overloads "." with this method.
+
+  # Class method
+  $fab = Fastq::Seq->cat($fa, $fb);
+  $fba = Fastq::Seq->cat($fa, $fb, 1); # swap order
+  
+  # Object method
+  $fab = $fa->cat($fb);
+  $fba = $fa->cat($fb, 1); # swap order
+  
+  # Overload
+  $fa.= $fb; # append $fb and overwrite $fa
+
+=cut
+
+sub cat{
+	my $class = shift unless ref $_[0]; # class usage
+	my ($s1, $s2, $swap) = @_;
+	
+	my $re = $s1->new; # clone
+	if($swap){
+		$re->seq( $s2->seq.$re->seq );
+		$re->qual( $s2->qual.$re->qual );
+	}else{
+		$re->seq( $re->seq.$s2->seq	);
+		$re->qual( $re->qual.$s2->qual );
+	}
+	
+	return $re;
+}
 
 ##------------------------------------------------------------------------##
 
@@ -340,34 +401,46 @@ When used on a Fastq::Seq object, it acts as cloning method, also
 
 sub new{
 	my $proto = shift;
+	my $self;
+	my $class;
 	
 	# object method -> clone + overwrite
-	if(my $class = ref $proto){ 
+	if($class = ref $proto){ 
 		return bless ({%$proto, @_}, $class);
+	}else{ # init empty obj
+		$class = $proto;
+		$self = {
+				seq_head => '@',
+				seq => '',
+				qual_head => '+',
+				qual => '',
+				phred_offset => undef,
+			};
 	}
 	
 	# class method -> construct + overwrite
-	my $self;
-	if(@_%2){ # create object from string
-		my %self;
-		@self{'seq_head','seq','qual_head','qual'} = split(/\n/, shift, 4);
-		$self = {
-			%self,
-			phred_offset => undef,
-			@_	# overwrite defaults
-		};
-	}else{ # create object from array
-		$self = {
-			seq_head => $_[0],
-			seq => $_[1],
-			qual_head => $_[2],
-			qual => $_[3],
-			phred_offset => undef,
-			@_[4..$#_]	# overwrite defaults
-		};
-		chomp(@$self{'seq_head','seq','qual_head', 'qual'});	# make sure all seqs loose there trailing "\n"
+	if(@_){
+		if(@_%2){ # create object from string
+			my %self;
+			@self{'seq_head','seq','qual_head','qual'} = split(/\n/, shift);
+			$self = {
+				%self,
+				phred_offset => undef,
+				@_	# overwrite defaults
+			};
+		}else{ # create object from array
+			$self = {
+				seq_head => $_[0],
+				seq => $_[1],
+				qual_head => $_[2],
+				qual => $_[3],
+				phred_offset => undef,
+				@_[4..$#_]	# overwrite defaults
+			};
+			chomp(@$self{'seq_head','seq','qual_head', 'qual'});	# make sure all seqs loose there trailing "\n"
+		}
 	}
-
+	
 	return bless $self, $proto;
 }
 
@@ -380,21 +453,6 @@ sub new{
 
 =cut
 
-=head2 clone
-
-DEPRECATED, use new as object method C<< $fq->new() >> instead.
-
-Create a clone of a seq object. Comes in handy of you want to modify the 
- object but still keep the original.
- 
-NOTE: This is not deep cloning but should work for this Class.
-
-=cut
-
-sub clone{
-	$_[0]->new();
-}
-
 =head2 trim2qual_lcs
 
 Trims nucleotide and quality sequence of object to qual_lcs, according to 
@@ -402,6 +460,8 @@ Trims nucleotide and quality sequence of object to qual_lcs, according to
  or undef if no lcs was found.
 
 =cut
+
+# TODO: qual_lcs does not return qual_seq anymore!!!!!!
 
 sub trim2qual_lcs{
 	my ($self) = @_;
@@ -422,10 +482,10 @@ sub trim2qual_lcs{
 Calculate OFFSET (position) and LENGTH of contingious substrings of 
  predefined phred range (Qual_lcs_range()) and minimum length
  (Qual_lcs_min_length()).
-Returns list of ARRAYREFS [OFFSET, LENGTH, QUALSUBSEQ]. Order is controlled 
- boolean parameter, if FALSE (default), LIST is sorted by LENGTH, 
- longest first, else if it is TRUE, LIST is in order of occurance of the 
- substrings.
+Returns list of AARRAY tuples ([OFFSET,LENGTH], [OFFSET,LENGTH],...). 
+Order is controlled by boolean parameter, if FALSE (default), LIST is sorted
+ by LENGTH, longest first, else if it is TRUE, LIST is in order of occurance
+ of the substrings.
 
 =cut
 
@@ -434,7 +494,7 @@ sub qual_lcs{
 	my $qs = $self->{qual};
 	my @re;
 	while($qs =~ /$Qual_lcs_regex/g){
-		push @re, [pos($qs) - length($1), length($1), $1];
+		push @re, [pos($qs) - length($1), length($1)];
 	}	
 	return $sorted_by_occurance ? sort{$b->[1] <=> $a->[1]}@re : @re;
 }
@@ -443,8 +503,8 @@ sub qual_lcs{
 
 Calculate OFFSET (position) and LENGTH of low quality substrings of 
  predefined phred range (Qual_low_range()).
-Returns list of ARRAYREFS [OFFSET, LENGTH, QUALSUBSEQ], in order of 
- occurance.
+Returns list of ARRAY tuples ([OFFSET,LENGTH], [OFFSET,LENGTH],...), 
+ in order of occurance.
 
 =cut
 
@@ -452,7 +512,7 @@ sub qual_low{
 	my $qs = $_[0]->{qual};
 	my @re;
 	while($qs =~ /$Qual_low_regex/g){
-		push @re, [pos($qs) - length($1), length($1), $1];
+		push @re, [pos($qs) - length($1), length($1)];
 	}	
 	return @re;
 }
@@ -488,42 +548,109 @@ sub mask_qual_low{
 	return $self;
 }
 
-=head2 slice_qual_lcs(<BOOL>)
+=head2 substr_qual_lcs(<BOOL>)
 
-Slice stretches of C< qual_lcs() > from the object and return resulting
+Substr stretches of C< qual_lcs() > from the object and return resulting
  new partial objects. Set <BOOL> TRUE to get LIST sorted by 
  occurance instead of length of the lcs. Convenience function, basically the
- same as C<$fq->slice_seq($fq->qual_lcs())>
+ same as C<$fq->substr_seq($fq->qual_lcs())>
 
 =cut
 
-sub slice_qual_lcs{
+sub substr_qual_lcs{
 	my ($self, $sorted_by_occ) = @_;
-	return $self->slice_seq($self->qual_lcs($sorted_by_occ));
+	return $self->substr_seq($self->qual_lcs($sorted_by_occ));
 }
 
-=head2 slice_seq
+sub slice_qual_lcs{
+	warn 'use of "slice_qual_lcs" is deprecated, use "substr_qual_lcs" instead';
+	return shift->substr_qual_lcs(@_);
+}
 
-Slice sequence based on a list of ARRAY tuples ([OFFSET,LENGTH],
- [OFFSET,LENGTH],...) as provided by qual_lcs() or qual_low(). 
- Returns LIST of sliced objects, which first are cloned from the 
- original object and hence share other attributes, like phred offset.
- The id is appended by _O:<OFFSET>_L:<LENGTH>
+=head2 substr_seq
+
+Substr sequence. Takes the same parameter as perls C<substr>, either plain 
+ or as a LIST of ARRAYREFS, each containing a set of parameter to allow for 
+ multiple operations at once. 
+
+In the first case the objects sequence is modified, the description appended
+ by SUBSTR:<OFFSET>,<LENGTH> and the modified object is returned.
+
+In the second case, the object itself is not modified, but a LIST of modified
+ clones will be returned. Tie ids are appended by <.CLONECOUNTER>.
+Methods like qual_low or qual_lcs provide these kind of LIST of ARRAYREFS.
+
+  $fq->substr_seq(5);   	# nt 5 to end
+  $fq->substr_seq(5,-5);    # nt 5 to fifth nt from the end
+  $fq->substr_seq(-5)		# last 5 nts
+  $fq->substr_seq(-100,50)  # 50 nts, starting 100 from end
+  $fq->substr_seq(10,5,"AAAA", 'IIII') # replace 5 nts starting at pos 10 
+    with 4 "A"s and replace corresponding qual values.
+  ($fq1, $fq2) = $fq->substr_seq([5,100], [200,500]);
+    # nts 5 to 100 and 200 to 500
+
 
 =cut
 
-sub slice_seq{
+sub substr_seq{
 	my $self = shift;
-	my @new_fqs;
-	foreach (@_){
-		my ($o, $l) = @$_[0,1];
-		my $fq = $self->clone;
-		$fq->id($fq->id.sprintf("_O:%d_L:%d", $o, $l));
-		$fq->{seq} = substr($fq->{seq}, $o, $l);
-		$fq->{qual} = substr($fq->{qual}, $o, $l);
-		push @new_fqs, $fq; 
+	if(!ref $_[0] || @_ == 1){
+		my $fq = $self->new; # clone
+		
+		my ($o, $l, $r, $q) = ref $_[0] ? @{$_[0]} : @_;
+		# replace
+		if(defined $r){
+			die __PACKAGE__."::substr_seq: seq and qual replacement need to be of same length \n$r\n$q\n" 
+				unless defined ($q) && length ($r) eq length ($q);
+			$fq->desc_append(sprintf("SUBSTR:%d,%d", $o, $l));
+			substr($fq->{seq}, $o, $l, $r);
+			substr($fq->{qual}, $o, $l, $q);
+		}elsif(defined $l){
+			$fq->desc_append(sprintf("SUBSTR:%d,%d", $o, $l));
+			$fq->seq( substr($fq->{seq}, $o, $l) );
+			$fq->qual( substr($fq->{qual}, $o, $l) );
+		}else{
+			$fq->desc_append(sprintf("SUBSTR:%d", $o));
+			$fq->seq( substr($fq->{seq}, $o) );
+			$fq->qual( substr($fq->{qual}, $o) );
+		}
+		return $fq;
+	}else{
+		my @new_fqs;
+		my $clone_c = 0;
+		
+		foreach (@_){
+			$clone_c++;
+			my $fq = $self->new; # clone
+			
+			$fq->id($fq->id.".$clone_c");
+	
+			my ($o, $l, $r, $q) = @$_;
+			# replace
+			if(defined $r){
+				die __PACKAGE__."::substr_seq: seq and qual replacement need to be of same length \n$r\n$q\n" 
+					unless defined ($q) && length ($r) eq length ($q);
+				$fq->desc_append(sprintf("SUBSTR:%d,%d", $o, $l));
+				substr($fq->{seq}, $o, $l, $r);
+				substr($fq->{qual}, $o, $l, $q);
+			}elsif(defined $l){
+				$fq->desc_append(sprintf("SUBSTR:%d,%d", $o, $l));
+				$fq->seq( substr($fq->{seq}, $o, $l) );
+				$fq->qual( substr($fq->{qual}, $o, $l) );
+			}else{
+				$fq->desc_append(sprintf("SUBSTR:%d", $o));
+				$fq->seq( substr($fq->{seq}, $o) );
+				$fq->qual( substr($fq->{qual}, $o) );
+			}
+			push @new_fqs, $fq; 
+		}
+		return @new_fqs;
 	}
-	return @new_fqs;
+}
+
+sub slice_seq{
+	warn 'use of "slice_seq" is deprecated, use "substr_seq" instead';
+	return shift->substr_seq(@_);
 }
 
 
@@ -657,6 +784,23 @@ sub qual_window{
 
 }
 
+=head2
+
+Append description by given attributes. Attributed are appended with
+ whitespace delimiter.
+
+=cut
+
+sub desc_append{
+	my ($self, @attr) = @_;
+	my $cur_desc = $self->desc();
+	$self->desc(
+		$cur_desc
+			?	join(" ", $cur_desc, @attr)
+			:	join(" ", @attr)
+	);
+	return $self->desc;
+}
 
 
 ##------------------------------------------------------------------------##
@@ -674,9 +818,9 @@ Get/Set the seq_head.
 sub seq_head{
 	my ($self, $seq_head) = @_;
 	if ($seq_head){
+		# make sure seq_head starts with @
+		$seq_head =~ /^@/ || substr($seq_head,0,0,'@');
 		$self->{seq_head} = $seq_head;
-		# reset id cache if head is changed
-		$self->{_id} = undef;
 	};
 	return $self->{seq_head};
 }
@@ -689,7 +833,10 @@ Get/Set the seq.
 
 sub seq{
 	my ($self, $seq) = @_;
-	$self->{seq} = $seq if $seq;
+	if (defined $seq){
+		$seq =~ tr/\n//d;
+		$self->{seq} = $seq; 
+	};
 	return $self->{seq};
 }
 
@@ -701,7 +848,11 @@ Get/Set the qual_head line.
 
 sub qual_head{
 	my ($self, $qual_head) = @_;
-	$self->{qual_head} = $qual_head if $qual_head;
+	if($qual_head){
+		# make sure seq_head starts with @
+		$qual_head =~ /^\+/ || substr($qual_head,0,0,'+');
+		$self->{qual_head} = $qual_head 
+	}
 	return $self->{qual_head};
 }
 
@@ -713,9 +864,25 @@ Get/Set the seq.
 
 sub qual{
 	my ($self, $qual) = @_;
-	$self->{qual} = $qual if $qual;
+	if (defined $qual){
+		$qual =~ tr/\n//d;
+		$self->{qual} = $qual; 
+	};
 	return $self->{qual};
 }
+
+=head2 phred_offset
+
+Get/Set the phred_offset.
+
+=cut
+
+sub phred_offset{
+	my ($self, $offset) = @_;
+	$self->{phred} = $offset if defined $offset;
+	return $self->{phred_offset};
+}
+
 
 =head2 string
 
@@ -732,28 +899,20 @@ sub string{
 
 Get/set the reads id. Includes picard naming scheme like numbers at 
  the end (/1, /2). This is important especially when dealing with
- PacBio data because they use a trailing /<number> as actual read 
- id.
+ PacBio data because they use a trailing /<number> as part of the actual 
+ read id.
 
 =cut
 
 sub id{
-	my ($self, $id) = @_;	
-	# parse id from head, cache id
+	my ($self, $id) = @_;
 	if(defined $id){
-		$self->{_id} = $id;
-		# reset seq_head
-		# make sure, desc is cached
-		$self->desc() 
-			? $self->{seq_head} = sprintf("\@%s %s", $self->{_id}, $self->{_desc})
-			: $self->{seq_head} = sprintf("\@%s", $self->{_id});
-					
+		$id =~ s/^@//;
+		$self->{seq_head} =~ s/[^@\s]+/$id/o;
+	}else{
+		($id) = $self->{seq_head} =~ /^@?(\S+)/o;
 	}
-	# parse id from head, cache id
-	unless ($self->{_id}){
-		($self->{_id}) = $self->{seq_head} =~ /^@(\S+)/o;  
-	}
-	return $self->{_id};
+	return $id;
 }
 
 =head2 id_no_picard
@@ -764,12 +923,14 @@ Get the reads id without the picard naming scheme like numbers at
 =cut
 
 sub id_no_picard{
-	my ($self) = @_;
-	# parse id_no_picard from head, cache id_no_picard
-	unless ($self->{_id_no_picard}){
-		($self->{_id_no_picard}) = $self->{seq_head} =~ /^@(\S+?)(?:\/\d+)?(?:\s|$)/o;  
+	my ($self, $id) = @_;
+	if(defined $id){
+		$id =~ s/^@//;
+		$self->{seq_head} =~ s/[^@\s]+?(\/\d+)?(\s|$)/$id$1$2/o;
+	}else{
+		($id) = $self->{seq_head} =~ /^@(\S+?)(?:\/\d+)?(?:\s|$)/o;  
 	}
-	return $self->{_id_no_picard};
+	return $id;
 }
 
 =head2 picard
@@ -782,10 +943,8 @@ Get the reads picard number (1,2..) from its id (/1, /2) or undef
 sub picard{
 	my ($self) = @_;
 	# parse picard from head, cache picard
-	unless ($self->{_picard}){
-		($self->{_picard}) = $self->{seq_head} =~ /^@(?:\S+?\/)(\d+)?(?:\s|$)/o;  
-	}
-	return $self->{_picard};
+	my ($picard) = $self->{seq_head} =~ /^@(?:\S+?\/)(\d+)?(?:\s|$)/o;  
+	return $picard;
 }
 
 
@@ -797,20 +956,14 @@ Get/set the reads description.
 
 sub desc{
 	my ($self, $desc) = @_;
-	# parse id from head, cache id
 	if(defined $desc){
-		$self->{_desc} = $desc;
-		$self->id(); # make sure, id is cached
-		# reset seq_head
-		$desc 
-			? $self->{seq_head} = sprintf("\@%s %s", $self->{_id}, $self->{_desc})
-			: $self->{seq_head} = sprintf("\@%s", $self->{_id});
-					
+		$self->{seq_head} = $desc 
+			? sprintf('@%s %s', $self->id, $desc)
+			: '@'.$self->id;
+	}else{
+		($desc) = $self->{seq_head} =~ /^\S+\s(.+)$/o;
 	}
-	unless (defined ($self->{_desc})){
-		($self->{_desc}) = $self->{seq_head} =~ /^\S+\s(.+)$/o;  
-	}
-	return $self->{_desc};
+	return $desc || '';
 }
 
 =head1 AUTHOR

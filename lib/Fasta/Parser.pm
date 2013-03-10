@@ -40,8 +40,6 @@ TODO
 
 =over
 
-=item [BugFix] C<< $fp->sample_seqs >> backups and restores buffer.
-
 =item [Feature] C<< $fp->guess_seq_length >>
 
 =item [Feature] C<< $fp->guess_seq_count >>
@@ -142,23 +140,38 @@ sub new{
 		fh => undef,
 		file => undef,
 		mode => '<',
+		_is_fh => undef, # 0 => FILE, 1 => PIPE, 2 => SCALAR
 		@_	# overwrite defaults
 	};
 
+	if($self->{file} && $self->{fh}){
+		die sprintf("%s: %s",(caller 0)[3],"Can only take either file or fh!");
+	}
+
+	bless $self, $class;
+
 	# open file in read/write mode
-	if ($self->{file}){
+	if($self->{file}){
 		my $fh;
 		open ( $fh , $self->{mode}, $self->{file}) or die sprintf("%s: %s, %s",(caller 0)[3],$self->{file}, $!);
 		$self->{fh} = $fh;
+		if(ref $self->{file} eq 'SCALAR'){
+			$self->{_is_fh} = 2;
+		}elsif(-f $self->{file}){
+			$self->{_is_fh} = 0;
+		}else{
+			die sprintf("%s: %s",(caller 0)[3],"file neither plain file nor SCALAR reference");
+		}
+	}else{
+		if($self->{fh}){
+			$self->fh($self->{fh});
+		}else{
+			open(my $fh, "<&STDIN") or die $!;
+			$self->{fh} = $fh;
+			$self->{_is_fh} = 1;
+		}
 	}
 	
-	# create a STDIN alias for save parsing and closing
-	unless($self->{fh}){
-		open(my $fh, "<&STDIN") or die $!;
-		$self->{fh} = $fh;
-	}
-	
-	bless $self, $class;
 	return $self;
 }
 
@@ -192,7 +205,10 @@ sub next_seq{
 	# return fasta seq object
 	my $byte_offset = tell($fh);
 	my $fa = <$fh>;
-	return unless defined $fa;
+	unless(defined $fa){
+		seek($fh,0,0); # reset to file start
+		return 
+	};
 	chomp($fa);
 	return Fasta::Seq->new($fa, byte_offset => $byte_offset);
 }
@@ -216,36 +232,6 @@ sub check_format{
 	return $c eq '>' ? $self : undef;
 }
 
-
-
-=head2 append_seq
-
-Append an sequence to the file, provided as object or string. Returns the
- byte offset position in the file.
-
-NOTE: In case a string is provided, make sure it contains trailing newline 
- since no further test is performed.
-
-=cut
-
-sub append_seq{
-	my ($self, $seq) = @_;
-	my $pos = tell($self->{fh});
-	print {$self->{fh}} ref $seq ? $seq->string : $seq;
-	return $pos;
-}
-
-
-=head2 append_tell
-
-Return the byte offset of the current append filehandle position
-
-=cut
-
-sub append_tell{
-	my ($self) = @_;
-	return tell($self->{fh});
-}
 
 =head2 seek
 
@@ -277,14 +263,19 @@ sub sample_seqs{
 	my $i;
 	my @seqs;
 	
-	return if $self->check_fh_is_pipe;
-
-	my $buffer = $self->{_buffer}; # backup buffer state to restore after sampling
-
 	my $file_pos = tell($fh);
 
 	# can seek on file: sample random reads
-	my $size = -s $fh;
+	my $size;
+	
+	if($self->is_fh('FILE')){
+		$size = -s $fh;
+	}elsif($self->is_fh('SCALAR') && ref $self->{file} eq 'SCALAR'){
+		$size = length ${$self->{file}};
+	}else{
+		return;
+	} 
+
 	if($size < 10_000_000){
 		$self->seek(0);
 		my $fa;
@@ -292,12 +283,12 @@ sub sample_seqs{
 		push @fas, $fa while $fa = $self->next_seq();
 		my @shuffled_fas = List::Util::shuffle(@fas);
 		@seqs = @shuffled_fas > $n
-			? @shuffled_fas[0..$n] 
+			? @shuffled_fas[0..$n-1] 
 			: @shuffled_fas; 
 	}else{
 		$size -= $size/100; # reduce size by 1% to prevent sampling eof
 	
-		for($i=$n;$i<1;$i--){
+		for($i=$n;$i>0;$i--){
 			$self->seek(int(rand($size))); # jump to random pos
 			local $/ = "\n>";
 			scalar <$fh>; # make sure to get a record start
@@ -313,9 +304,7 @@ sub sample_seqs{
 
 	# restore file handle
 	$self->seek($file_pos);
-	
-	$self->{_buffer} = $buffer; # restore buffer
-	
+
 	return @seqs;
 }
 
@@ -363,7 +352,7 @@ sub guess_seq_count{
 	my ($self, $n) = (@_, 1000);
 	my $fh = $self->fh;
 	# pipe
-	return undef if $self->check_fh_is_pipe;
+	return undef if $self->is_fh('PIPE');
 
 	my $size;
 	my $file_size = -s $fh;
@@ -375,17 +364,73 @@ sub guess_seq_count{
 	return int(($file_size/$size* @sample_seqs)+0.5);
 }
 
-=head2 check_fh_is_pipe
+=head2 is_fh
 
-Returns TRUE (1) if filehandle is associated with a pipe, FALSE ('') if it is 
- associated with a real file.
+Determine the type of the filehandle. Without parameter, returns 0 for 
+ handle to FILE, 1 for PIPE, and 2 for a handle to a SCALAR.
+Alternatively you can provide the name of the type or the corresponding
+ INT as single parameter. In these cases, the methods returns 1, if the
+ type is matched, 0 otherwise.
+
+  $fp->is_fh();  # 0,1 or 2
+  $fp->is_fh('FILE') # 1 if filehandle is a handle to a FILE, 0 otherwise
+  $fp->is_fh(0) # 1 if filehandle is a handle to a FILE, 0 otherwise
 
 =cut
 
-sub check_fh_is_pipe{
-	my $self = shift;
-	return $self->{_is_pipe};
+sub is_fh{
+	my ($self, $type) = @_;
+	
+	my %type = (
+		'FILE' => 0,
+		'PIPE' => 1,
+		'SCALAR' => 2,
+		0 => 0,
+		1 => 1,
+		2 => 2,
+	);
+	
+	if(defined $type){
+		die sprintf("%s: %s",(caller 0)[3],"unknown type $type") 
+			unless exists $type{$type};
+		
+		return $type{$type} == $self->{_is_fh} ? 1 : 0;
+		
+	}
+
+	return $self->{_is_fh};
 }
+
+
+=head2 append_seq
+
+Append an sequence to the file, provided as object or string. Returns the
+ byte offset position in the file.
+
+NOTE: In case a string is provided, make sure it contains trailing newline 
+ since no further test is performed.
+
+=cut
+
+sub append_seq{
+	my ($self, $seq) = @_;
+	my $pos = tell($self->{fh});
+	print {$self->{fh}} ref $seq ? $seq->string : $seq;
+	return $pos;
+}
+
+
+=head2 append_tell
+
+Return the byte offset of the current append filehandle position
+
+=cut
+
+sub append_tell{
+	my ($self) = @_;
+	return tell($self->{fh});
+}
+
 
 =head2 _stddev
 
@@ -434,7 +479,18 @@ Get/Set the file handle.
 
 sub fh{
 	my ($self, $fh) = @_;
-	$self->{fh} = $fh if $fh;
+	
+	if($fh){
+		if(-f $fh){
+			$self->{_is_fh} = 0;
+		}elsif(-p $fh){
+			$self->{_is_fh} = 1;
+		}else{
+			$self->{_is_fh} = 2;
+		}
+		$self->{fh} = $fh 
+	}
+	
 	return $self->{fh};
 }
 
