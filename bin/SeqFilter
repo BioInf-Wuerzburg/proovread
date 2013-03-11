@@ -619,7 +619,7 @@ foreach (sort{$a <=> $b}keys %total_Ns){
 
 $V->hline();
 
-unless(keys @filtered_L){
+unless(@filtered_L){
 	$V->verbose("No sequences found matching given filter criteria");
 	exit(1);
 }
