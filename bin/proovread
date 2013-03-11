@@ -15,12 +15,12 @@ use Getopt::Long;
 use Pod::Usage;
 use List::Util qw(sum max);
 
+use FindBin qw($RealBin);
+use lib "$RealBin/../lib/";
+
 use File::Basename;
 use File::Path qw(make_path remove_tree);
 use File::Copy;
-use FindBin qw($RealBin);
-
-use lib "$RealBin/../lib/";
 
 use Verbose;
 use Verbose::ProgressBar;

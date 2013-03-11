@@ -158,7 +158,9 @@ sub Add_base_content_scan{
 =cut
 
 sub Complement{	
-	$_[1] =~ tr/ATGCatgc/TACGtacg/r 
+	my ($class, $seq);
+	$seq =~ tr/ATGCatgc/TACGtacg/;
+	return $seq; 
 } 
 
 =head2 Reverse_complement
@@ -166,7 +168,9 @@ sub Complement{
 =cut
 
 sub Reverse_complement{
-	scalar reverse $_[1] =~ tr/ATGCatgc/TACGtacg/r;
+	my ($class, $seq);
+	scalar reverse $seq =~ tr/ATGCatgc/TACGtacg/;
+	return $seq;
 }
 
 ##------------------------------------------------------------------------##
