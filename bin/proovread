@@ -67,6 +67,9 @@ Correct single molecule sequencing reads by iterative mapping of high
 
 =over
 
+=item [BugFix] read_sam() exits if no Reference Sequence Entry '@SQ'
+ for a given sequence could be found in the header. 
+
 =item [BugFix] Short reads stats are not computed in case of 'external-sam'. 
 
 =back
@@ -924,17 +927,26 @@ sub read_sam{
 		);
 	}
 	
+	# make sure SAM had header with Ref names
+	$VS->exit('The SAM file needs to have a header with an reference sequence entry @SQ foreach reference sequence') 
+		unless keys %LR;
 	
 	# read sam file
 	my $rsp_c = 0;
 	if($opt_ram_sam){
 		while(my $aln = $rsp->next_aln()){
+			# make sure Ref Seq entry exists
+			$VS->exit('The SAM file needs to have a header with an reference sequence entry @SQ foreach reference sequence')
+				unless exists $LR{$aln->rname};
 			# try to add aln, if sufficient score, add to temporary sam file
 			$rsp_c++ if($LR{$aln->rname}->add_aln_by_score($aln));
 			$pg_rsp->update() unless $rsp_c%10000;
 		}
 	}else{
 		while(my $aln = $rsp->next_aln()){
+			# make sure Ref Seq entry exists
+			$VS->exit('The SAM file needs to have a header with an reference sequence entry @SQ foreach reference sequence')
+				unless exists $LR{$aln->rname};
 			# try to add aln, if sufficient score, add to temporary sam file
 			if($LR{$aln->rname}->add_aln_by_score($aln)){
 				$rsp_c++;
