@@ -583,6 +583,11 @@ sub _run_pipe_open {
 	}
 
 	$self->{_result_reader} = $rdr;
+	
+	for (1..5){
+		# to make sure the file has been created
+		sleep 1 unless -e $tmp_error_log;
+	}
 
 	open(my $err, '<', $tmp_error_log) or $V->exit($tmp_error_log.": ".$!);
 	$self->{_error_reader} = $err;

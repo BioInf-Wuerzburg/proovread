@@ -207,7 +207,7 @@ sub new{
 	}else{ # init emtpy obj
 		$class = $proto;
 		$self = {
-				seq_head => '>',
+				seq_head => '',
 				id => '',
 				desc => '',
 				seq => '',

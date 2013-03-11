@@ -46,6 +46,9 @@ Class for handling sam reference sequences and its aligned reads.
 
 =over
 
+=item [Change] C<< $fq->substr_seq >> for precalculated hcrs, 
+ C<< $fq->slice_seq >> is deprecated. 
+
 =item [Change] State matrix is now by default reinitialized by 
  _state_matrix call, unless $append_matrix is set to TRUE.
 
@@ -1396,7 +1399,7 @@ sub _add_pre_calc_fq{
 	my $self = shift;
 	my @S = @{$self->{_state_matrix}};
 	foreach my $coords (@_){
-		my ($seq) = $self->ref->slice_seq($coords);
+		my ($seq) = $self->ref->substr_seq($coords);
 		my @seq = split (//, $seq->seq);
 		my @freqs = Sam::Seq->Phreds2Freqs($seq->phreds);
 		

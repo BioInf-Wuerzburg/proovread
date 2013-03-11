@@ -70,6 +70,8 @@ Correct single molecule sequencing reads by iterative mapping of high
 =item [BugFix] read_sam() exits if no Reference Sequence Entry '@SQ'
  for a given sequence could be found in the header. 
 
+=item [Change] SeqFilter replaces FastqFilter.pl for final filtering.
+
 =item [BugFix] Short reads stats are not computed in case of 'external-sam'. 
 
 =back
@@ -859,7 +861,7 @@ $VS->verbose("Creating raw output sequences");
 copy(task_file_name(".fa", task=>$TASKS[$TC]), $opt_fa_raw);
 copy(task_file_name(".fq", task=>$TASKS[$TC]), $opt_fq_raw);
 
-fastq_filter() if $cfg{'fastq-filter'};
+seq_filter() if $cfg{'seq-filter'};
 
 # lets see if we came this far
 $no_error++;
@@ -871,7 +873,7 @@ END{
 		remove_tree(@tmp_dirs) 
 	};
 	if ($no_error){
-		Verbose->new()->verbose("Done");
+		$VS->verbose("Done");
 	} 
 }
 
@@ -1249,11 +1251,13 @@ sub prepare_lr{
 					$VS->exit('Non-unique long read id ('. $lr->id .') in '. $_);
 				}
 				# convert FASTQ to FASTA
+				#print Dumper($lr->id, 
 				$lr{$lr->id} = Fasta::Seq->new(
 					id => $lr->id,
 					desc => $lr->desc,
 					seq => lc($lr->seq), # convert seq to lower case
-				);
+				)
+				#);
 			}
 		}
 		
@@ -1451,18 +1455,18 @@ sub copy_custom_cfg{
 }
 
 
-=head2 fastq_filter
+=head2 seq_filter
 
-Run FastqFilter.pl on raw output
+Run SeqFilter on raw output
 
 =cut
 
-sub fastq_filter{
+sub seq_filter{
 
-	my $params = param_join(\%{$cfg{'fastq-filter'}});
+	my $params = param_join(\%{$cfg{'seq-filter'}});
 
-	my $cmd_fa_fil = "$RealBin/FastqFilter.pl $params --in $opt_fq_raw --fasta --out $opt_fa_fil\n";
-	my $cmd_fq_fil = "$RealBin/FastqFilter.pl $params --in $opt_fq_raw --out $opt_fq_fil\n";
+	my $cmd_fa_fil = "$RealBin/SeqFilter $params --in $opt_fq_raw --fasta --out $opt_fa_fil\n";
+	my $cmd_fq_fil = "$RealBin/SeqFilter $params --in $opt_fq_raw --out $opt_fq_fil\n";
 	
 	$V->nline;
 	$VS->verbose("Quality trimming raw output");
