@@ -47,6 +47,8 @@ TODO
 
 =over
 
+=item [BugFix] Filehandle to pipe can be -p or -t.
+
 =item [Rename] C<< $fp->sample_seq >> to C<< $fp->sample_seqs >> 
 
 =item [BugFix] C<< $fp->sample_seq >> backups and restores buffer.
@@ -168,7 +170,7 @@ sub new{
 		$self->{fh} = $fh;
 		$self->{_is_pipe} = '';
 	}else{
-		 $self->{_is_pipe} = -p $self->{fh} ? 1 : ''; 
+		 $self->{_is_pipe} = (-p $self->{fh} || -t $self->{fh}) ? 1 : ''; 
 	}
 
 	bless $self, $class;
@@ -642,7 +644,7 @@ sub fh{
 	my ($self, $fh) = @_;
 	if($fh){
 		$self->{fh} = $fh;
-		$self->{_is_pipe} = -p $fh ? 1 : undef;	
+		$self->{_is_pipe} = (-p $fh || -t $fh) ? 1 : undef;	
 	};
 	return $self->{fh};
 }

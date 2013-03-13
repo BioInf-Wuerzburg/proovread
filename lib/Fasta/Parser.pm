@@ -40,6 +40,8 @@ TODO
 
 =over
 
+=item [BugFix] Filehandle to pipe can be -p or -t.
+
 =item [Feature] C<< $fp->guess_seq_length >>
 
 =item [Feature] C<< $fp->guess_seq_count >>
@@ -483,7 +485,7 @@ sub fh{
 	if($fh){
 		if(-f $fh){
 			$self->{_is_fh} = 0;
-		}elsif(-p $fh){
+		}elsif(-p $fh or  -t $fh){
 			$self->{_is_fh} = 1;
 		}else{
 			$self->{_is_fh} = 2;
