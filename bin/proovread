@@ -855,11 +855,13 @@ my $opt_fa_raw = task_file_name(task => '', suffix => "_corr.raw.fa");
 my $opt_fq_raw = task_file_name(task => '', suffix => "_corr.raw.fq");
 my $opt_fa_fil = task_file_name(task => '', suffix => "_corr.fil.fa");
 my $opt_fq_fil = task_file_name(task => '', suffix => "_corr.fil.fq");
+my $opt_chim = task_file_name(task => '', suffix => "_corr.chimera.tsv");
 
 $VS->verbose("Creating raw output sequences");
 
 copy(task_file_name(".fa", task=>$TASKS[$TC]), $opt_fa_raw);
 copy(task_file_name(".fq", task=>$TASKS[$TC]), $opt_fq_raw);
+copy(task_file_name(".fc", task=>$TASKS[$TC]), $opt_chim);
 
 seq_filter() if $cfg{'seq-filter'};
 
