@@ -15,7 +15,7 @@ BEGIN { use_ok('Fasta::Parser'); }
 
 my $class = 'Fasta::Parser';
 my ($fp, $fpr, $fpr_string);
-my $fpr_dat_file = 'fasta.fa';
+my $fpr_dat_file = "$RealBin/fasta.fa";
 
 my $seq1_string = <<'FASTA';
 >gi|129295|sp|P01013|OVAX_CHICK GENE X PROTEIN (OVALBUMIN-RELATED)

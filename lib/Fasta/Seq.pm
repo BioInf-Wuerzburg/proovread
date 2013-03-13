@@ -169,8 +169,8 @@ sub Complement{
 
 sub Reverse_complement{
 	my ($class, $seq) = @_;
-	scalar reverse $seq =~ tr/ATGCatgc/TACGtacg/;
-	return $seq;
+	$seq =~ tr/ATGCatgc/TACGtacg/;
+	return reverse $seq;
 }
 
 ##------------------------------------------------------------------------##
