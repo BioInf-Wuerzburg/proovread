@@ -415,7 +415,7 @@ NOTE: In case a string is provided, make sure it contains trailing newline
 sub append_seq{
 	my ($self, $seq) = @_;
 	my $pos = tell($self->{fh});
-	print {$self->{fh}} ref $seq ? $seq->string : $seq;
+	print {$self->{fh}} "$seq";
 	return $pos;
 }
 
