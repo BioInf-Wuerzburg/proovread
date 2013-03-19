@@ -67,6 +67,11 @@ Correct single molecule sequencing reads by iterative mapping of high
 
 =over
 
+=item [Change] Allow larger inserts in finish iteration using sam2cns
+ --max-ins-length. Long inserts in the primal iterations are likely to be
+ mapping artefact. In the finishing step, they are more likely to be missed
+ in the first placed as the could not be distinguished from mapping artefacts.
+
 =item [BugFix] read_sam() exits if no Reference Sequence Entry '@SQ'
  for a given sequence could be found in the header. 
 
@@ -653,7 +658,7 @@ Sam::Seq->BinSize($cfg{'bin-size'});
 
 
 # globals
-my $PG_line;
+my $PG_line = '@PG ID:unknown';
 
 # mode
 my @TASKS;
@@ -1076,8 +1081,6 @@ sub run_shrimp{
 					sam => $tsp,	# indexed sam file, containing aln data
 				);
 			}
-		
-			$PG_line = '@PG ID:unknown' unless $PG_line;
 		}
 	
 		# read SAM alignmetn section
@@ -1305,7 +1308,11 @@ sub correct_sr_mt{
 			? ('--min-lcr-length' => $min_lcr_length) # params from config
 			: ('--min-hcr-length' => 0),
 		($TASKS[$TC] eq 'shrimp-finish' || $TASKS[$TC] eq 'read-sam') # calculate hcrs on first iter for second iter
-			? ('--ignore-hcr' => 1, $cfg{'detect-chimera'} ? ('--detect-chimera' => 1) : ()) # params from config
+			? (
+				'--ignore-hcr' => 1, 
+				'--max-ins-length' => 0,
+				$cfg{'detect-chimera'} ? ('--detect-chimera' => 1) : ()
+			  ) # params from config
 			: (),
 		$cfg
 		 	? ('--cfg'	=> $cfg) 

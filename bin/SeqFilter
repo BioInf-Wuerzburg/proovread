@@ -34,6 +34,9 @@ SeqFilter - Versatile FASTA/FASTQ sequence file analysis and modification tool.
 
 =over
 
+=item [BugFix] empty LISTs returned by qual_lcs / qual_win are now handled 
+ correctly.
+
 =item [Refactoring] Merged FastaFilter.pl and FastqFilter.pl in this one script.
 
 =back
@@ -552,7 +555,10 @@ while (my $SEQ = $FP->next_seq()){
 		@fq = map{$_->substr_qual_lcs(1)}@fq;
 	}
 	if($opt_trim){ # trim window
-		@fq = map{$_->substr_seq($_->qual_window(1))}@fq;
+		@fq = map{
+			my @wins = $_->qual_window(1);
+			@wins ? $_->substr_seq(@wins) : ();
+		}@fq;
 	}
 	
 	foreach my $SEQ (@fq){

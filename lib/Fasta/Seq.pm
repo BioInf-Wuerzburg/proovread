@@ -39,6 +39,8 @@ Class for handling FASTA sequences.
 
 =over
 
+=item [BugFix] C<< $fq->substr_seq >> dies on no arguments
+
 =item [Change] Refactored C<new()>. Handles creation of "empty" objects and 
  has some adjustments to head/id/desc parsing/generation.
 
@@ -411,6 +413,10 @@ sub substr_seq{
 		my $fa = $self->new; # clone
 
 		my ($o, $l, $r) = ref $_[0] ? @{$_[0]} : @_;
+					
+		die __PACKAGE__."::substr_seq: Not enougth arguments\n" 
+			unless defined ($o);
+		
 		# replace
 		if(defined $r){
 			$fa->desc_append(sprintf("SUBSTR:%d,%d", $o, $l));
@@ -432,6 +438,10 @@ sub substr_seq{
 			$fa->id($fa->id.".$clone_c");
 	
 			my ($o, $l, $r) = @$_;
+			
+			die __PACKAGE__."::substr_seq: Not enougth arguments\n" 
+				unless defined ($o);
+			
 			# replace
 			if(defined $r){
 				$fa->desc_append(sprintf("SUBSTR:%d,%d", $o, $l));

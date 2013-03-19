@@ -46,6 +46,9 @@ Class for handling sam reference sequences and its aligned reads.
 
 =over
 
+=item [Feature] $Sam::Seq::MaxInsLength determines the maximum allowed 
+ insertion length.
+
 =item [Change] C<< $fq->substr_seq >> for precalculated hcrs, 
  C<< $fq->slice_seq >> is deprecated. 
 
@@ -217,6 +220,13 @@ Boolean. Deactivate trimming completely, including leading/trailing indels
 
 our $Trim = 1;
 
+=head2 $MaxInsLength
+
+Default 0, which deactivates the feature.
+
+=cut
+
+our $MaxInsLength = 0;
 
 =head2 %Freqs2Phreds
 
@@ -291,6 +301,18 @@ sub Trim{
 	my ($class, $trim) = @_;
 	$Trim = $trim if defined $trim;
 	return $Trim;
+}
+
+=head2 Trim
+
+Get/Set $Sam::Seq::MaxInsLength. Default 0, which deactivates the feature.
+
+=cut
+
+sub MaxInsLength{
+	my ($class, $max_ins_length) = @_;
+	$MaxInsLength = $max_ins_length if defined $max_ins_length;
+	return $MaxInsLength;
 }
 
 
@@ -878,13 +900,13 @@ sub chimera{
 	my ($self, $reuse_matrix) = (@_,0);
 	# compute state_matrix if required/wanted
 	$self->_init_state_matrix() unless ($self->{_state_matrix} || !$reuse_matrix);
-	
+
 	my @bin_bases = @{$self->{_bin_bases}};
 	return unless @bin_bases > 20; # need at least 20 bins to make sense
 
 	# low coverage bin: bin_bases[bin] << bin_max_bases
 	# threshold 10% (educated guess)
-	my $bin_threshold = $self->{bin_max_bases}/10;
+	my $bin_threshold = $self->{bin_max_bases}/5 +1;
 
 	my $lcov_bin_count = 0;
 	my @lcov_bin_idxs = ();
@@ -896,11 +918,13 @@ sub chimera{
 		}elsif($lcov_bin_count){
 			# require at least 2 consecutive low cov bins to trigger chimera check
 			# yet only consider local coverage drops (<5 bins)
-			push @lcov_bin_idxs, [($i-$lcov_bin_count,$i-1)] if ($lcov_bin_count > 1 && $lcov_bin_count < 5);
+			push @lcov_bin_idxs, [($i-$lcov_bin_count,$i-1)] if ($lcov_bin_count >= 1 && $lcov_bin_count < 5);
 			$lcov_bin_count = 0; # reset
 		}
 	}
 	
+	use Data::Dumper;
+	print Dumper(\@bin_bases, \@lcov_bin_idxs);
 	
 	my @coords;
 	# get the state matrix columns 
@@ -910,8 +934,8 @@ sub chimera{
 		my $mat_to = ($lcov_bin_idxs->[1]+2) * $self->{bin_size} -1;
 		
 		next if grep{!@$_}@{$self->{_state_matrix}}[$mat_from .. $mat_to];
-	
-		#TODO: heterozygosity proof -> left hand and right hand matrix separately
+
+		#heterozygosity proof -> left hand and right hand matrix separately
 		my $fl = $lcov_bin_idxs->[0]-4;
 		my $tr = $lcov_bin_idxs->[1]+5;
 		my $delta = int(($tr - $fl - 1)/2);
@@ -947,12 +971,15 @@ sub chimera{
 		
 		my @hx_delta;
 		for(my $i=0; $i< @mat_r; $i++){
-			my $hx_r = Hx($mat_r[$i]) || 0; 
-			my $hx_l = Hx($mat_l[$i]) || 0;
+			# only consider columns, where both sides contribute
+			next unless @{$mat_r[$i]} && @{$mat_l[$i]};
+			
+			my $hx_r = Hx($mat_r[$i]); 
+			my $hx_l = Hx($mat_l[$i]);
 			my $hx_gt = $hx_r > $hx_l ? $hx_r : $hx_l;
 
+			# combined column
 			my @col;
-			
 			my ($max) = sort{$b <=>$a}(scalar @{$mat_l[$i]}, scalar @{$mat_r[$i]});
 			
 			for(my $j=0; $j<$max; $j++){
@@ -969,10 +996,17 @@ sub chimera{
 			
 		}
 		
+		# x of the overlapping columns need to increase Hx
+		# 1,2,3,4:		>1 (0 mm)
+		# 5,6,7,8:		>2 (1 mm)
+		# 9,10,11,12:	>3 (2 mm)
+		# ...
+		
 		push @coords, {
 			col_range => [$mat_from, $mat_to],
-			hx => \@hx_delta
-		} if (sort{$b <=> $a}@hx_delta)[3] > 0 # at least 4 mismatching columns 
+			hx => \@hx_delta,
+			chim => (grep{$_}@hx_delta) +1 > ((@hx_delta-1)/4) ? "T" : "F"
+		} 
 
 		#TODO: self chimera
 	} 
@@ -1450,12 +1484,12 @@ sub _consensus{
 				if($freq > $max_freq){
 					# exception: long prominent inserts (>3) are very ugly,
 					# probable mapping artefacts caused by cheap gap costs 
-					# compared to missmatch which might lead to long gaps
+					# compared to mismatch which might lead to long gaps
 					# at read ends close to error rich regions. These long
 					# gaps should not be considered.
 					# Insert state has to have idx > 4 (not A,T,G,C or -)
 					# for check to make sense
-					next if($i > 4 && length $states_rev{$i} > 3);
+					next if($MaxInsLength && $i > 4 && length $states_rev{$i} > $MaxInsLength);
 										
 					$max_freq = $freq;
 					$idx = $i; 

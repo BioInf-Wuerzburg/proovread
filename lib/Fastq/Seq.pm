@@ -37,6 +37,8 @@ Class for handling FASTQ sequences.
 
 =over
 
+=item [BugFix] C<< $fq->substr_seq >> dies on no arguments
+
 =item [Feature] C<< Fasta::Seq->Cat >> concatenates seq objects, "." and ".="
  are overloaded with this method
 
@@ -559,7 +561,8 @@ Substr stretches of C< qual_lcs() > from the object and return resulting
 
 sub substr_qual_lcs{
 	my ($self, $sorted_by_occ) = @_;
-	return $self->substr_seq($self->qual_lcs($sorted_by_occ));
+	my @lcs = $self->qual_lcs($sorted_by_occ);
+	return @lcs ? $self->substr_seq(@lcs) : ();
 }
 
 sub slice_qual_lcs{
@@ -598,6 +601,11 @@ sub substr_seq{
 		my $fq = $self->new; # clone
 		
 		my ($o, $l, $r, $q) = ref $_[0] ? @{$_[0]} : @_;
+					
+		die __PACKAGE__."::substr_seq: Not enougth arguments\n" 
+			unless defined ($o);
+			
+		
 		# replace
 		if(defined $r){
 			die __PACKAGE__."::substr_seq: seq and qual replacement need to be of same length \n$r\n$q\n" 
@@ -626,6 +634,10 @@ sub substr_seq{
 			$fq->id($fq->id.".$clone_c");
 	
 			my ($o, $l, $r, $q) = @$_;
+			
+			die __PACKAGE__."::substr_seq: Not enougth arguments\n" 
+				unless defined ($o);
+			
 			# replace
 			if(defined $r){
 				die __PACKAGE__."::substr_seq: seq and qual replacement need to be of same length \n$r\n$q\n" 

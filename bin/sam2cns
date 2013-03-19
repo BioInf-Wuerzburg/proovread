@@ -249,6 +249,14 @@ Minimum length of masked nts in hcrs
 
 $opt{'--min-hcr-length=i'} = \(my $opt_hcr_mask_length = $cfg{'hcr-mask-length'});
 
+=item [--max-ins-length=<INT>] [4]
+
+Maximum allowed length for inserts.
+
+=cut
+
+$opt{'--max-ins-length=i'} = \(my $opt_max_ins_length = 4);
+
 
 =back
 
@@ -287,6 +295,7 @@ Sam::Seq->Trim($cfg{'sr-trim'});
 Sam::Seq->InDelTaboo($cfg{'sr-indel-taboo'});
 Sam::Seq->MaxCoverage($opt_cov);
 Sam::Seq->BinSize($cfg{'bin-size'});
+Sam::Seq->MaxInsLength($opt_max_ins_length);
 
 Fastq::Seq->Qual_lcs_range(20, 40, $opt_qv_offset);  
 # 80 chars are cutoff at each side to keep overlaps => min length 160, better 200
@@ -407,7 +416,7 @@ foreach my $pb_id(@PB_IDS){
 	if($opt_detect_chimera){
 		my @chimera_coords = $PB{$pb_id}->chimera();
 		foreach my $c(@chimera_coords){
-			printf $fch ("%s\t%d\t%d\t%s\n", $pb_id, @{$c->{col_range}}, join("\t", @{$c->{hx}}));
+			printf $fch ("%s\t%s\t%d\t%d\t%s\n", $pb_id, $c->{chim}, @{$c->{col_range}}, join("\t", @{$c->{hx}}));
 		}
 	}
 	
