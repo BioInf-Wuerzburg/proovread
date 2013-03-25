@@ -39,6 +39,9 @@ Class for handling FASTA sequences.
 
 =over
 
+=item [BugFix] Regex to parse FASTA record doesn't fail anymore on 
+ entries without description.
+
 =item [BugFix] C<< $fq->substr_seq >> dies on no arguments
 
 =item [Change] Refactored C<new()>. Handles creation of "empty" objects and 
@@ -226,7 +229,7 @@ sub new{
 			my %self;
 			@self{'id','desc', 'seq'} = shift =~ m/
 				(?:>?(\S*))			# id, >? for records
-				(?:\s([^\n]+))?\n	# desc, optional
+				(?:[^\S\n]([^\n]+))?\n	# desc, optional
 				(.+)				# seq
 			/xs;					# . includes \n
 			$self = {
@@ -256,7 +259,7 @@ sub new{
 			}elsif($self->{seq_head}){
 				my($id,$desc) = $self->{seq_head} =~ m/
 					(?:>?(\S*))			# id, >? for records
-					(?:\s([^\n]+))?		# desc, optional
+					(?:[^\S\n]([^\n]+))?		# desc, optional
 				/xs;	
 				$self->{id} = $id; 
 				$self->{desc} = $desc || '';

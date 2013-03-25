@@ -34,6 +34,9 @@ SeqFilter - Versatile FASTA/FASTQ sequence file analysis and modification tool.
 
 =over
 
+=item [Feature] Verbose levels to omit Progressbar and entire output, 
+ --quiet as convenience for --verbose=0.
+
 =item [BugFix] empty LISTs returned by qual_lcs / qual_win are now handled 
  correctly.
 
@@ -329,13 +332,22 @@ Examples:
 
 $opt{'base-content=s'} = \(my $opt_base_content = undef);
 
-=item --[no]verbose
+=item --verbose=<INT>
 
-Toggle verbose, default on.
+Toggle verbose level, default 2, which outputs statistics and progress.
+Set 1 for statistics only or 0 for no verbose output.
 
 =cut 
 
-$opt{'verbose!'} = \(my $opt_verbose = 1);
+$opt{'verbose=i'} = \(my $opt_verbose = 2);
+
+=item --quiet
+
+Omit all verbose messages. The same as --verbose=0, Superceeds --verbose settings.
+
+=cut
+
+$opt{'quiet'} = \(my $opt_quiet);
 
 =item [--help]
 
@@ -363,7 +375,7 @@ if($opt_max_length && $opt_min_length && ($opt_min_length > $opt_max_length)){
 	pod2usage(exitval=>1, msg=>'Cannot read IDS and sequences from STDIN');
 }
 $opt_substr_file && !-e $opt_substr_file && pod2usage(exitval=>1, msg=>'Cannot find SUBSTR file: '.$opt_substr_file);
-
+$opt_verbose = 0 if $opt_quiet; 
 
 ##------------------------------------------------------------------------##
 
@@ -372,10 +384,11 @@ $opt_substr_file && !-e $opt_substr_file && pod2usage(exitval=>1, msg=>'Cannot f
 =cut
 
 my $V = Verbose->new(
-	report_level => $opt_verbose || 0,
-	line_width => 80
+	level => 1,
+	report_level => $opt_verbose,
+	line_width => 80,
+	
 );
-
 
 ##------------------------------------------------------------------------##
 
@@ -412,8 +425,9 @@ if(
 
 
 my $VPB = Verbose::ProgressBar->new(
-	report_level => $opt_verbose || 0,
-	size => $FP->fh()
+	level => 2,
+	report_level => $opt_verbose,
+	size => $FP->fh(),
 );
 
 
