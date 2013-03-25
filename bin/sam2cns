@@ -415,8 +415,16 @@ foreach my $pb_id(@PB_IDS){
 	# chimera
 	if($opt_detect_chimera){
 		my @chimera_coords = $PB{$pb_id}->chimera();
-		foreach my $c(@chimera_coords){
-			printf $fch ("%s\t%s\t%d\t%d\t%s\n", $pb_id, $c->{chim}, @{$c->{col_range}}, join("\t", @{$c->{hx}}));
+		if(@chimera_coords){
+			# reorder chimera coords
+			# prepend a 0, since we want to substr not the chimera regions, 
+			# but the sequence between chimera regions
+			my @coords = map{@{$_->{col_range}}}@chimera_coords;
+			unshift(@coords,0);
+		
+			foreach my $c(@chimera_coords){
+				print $fch join("\t", $pb_id, $c->{bool}, shift(@coords), shift(@coords), @{$c->{hx}}), "\n";
+			}
 		}
 	}
 	

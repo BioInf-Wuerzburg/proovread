@@ -929,10 +929,10 @@ sub chimera{
 	my @coords;
 	# get the state matrix columns 
 	foreach my $lcov_bin_idxs (@lcov_bin_idxs){
-		# uncovered columns in lcov are zero quality anyways
 		my $mat_from = ($lcov_bin_idxs->[0]-1) * $self->{bin_size};
 		my $mat_to = ($lcov_bin_idxs->[1]+2) * $self->{bin_size} -1;
 		
+		# uncovered columns in lcov are zero quality anyways
 		next if grep{!@$_}@{$self->{_state_matrix}}[$mat_from .. $mat_to];
 
 		#heterozygosity proof -> left hand and right hand matrix separately
@@ -1003,9 +1003,9 @@ sub chimera{
 		# ...
 		
 		push @coords, {
-			col_range => [$mat_from, $mat_to],
+			col_range => [$mat_from + $self->{bin_size}, $mat_to - $self->{bin_size}],
 			hx => \@hx_delta,
-			chim => (grep{$_}@hx_delta) +1 > ((@hx_delta-1)/4) ? "T" : "F"
+			bool => (grep{$_}@hx_delta) +1 > ((@hx_delta-1)/4) ? 1 : 0
 		} 
 
 		#TODO: self chimera
