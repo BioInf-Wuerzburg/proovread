@@ -43,7 +43,7 @@ use Time::HiRes qw(usleep);
 
 use Data::Dumper;
 
-our $VERSION = '0.84';
+our $VERSION = '0.85';
 our ($REVISION) = '$Revision$' =~ /(\d+)/;
 our ($MODIFIED) = '$Date$' =~ /Date: (\S+\s\S+)/;
 
@@ -62,6 +62,12 @@ Correct single molecule sequencing reads by iterative mapping of high
 =cut
 
 =head1 CHANGELOG
+
+=head2 0.85
+
+=item [Feature] Chimera detection returns score for threshold.
+
+=item [Feature] SeqFilter does --substr on chimera coords file.
 
 =head2 0.84
 

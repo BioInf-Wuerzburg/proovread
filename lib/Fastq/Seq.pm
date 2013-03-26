@@ -37,6 +37,8 @@ Class for handling FASTQ sequences.
 
 =over
 
+=item [Feature] Added C<< $fq->compelment >> and C<< $fq->reverse_compelment >>
+
 =item [BugFix] C<< $fq->substr_seq >> dies on no arguments
 
 =item [Feature] C<< Fasta::Seq->Cat >> concatenates seq objects, "." and ".="
@@ -186,6 +188,26 @@ $Tr{33} = eval 'sub{ $_[0] =~ tr/'.$o64.'/'.$o33.'/;}';
 =head1 Class METHODS
 
 =cut
+
+=head2 Complement
+
+=cut
+
+sub Complement{	
+	my ($class, $seq) = @_;
+	$seq =~ tr/ATGCatgc/TACGtacg/;
+	return $seq; 
+} 
+
+=head2 Reverse_complement
+
+=cut
+
+sub Reverse_complement{
+	my ($class, $seq) = @_;
+	$seq =~ tr/ATGCatgc/TACGtacg/;
+	return reverse $seq;
+}
 
 =head2 Add_base_content_scan
 
@@ -370,6 +392,8 @@ sub cat{
 	return $re;
 }
 
+
+
 ##------------------------------------------------------------------------##
 
 =head1 Constructor METHOD
@@ -454,6 +478,31 @@ sub new{
 =head1 Object METHODS
 
 =cut
+
+=head2 reverse_complement
+
+Reverse complement the sequence. Returns modified seq object.
+
+=cut
+
+sub reverse_complement{
+	my $self = shift;
+	$self->{seq} = ref($self)->Reverse_complement($self->{seq});
+	$self->{qual} = reverse $self->{qual};
+	return $self;
+}
+
+=head2 reverse_complement
+
+Complement the sequence. Returns modified seq object
+
+=cut
+
+sub complement{
+	my $self = shift;
+	$self->{seq} = ref($self)->Complement($self->{seq});
+	return $self;
+}
 
 =head2 trim2qual_lcs
 

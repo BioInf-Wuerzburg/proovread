@@ -20,7 +20,7 @@ use Fastq::Seq 0.10;
 use Fasta::Parser 0.06;
 use Fasta::Seq 0.06;
 
-our $VERSION = '1.00';
+our $VERSION = '1.01';
 
 =head1 NAME
 
@@ -30,12 +30,31 @@ SeqFilter - Versatile FASTA/FASTQ sequence file analysis and modification tool.
 
 =head1 CHANGELOG seqz (combined Fasta-/FastqFilter)
 
+=head1 1.01
+
+=over
+
+=item [Feature] C<--substr-perl-style> enables usage of C<--substr> OFFSET
+ [LENGTH [REPLACEMENT]].
+
+=item [Change] C<--substr> uses by default  TO FROM syntax instead of OFFSET
+ [LENGTH [REPLACEMENT]]
+
+=item [Feature] C<--rev-comp> to output sequences specified by ID as reverse 
+ complement.
+
+=item [Feature] Comment lines indicated by leading "#" are now supported in
+ substr and ids files.
+
+=item [Feature] Verbose levels to omit Progressbar and entire output, 
+ --quiet as convenience for --verbose=0.
+
+=back
+
 =head 1.00
 
 =over
 
-=item [Feature] Verbose levels to omit Progressbar and entire output, 
- --quiet as convenience for --verbose=0.
 
 =item [BugFix] empty LISTs returned by qual_lcs / qual_win are now handled 
  correctly.
@@ -218,6 +237,15 @@ FASTQ only. output FASTA format. Default FASTQ.
 
 $opt{'fasta'} = \(my $opt_fasta = undef);
 
+=item [--rev-comp=<FILE>/----rev-comp='-']
+
+Pathname to file of sequence IDs or list of IDs to be transformed. Formatting
+ follows the same rules as --ids files.
+
+=cut 
+
+$opt{'rev-comp=s'} = \(my $opt_rc = '');
+
 =item [--phred-offset] [auto]
 
 FASTQ only. Phred offset for quality scores. Default auto-detect.
@@ -279,9 +307,12 @@ $opt{'trim-lcs=s'} = \(my $opt_slice_lcs = undef);
 
 =item [--substr=<FILE>]    
 
-Pathname to a FILE containing information for subseq extraction/modification
-The format is a tsv, starting with the ID of the read, followed by the substr
- values OFFSET,LENGTH,REPLACESEQ,REPLACEQUAL. The parameter usage is the 
+Pathname to a FILE containing information for subseq extraction/modification.
+The format is a tsv, by default lines of the format ID FROM TO are expected.
+Lines prepened by '#' are treated as comments and therefore ignored.
+If --substr-perl-style is set, the lines must start with the ID of the read,
+ followed by the substr
+ values OFFSET,LENGTH,REPLACESEQ,REPLACEQUAL. The parameter usage is than the 
  same as for perl builtin C<substr> function, meaning an OFFSET alone is 
  sufficient, a positive value is set from the start of the sequence, a 
  negative offset from the end, without LENGTH, the sequence is returned from
@@ -292,21 +323,34 @@ The format is a tsv, starting with the ID of the read, followed by the substr
  of the read id. This command will be performed prior to any indiviual 
  substr command.
 
-Examples:
-
-  # trim read1 head and tail by 10
-  read1   10
-  # extract from read2 250 nts starting at pos 15
-  read2   15   250
-  # replace 3 nt by an "N"" with qual "!" (for FASTQ)
-  read3   3   1   N   !
-  # trim from all reads 5nts at the beginning and the end.
-  *	5
-  *	-5
+  FROM TO:
+    # extract sequence from pos 10 to pos 50
+    read1 10 50
+  
+  OFFSET [LENGTH [REPLACEMENT]]
+    # trim read1 head and tail by 10
+    read1   10
+    # extract from read2 250 nts starting at pos 15
+    read2   15   250
+    # replace 3 nt by an "N"" with qual "!" (for FASTQ)
+    read3   3   1   N   !
+    # trim from all reads 5nts at the beginning and the end.
+    *	5
+    *	-5
 
 =cut
 
 $opt{'substr=s'} = \(my $opt_substr_file = undef);
+
+=item [--substr-perl-style]
+
+By default, substr information are read according to the format FROM TO.
+Set this flag to switch the behaviour to perl substr() like style of 
+"OFFSET [LENGTH [REPLACEMENT]]"
+
+=cut
+
+$opt{'substr-perl-style!'} = \(my $opt_substr_perl);
 
 =item [--N=<INT,INT...>]
 
@@ -397,6 +441,10 @@ my $V = Verbose->new(
 =cut
 
 # Fasta parser
+if(!$opt_in and ($opt_in and $opt_in eq '-') || ($opt_rc and $opt_rc eq '-')){
+	$V->exit('STDIN already in use, --in missing');
+}
+
 $V->verbose("Reading Input from ".( $opt_in ? $opt_in : "STDIN" ));
 
 my $FP;
@@ -470,7 +518,19 @@ if(!$FASTQ){
 
 my @opt_base_content = split(/\s*,\s*/, $opt_base_content) if $opt_base_content;
 my @opt_N = sort{$a <=> $b}(split(/\s*,\s*/, $opt_N)) if $opt_N;
-my %IDS = read_ids() if $opt_ids;
+my %IDS = read_ids($opt_ids) if $opt_ids;
+my %RC_IDS;
+if($opt_rc){
+	if($opt_rc eq '-' && $opt_ids eq '-'){
+		if($opt_ids_exclude){
+			$V->exit("It does not make sense to rev-comp the same ids you are going to exclude!");
+		}
+		%RC_IDS = %IDS;
+	}else{
+		%RC_IDS = read_ids($opt_rc) if $opt_rc;
+	}
+}
+
 my %SUBSTR = read_substrs() if $opt_substr_file;
 
 my $tsv;
@@ -527,7 +587,8 @@ my %BCs; # base contents
 while (my $SEQ = $FP->next_seq()){
 	$total_count++;
 	$VPB->update();
-
+	
+	my $ID = $SEQ->id;
 	my $length = length($SEQ->seq);
 	
 	# TOTAL STATS		
@@ -543,9 +604,9 @@ while (my $SEQ = $FP->next_seq()){
 	# ids
 	if(keys %IDS){
 		if ($opt_ids_exclude){
-			next if $IDS{$SEQ->id}
+			next if $IDS{$ID}
 		}else{
-			next unless $IDS{$SEQ->id}
+			next unless $IDS{$ID}
 		}
 	}
 	
@@ -558,9 +619,9 @@ while (my $SEQ = $FP->next_seq()){
 		}@fq;
 	}
 	
-	if($opt_substr_file && exists $SUBSTR{$SEQ->id} ){
+	if($opt_substr_file && exists $SUBSTR{$ID} ){
 		@fq = map{
-			$_->substr_seq(@{$SUBSTR{$SEQ->id}});
+			$_->substr_seq(@{$SUBSTR{$ID}});
 		}@fq;
 	}
 	
@@ -580,10 +641,15 @@ while (my $SEQ = $FP->next_seq()){
 		# min-length/max-length
 		if($opt_min_length){ next if $length < $opt_min_length }; 
 		if($opt_max_length){ next if $length > $opt_max_length };
+
+		# reverse complement
+		if(keys %RC_IDS){
+			$SEQ->reverse_complement if $RC_IDS{$ID};
+		}
 		
 		# mask low quality
 		$opt_mask && $SEQ->mask_qual_low();
-
+		
 		# OUTPUT
 		if($opt_out){
 			if($opt_fasta){
@@ -690,14 +756,19 @@ if($tsv){
 =cut
 
 sub read_ids{
+	my ($src) = @_;
 	my @IDS;
-	if($opt_ids eq '-'){
+	if($src eq '-'){
 		while(<STDIN>){
+			next unless $_; # ignore empty lines
+			next if /^#/; # ignore comments
 			push @IDS, split(/[\s,\n]+/, $_);
 		}
 	}else{
-		open(IDS, $opt_ids) || $V->exit("Can't open output ids file: '$opt_ids'");
+		open(IDS, $src) || $V->exit("Can't open file '$src'");
 		while(<IDS>){
+			next unless $_; # ignore empty lines
+			next if /^#/; # ignore comments
 			push @IDS, split(/[\s,\n]+/, $_);
 		}
 		close IDS;
@@ -720,9 +791,13 @@ sub read_substrs{
 	while(<SUBS>){
 		chomp();
 		next unless $_; # ignore empty lines
-		my ($id, @f) = split(/\t/, $_);
+		next if /^#/; # ignore comments
+		my ($id, @f) = split(/\t/, $_, 3);
 		$id =~ s/^[>@]//;
-		push @{$s{$id}}, [@f];
+		# transform from-to to offset-length
+		my $o = $f[0];
+		my $l = $f[1]-$f[0]+1;
+		push @{$s{$id}}, [$o, $l];
 	}
 	close SUBS;
 	return %s;	

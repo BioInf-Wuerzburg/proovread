@@ -923,9 +923,6 @@ sub chimera{
 		}
 	}
 	
-	use Data::Dumper;
-	print Dumper(\@bin_bases, \@lcov_bin_idxs);
-	
 	my @coords;
 	# get the state matrix columns 
 	foreach my $lcov_bin_idxs (@lcov_bin_idxs){
@@ -1005,6 +1002,7 @@ sub chimera{
 		push @coords, {
 			col_range => [$mat_from + $self->{bin_size}, $mat_to - $self->{bin_size}],
 			hx => \@hx_delta,
+			score => (grep{$_> 0}@hx_delta) / @hx_delta,  # number of + columns normalized to total n columns
 			bool => (grep{$_}@hx_delta) +1 > ((@hx_delta-1)/4) ? 1 : 0
 		} 
 

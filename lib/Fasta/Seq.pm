@@ -39,10 +39,13 @@ Class for handling FASTA sequences.
 
 =over
 
+=item [BugFix] Methods C<< $fa->reverse_complement >> and C<< $fa->complement >>
+ now return the object after transformation and not the sequence string itself.
+
 =item [BugFix] Regex to parse FASTA record doesn't fail anymore on 
  entries without description.
 
-=item [BugFix] C<< $fq->substr_seq >> dies on no arguments
+=item [BugFix] C<< $fa->substr_seq >> dies on no arguments
 
 =item [Change] Refactored C<new()>. Handles creation of "empty" objects and 
  has some adjustments to head/id/desc parsing/generation.
@@ -302,6 +305,7 @@ Reverse complement the sequence.
 sub reverse_complement{
 	my $self = shift;
 	$self->{seq} = ref($self)->Reverse_complement($self->{seq});
+	return $self;
 }
 
 =head2 reverse_complement
@@ -313,6 +317,7 @@ Complement the sequence.
 sub complement{
 	my $self = shift;
 	$self->{seq} = ref($self)->Complement($self->{seq});
+	return $self;
 }
 
 
