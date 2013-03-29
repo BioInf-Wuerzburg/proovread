@@ -1003,7 +1003,6 @@ sub chimera{
 			col_range => [$mat_from + $self->{bin_size}, $mat_to - $self->{bin_size}],
 			hx => \@hx_delta,
 			score => (grep{$_> 0}@hx_delta) / @hx_delta,  # number of + columns normalized to total n columns
-			bool => (grep{$_}@hx_delta) +1 > ((@hx_delta-1)/4) ? 1 : 0
 		} 
 
 		#TODO: self chimera

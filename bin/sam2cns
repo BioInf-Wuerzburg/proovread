@@ -257,6 +257,7 @@ Maximum allowed length for inserts.
 
 $opt{'--max-ins-length=i'} = \(my $opt_max_ins_length = 4);
 
+$opt{'--chimera-min-score'} = \(my $opt_chimera_min_score = 0);
 
 =back
 
@@ -421,10 +422,13 @@ foreach my $pb_id(@PB_IDS){
 			# but the sequence between chimera regions
 			my @coords = map{@{$_->{col_range}}}@chimera_coords;
 			unshift(@coords,0);
-		
-			foreach my $c(@chimera_coords){
-				print $fch join("\t", $pb_id, $c->{bool}, shift(@coords), shift(@coords), @{$c->{hx}}), "\n";
+			
+			my $i;
+			for($i=0; $i<@chimera_coords; $i++){
+				print $fch join("\t", $pb_id, $coords[$i*2],$coords[$i*2+1]), "\n";
+				print $fch "#\t",$chimera_coords[$i]->{score},"\n";
 			}
+			print $fch join("\t", $pb_id, $coords[++$i]), "\n";
 		}
 	}
 	
