@@ -44,7 +44,7 @@ use Time::HiRes qw(usleep);
 use Data::Dumper;
 $Data::Dumper::Sortkeys = 1;
 
-our $VERSION = '0.85';
+our $VERSION = '0.90';
 our ($REVISION) = '$Revision$' =~ /(\d+)/;
 our ($MODIFIED) = '$Date$' =~ /Date: (\S+\s\S+)/;
 
@@ -466,6 +466,15 @@ Since the pipeline is designed to use short reads for correction, it stops
 
 $opt{'ignore-sr-length'} = \(my $opt_ignore_sr_length = $cfg{'ignore-sr-length'});
 
+=item [--overwrite]
+
+Overwrite output folder if it already exists.
+
+=cut
+
+$opt{'overwrite'} = \(my $opt_overwrite = $cfg{'overwrite'});
+
+
 =item [-h, --help]
 
 Show this help.
@@ -683,6 +692,9 @@ if($opt_sam_file){
 			$opt_mode = 'pacbio-iterative';
 			@TASKS = @{$cfg{'mode-tasks'}{$opt_mode}};
 		}
+	}else{
+		print $opt_mode;
+		@TASKS = @{$cfg{'mode-tasks'}{$opt_mode}};
 	}
 }
 
@@ -705,8 +717,12 @@ $opt_prefix = 'proovread' unless defined $opt_prefix;
 my @tmp_dirs = (map{$opt_prefix."/".$_}@TASKS);
 if(-e $opt_prefix){
 	if(-d $opt_prefix){
-		$VS->exit("Output directory already exists and is not empty")
-		unless is_empty_dir($opt_prefix);
+		if($opt_overwrite){
+			remove_tree($opt_prefix);
+		}else{
+			$VS->exit("Output directory already exists and is not empty")
+			unless is_empty_dir($opt_prefix);
+		}
 	}else{
 		$VS->exit("Output directory already exists, yet is no directory")
 	} 
@@ -799,6 +815,76 @@ foreach my $task(@TASKS){
 		$lr_chunk_offsets = correct_sr_mt($sam_chunk_offsets, $lr_chunk_offsets);
 	
 		$LR = undef;
+
+############################################################################
+
+	}elsif($task eq 'shrimp-pre-1'){
+
+		run_shrimp(
+			sr_files => $opt_sr_file,
+			stop_after => $sr_count_total * $cfg{'sr-pre-fraction'},
+			shrimp => {
+				%{$cfg{$task}}, # basic shrimp params from cfg
+				'verbose' => 1,
+				'log' => task_file_name(suffix => "_shrimp.log"),
+				'ref' => task_file_name('.fa', task => $TASKS[$TC-1] ),
+				#'--al' => task_file_name(suffix => "_sr.fq"),
+				'--threads' => $opt_threads,
+				'--qv-offset' => $sr_qv_offset_total,
+			}
+		);
+	
+		$sam_chunk_offsets = create_sorted_sam();
+		
+		$lr_chunk_offsets = correct_sr_mt($sam_chunk_offsets, $lr_chunk_offsets);
+
+		$LR = undef;
+
+	}elsif($task eq 'shrimp-pre-2'){
+
+		run_shrimp(
+			sr_files => $opt_sr_file,
+			stop_after => $sr_count_total * $cfg{'sr-pre-fraction'},
+			shrimp => {
+				%{$cfg{$task}}, # basic shrimp params from cfg
+				'verbose' => 1,
+				'log' => task_file_name(suffix => "_shrimp.log"),
+				'ref' => task_file_name(".fm", task => $TASKS[$TC-1] ),
+				#'--al' => task_file_name(suffix => "_sr.fq"),
+				'--threads' => $opt_threads,
+				'--qv-offset' => $sr_qv_offset_total,
+			}
+		);
+
+		$sam_chunk_offsets = create_sorted_sam();
+
+		$lr_chunk_offsets = correct_sr_mt($sam_chunk_offsets, $lr_chunk_offsets);
+	
+		$LR = undef;
+	}elsif($task eq 'shrimp-pre-3'){
+
+		run_shrimp(
+			sr_files => $opt_sr_file,
+			stop_after => $sr_count_total * $cfg{'sr-pre-fraction'},
+			shrimp => {
+				%{$cfg{$task}}, # basic shrimp params from cfg
+				'verbose' => 1,
+				'log' => task_file_name(suffix => "_shrimp.log"),
+				'ref' => task_file_name('.fm', task => $TASKS[$TC-1] ),
+				#'--al' => task_file_name(suffix => "_sr.fq"),
+				'--threads' => $opt_threads,
+				'--qv-offset' => $sr_qv_offset_total,
+			}
+		);
+	
+		$sam_chunk_offsets = create_sorted_sam();
+		
+		$lr_chunk_offsets = correct_sr_mt($sam_chunk_offsets, $lr_chunk_offsets);
+
+		$LR = undef;
+
+############################################################################		
+		
 		
 	}elsif($task eq 'shrimp-ccs'){
 
@@ -993,8 +1079,14 @@ sub run_shrimp{
 		shrimp => {},
 		tmp_sam => task_file_name("_tmp.sam"),
 		ram_sam => $opt_ram_sam,
+		stop_after => 0,
 		@_
 	};
+	
+
+	$V->hline;
+	$V->hline;
+	$V->verbose($p->{stop_after});
 	
 	$V->nline;
 	$V->nline;
@@ -1094,7 +1186,7 @@ sub run_shrimp{
 		my $rsp_c = 0;
 		my $add_c = 0;
 		my $src_lib_sum = 0;
-		my $src;
+		my $src = 0;
 		# shrimp log
 		my $slh = $shrimp->logh;
 		
@@ -1135,15 +1227,24 @@ sub run_shrimp{
 					($src) = $tail =~ /(\d+)\s+\S+\s+\S+\s*$/;
 					$pg_rsp->update($src) if defined $src; 
 				}
+				
+				# shrimp pre, cancel after first fraction of reads
+				if($p->{stop_after} && $src > $p->{stop_after}){
+					$V->verbose('$src: '.$src);
+					$shrimp->cancel(); # cancel shrimp
+					last;
+				}
+				
 				$rsp_c++;
 			}
 
 			seek($slh, -1500, 2); # get, ..
 			read($slh, my $tail, 1500); # .. read, .. 
 			# .. and parse last 1500 chars of shrimp log for number of processed reads
-			my ($reads_matched) = $tail =~ /Reads Matched:\s+(\S+)/;
+			my ($reads_matched) = $tail =~ /Reads Matched:\s+(\S+)/ || 'NA';
 			$reads_matched =~ tr/,//d;
 			push @sr_matched, $reads_matched;
+			
 		}
 
 
@@ -1311,7 +1412,7 @@ sub correct_sr_mt{
 			: ('--ref' 		=> $TC == 1
 						 	 ? task_file_name(".f[aq]", task => $TASKS[$TC-1] )
 						 	 : task_file_name(".fq", task => $TASKS[$TC-1] )),
-		$TASKS[$TC] eq 'shrimp-iter-1' # calculate hcrs on first iter for second iter
+		$TASKS[$TC] =~ m/iter-1|pre-1|pre-2/ # calculate hcrs on first iter for second iter
 			? ('--min-lcr-length' => $min_lcr_length) # params from config
 			: ('--min-hcr-length' => 0),
 		($TASKS[$TC] eq 'shrimp-finish' || $TASKS[$TC] eq 'read-sam') # calculate hcrs on first iter for second iter

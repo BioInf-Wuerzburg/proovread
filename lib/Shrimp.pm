@@ -63,6 +63,9 @@ SHRiMP (2.2.0) gmapper interface.
 
 =over
 
+=item [Feature] << $shrimp->cancel(<MESSAGE>) >> does not report anything
+unless a message is given.
+
 =item [BugFix] Correctly creating flag only parameter if specified with 
  value '' and ignoring them if specified as undef. 
 
@@ -375,7 +378,7 @@ sub cancel {
 #		$pid." doesnt exist -> probably already finished\n");
 	};
 
-	$V->verbose($msg || "Shrimp run canceled");
+	$msg && $V->verbose($msg);
 }
 
 
