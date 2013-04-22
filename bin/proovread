@@ -42,6 +42,7 @@ use Thread::Queue;
 use Time::HiRes qw(usleep);
 
 use Data::Dumper;
+$Data::Dumper::Sortkeys = 1;
 
 our $VERSION = '0.85';
 our ($REVISION) = '$Revision$' =~ /(\d+)/;
