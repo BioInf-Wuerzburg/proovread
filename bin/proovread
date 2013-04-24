@@ -64,6 +64,15 @@ Correct single molecule sequencing reads by iterative mapping of high
 
 =head1 CHANGELOG
 
+=head2 0.90
+
+=over
+
+=item [Feature] shrimp-pre. Pre correct long reads with fraction of short 
+ reads to increase overall speed.
+
+=back
+
 =head2 0.85
 
 =item [Feature] Chimera detection returns score for threshold.
@@ -840,11 +849,11 @@ foreach my $task(@TASKS){
 
 		$LR = undef;
 
-	}elsif($task eq 'shrimp-pre-2'){
+	}elsif($task =~ m/shrimp-pre-2/){
 
 		run_shrimp(
 			sr_files => $opt_sr_file,
-			stop_after => $sr_count_total * $cfg{'sr-pre-fraction'},
+			stop_after => $sr_count_total * $cfg{'sr-pre-fraction'} *2,
 			shrimp => {
 				%{$cfg{$task}}, # basic shrimp params from cfg
 				'verbose' => 1,
@@ -861,28 +870,28 @@ foreach my $task(@TASKS){
 		$lr_chunk_offsets = correct_sr_mt($sam_chunk_offsets, $lr_chunk_offsets);
 	
 		$LR = undef;
-	}elsif($task eq 'shrimp-pre-3'){
+
+	}elsif($task =~ m/shrimp-pre-3/){
 
 		run_shrimp(
 			sr_files => $opt_sr_file,
-			stop_after => $sr_count_total * $cfg{'sr-pre-fraction'},
+			stop_after => $sr_count_total * $cfg{'sr-pre-fraction'} *2,
 			shrimp => {
 				%{$cfg{$task}}, # basic shrimp params from cfg
 				'verbose' => 1,
 				'log' => task_file_name(suffix => "_shrimp.log"),
-				'ref' => task_file_name('.fm', task => $TASKS[$TC-1] ),
+				'ref' => task_file_name(".fm", task => $TASKS[$TC-1] ),
 				#'--al' => task_file_name(suffix => "_sr.fq"),
 				'--threads' => $opt_threads,
 				'--qv-offset' => $sr_qv_offset_total,
 			}
 		);
-	
+
 		$sam_chunk_offsets = create_sorted_sam();
-		
+
 		$lr_chunk_offsets = correct_sr_mt($sam_chunk_offsets, $lr_chunk_offsets);
-
+	
 		$LR = undef;
-
 ############################################################################		
 		
 		
@@ -1412,7 +1421,7 @@ sub correct_sr_mt{
 			: ('--ref' 		=> $TC == 1
 						 	 ? task_file_name(".f[aq]", task => $TASKS[$TC-1] )
 						 	 : task_file_name(".fq", task => $TASKS[$TC-1] )),
-		$TASKS[$TC] =~ m/iter-1|pre-1|pre-2/ # calculate hcrs on first iter for second iter
+		$TASKS[$TC] =~ m/iter-1|pre-1|pre-2|pre-3/ # calculate hcrs on first iter for second iter
 			? ('--min-lcr-length' => $min_lcr_length) # params from config
 			: ('--min-hcr-length' => 0),
 		($TASKS[$TC] eq 'shrimp-finish' || $TASKS[$TC] eq 'read-sam') # calculate hcrs on first iter for second iter
