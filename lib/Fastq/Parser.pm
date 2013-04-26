@@ -5,14 +5,17 @@ package Fastq::Parser;
 use warnings;
 use strict;
 
+use IO::File;
+use IO::Uncompress::Gunzip;
+use List::Util;
+
 # preference libs in same folder over @INC
 use lib '../';
 
-use Fastq::Seq 0.03;
+use Fastq::Seq 0.10;
 
-use List::Util;
 
-our $VERSION = '0.07';
+our $VERSION = '0.08';
 our ($REVISION) = '$Revision$' =~ /(\d+)/;
 our ($MODIFIED) = '$Date$' =~ /Date: (.+)/;
 
@@ -42,6 +45,30 @@ TODO
 =cut
 
 =head1 CHANGELOG
+
+=head2 0.08
+
+=over
+
+=item [Change] STDIN is not dupped anymore. Dupped STDIN prevents subsequent
+ reading of STDIN in main.
+
+=item [Feature] << $fp->check_format >> now reads and B<unreads> the first
+ char form input to determine format. Unreading makes it safe to use on 
+ STDIN without using up stuff from the stream.
+
+=item [Change] Removed << $fp->check_fh_is_pipe >>. Use << $fp->is_fh('PIPE') >> 
+instead.
+ 
+=item [Feature] << $fp->is_fh() >> allows to tell the type of input stream.
+
+=item [Refactoring] Type of input stream is determined more sophistically. 
+
+=item [Change] Uses <&STDIN dup instead of STDIN by default.
+
+=back
+
+=cut
 
 =head2 0.07
 
@@ -154,33 +181,40 @@ sub new{
 	
 	# defaults=
 	my $self = {
-		fh => \*STDIN,
+		fh => undef,
 		file => undef,
 		phred_offset => undef,
 		mode => '<',
 		_buffer => [],
-		_is_pipe => undef,
 		@_	# overwrite defaults
 	};
 
+	bless $self, $class;
+
+	my $fh;
 	# open file in read/write mode
-	if ($self->{file}){
-		my $fh;
-		open ( $fh , $self->{mode}, $self->{file}) or die sprintf("%s: %s, %s",(caller 0)[3],$self->{file}, $!);
-		$self->{fh} = $fh;
-		$self->{_is_pipe} = '';
-	}else{
-		 $self->{_is_pipe} = (-p $self->{fh} || -t $self->{fh}) ? 1 : ''; 
+	if($self->{file}){
+		if(-T $self->{file}){
+			open ($fh, $self->{mode}, $self->{file}) or die sprintf("%s: %s, %s",(caller 0)[3],$self->{file}, $!);
+		}else{ # assume gzip input
+			$fh = IO::Uncompress::Gunzip->new($self->{file});
+		}
 	}
 
-	bless $self, $class;
+	if($fh){
+		$self->fh($fh);
+	}else{
+		#open(my $fh, "<&STDIN") or die $!;
+		$self->fh(\*STDIN); # cannot dup, 'cause than ungetc does not work anymore!
+	}
+
 	return $self;
 }
 
 sub DESTROY{
 	# just to be sure :D
 	my $self = shift;
-	close $self->fh;
+	close $self->fh unless $self->is_fh('PIPE');
 }
 
 =head1 Object METHODS
@@ -264,25 +298,30 @@ sub next_seq{
 =head2 check_format
 
 Takes a peek at the first entry in the file and checks wether the format of 
- the input looks like FASTQ (leading @, + at start of third line). Returns 
- the Parser object on success, undef on failure.
- 
-NOTE: Use this directly after creating the Parser object, if other methods 
- are run on the Fastq::Parser object prior, it is likely to 
- fail.
+ the input looks like FASTQ (leading @). Returns the Parser object on 
+ success, undef on failure. Does not modify the input stream, therefore
+ can be used on STDIN safely.
+
+NOTE: It only works at the start of the input. This means for pipes, use it
+ before you start reading, on files use it either in the beginning or seek
+ to the start to perform the check.
 
 =cut
 
 sub check_format{
-	my $self = shift;
+	my ($self) = @_;
 	my $fh = $self->fh;
-	# read a line from/to the buffer
-	$self->{_buffer} = [my $nh = scalar <$fh>, scalar <$fh>, my $qh = scalar <$fh>, scalar <$fh>] unless @{$self->{_buffer}};
-	if($nh =~ /^@/ and $qh =~ /^\+/){
-		return $self;
-	}
-	return undef;
+	die sprintf("%s: %s",(caller 0)[3],"Format checking only works at the start of the file") 
+		if $fh->tell;
+	my $c =$fh->getc(); # read first char
+	# unread first char
+	$self->is_fh('GZIP') 
+		? $fh->ungetc($c)		# IO::Uncompress::Gunzip->ungetc pushes back string 
+		: $fh->ungetc(ord($c)); # IO::File->ungetc pushes back char by ordinal
+
+	return $c eq '@' ? $self : undef;
 }
+
 
 
 =head2 next_raw_seq
@@ -398,12 +437,12 @@ NOTE: The set of samples reads is entirely kept in memory, therefore this
 =cut
 
 sub sample_seqs{
-	my ($self, $n) = (@_, 1000);
+	my ($self, $n) = (@_, 100);
 	my $fh = $self->fh;
 	my $i;
 	my @reads;
 	
-	if($self->check_fh_is_pipe){
+	if($self->is_fh('PIPE') or $self->is_fh('GZIP')){
 		#cant seek on pipe: need to buffer and can only read head
 		
 		my $l;
@@ -435,7 +474,7 @@ sub sample_seqs{
 		my $buffer = $self->{_buffer}; # backup buffer state to restore after sampling
 		my $file_pos = tell($fh);
 		# can seek on file: sample random reads
-		my $size = -s $fh;
+		my $size = $self->file_size;
 
 		if($size < 10_000_000){
 			$self->seek(0);
@@ -566,12 +605,11 @@ Reads up to n reads from the current position of the FASTQ and estimates the
 
 sub guess_seq_count{
 	my ($self, $n) = (@_, 1000);
-	my $fh = $self->fh;
 	# pipe
-	return undef if $self->check_fh_is_pipe;
+	return undef if $self->is_fh('PIPE');
 
 	my $size;
-	my $file_size = -s $fh;
+	my $file_size = $self->file_size();
 	# empty file
 	return 0 unless $file_size;
 	
@@ -583,16 +621,42 @@ sub guess_seq_count{
 	return int(($file_size/$size* @sample_seqs)+0.5);
 }
 
-=head2 check_fh_is_pipe
+=head2 is_fh
 
-Returns TRUE (1) if filehandle is associated with a pipe, FALSE ('') if it is 
- associated with a real file.
+Determine the type of the filehandle. Without parameter, returns 0 for 
+ handle to FILE, 1 for PIPE, and 2 for a handle to a SCALAR.
+Alternatively you can provide the name of the type or the corresponding
+ INT as single parameter. In these cases, the methods returns 1, if the
+ type is matched, 0 otherwise.
+
+  $fp->is_fh();  # 0,1 or 2
+  $fp->is_fh('FILE') # 1 if filehandle is a handle to a FILE, 0 otherwise
+  $fp->is_fh(0) # 1 if filehandle is a handle to a FILE, 0 otherwise
 
 =cut
 
-sub check_fh_is_pipe{
-	my $self = shift;
-	return $self->{_is_pipe};
+sub is_fh{
+	my ($self, $type) = @_;
+	
+	my %type = (
+		'FILE' => 0,
+		'PIPE' => 1,
+		'SCALAR' => 2,
+		'GZIP' => 3,
+		0 => 0,
+		1 => 1,
+		2 => 2,
+		3 => 3,
+	);
+	
+	if(defined $type){
+		die sprintf("%s: %s",(caller 0)[3],"unknown type $type") 
+			unless exists $type{$type};
+		
+		return $type{$type} == $self->{_is_fh} ? 1 : 0;
+	}
+
+	return $self->{_is_fh};
 }
 
 =head2 _stddev
@@ -642,12 +706,25 @@ Get/Set the file handle.
 
 sub fh{
 	my ($self, $fh) = @_;
+	
 	if($fh){
+		if((ref $fh) =~ m/Gunzip/){
+			$self->{_is_fh} = 3;
+		}elsif(-f $fh){
+			$self->{_is_fh} = 0;
+		}elsif(-p $fh or  -t $fh){
+			$self->{_is_fh} = 1;
+		}elsif(ref $fh eq 'SCALAR'){
+			$self->{_is_fh} = 2;
+		}else{
+			die sprintf("%s: %s",(caller 0)[3],"Unknown filehandle type");
+		}
 		$self->{fh} = $fh;
-		$self->{_is_pipe} = (-p $fh || -t $fh) ? 1 : undef;	
-	};
+	}
+	
 	return $self->{fh};
 }
+
 
 =head2 phred_offset
 
@@ -662,6 +739,23 @@ sub phred_offset{
 }
 
 
+=head2 file_size
+
+Get the (uncompressed) size in kb of the underling data source.
+Returns undef on pipes.
+
+=cut
+
+sub file_size{
+	my ($self) = @_;
+	if($self->is_fh('GZIP')){
+		my @raw = `gzip --list $self->{file}`;
+		my $size = ( split " ", $raw[1] )[1];
+		return $size;
+	}else{
+		return -s $self->{fh};
+	}
+}
 
 
 =head1 AUTHOR

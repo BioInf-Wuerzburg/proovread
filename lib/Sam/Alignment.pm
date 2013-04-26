@@ -5,11 +5,14 @@ use strict;
 
 # $Id$
 
+use overload '""' => \&raw;
+
 # preference libs in same folder over @INC
 use lib '../';
 
 
-our $VERSION = '0.06';
+
+our $VERSION = '0.07';
 our ($REVISION) = '$Revision$' =~ /(\d+)/;
 our ($MODIFIED) = '$Date$' =~ /Date: (\S+\s\S+)/;
 
@@ -57,6 +60,19 @@ Class for handling sam alignments.
 =cut
 
 =head1 CHANGELOG
+
+=head 0.07
+
+=over
+
+=item [Feature] C<< $aln->raw >> overloads "";
+
+=item [Change] C<split(/\s/, $sam, 12)> is replaced by C<split("\t", $sam, 12)>
+ for better performance
+
+=item [Feature] Field names are stored in @Sam::Alignment::_Fieldsnames
+
+=back
 
 =head2 0.06
 
@@ -109,6 +125,13 @@ Initial Alignment module. Provides Constructor, generic accessor
 =cut
 
 
+=head1 Class ATTRIBUTES
+
+=cut
+
+our @_Fieldsnames = qw(qname flag rname pos mapq cigar rnext pnext tlen seq qual opt);
+
+
 =head1 Constructor METHOD
 
 =head2 new
@@ -132,8 +155,9 @@ sub new{
 	if(@_ == 1){ # input is string to split
 		my $sam = $_[0];
 		chomp($sam);
-		my @opt = ();
-		(@$self{qw(qname flag rname pos mapq cigar rnext pnext tlen seq qual opt)}) = split(/\s/,$sam, 12); 
+		my %sam;
+		@sam{@Sam::Alignment::_Fieldsnames} = split("\t",$sam, 12); 
+		$self = \%sam;
 		$self->{raw} = $sam."\n";
 	}else{ # input is key -> hash structure
 		$self = {

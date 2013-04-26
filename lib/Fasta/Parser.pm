@@ -5,12 +5,14 @@ package Fasta::Parser;
 use warnings;
 use strict;
 
+use IO::File;
+use List::Util;
+
 # preference libs in same folder over @INC
 use lib '../';
 
-use Fasta::Seq 0.02;
+use Fasta::Seq 0.06;
 
-use List::Util;
 
 our $VERSION = '0.08';
 our ($REVISION) = '$Revision$' =~ /(\d+)/;
@@ -39,6 +41,13 @@ TODO
 =head2 0.08
 
 =over
+
+=item [Change] STDIN is not dupped anymore. Dupped STDIN prevents subsequent
+ reading of STDIN in main.
+
+=item [Feature] << $fp->check_format >> now reads and B<unreads> the first
+ char form input to determine format. Unreading makes it safe to use on 
+ STDIN without using up stuff from the stream.
 
 =item [BugFix] Filehandle to pipe can be -p or -t.
 
@@ -168,7 +177,8 @@ sub new{
 		if($self->{fh}){
 			$self->fh($self->{fh});
 		}else{
-			open(my $fh, "<&STDIN") or die $!;
+			#open(my $fh, "<&STDIN") or die $!;
+			my $fh = \*STDIN;
 			$self->{fh} = $fh;
 			$self->{_is_fh} = 1;
 		}
@@ -180,7 +190,7 @@ sub new{
 sub DESTROY{
 	# just to be sure :D
 	my $self = shift;
-	close $self->fh;
+	close $self->fh unless $self->is_fh('PIPE');
 }
 
 
@@ -220,17 +230,25 @@ sub next_seq{
 
 =head2 check_format
 
-Check wether the format of the input looks like FASTA (leading >). 
- Returns the Parser object on success, undef on failure.
+Takes a peek at the first entry in the file and checks wether the format of 
+ the input looks like FASTA (leading >). Returns the Parser object on 
+ success, undef on failure. Does not modify the input stream, therefore
+ can be used on STDIN safely.
+
+NOTE: It only works at the start of the input. This means for pipes, use it
+ before you start reading, on files use it either in the beginning or seek
+ to the start to perform the check.
 
 =cut
 
 sub check_format{
 	my ($self) = @_;
 	my $fh = $self->fh;
-	my $c;
+	die sprintf("%s: %s",(caller 0)[3],"Format checking only works at the start of the file") 
+		if $fh->tell;
+	my $c =$fh->getc(); # read first char
+	$fh->ungetc(ord($c)); # unread first char
 	# read first char
-	read($fh,$c,1,0);
 	return $c eq '>' ? $self : undef;
 }
 
@@ -397,7 +415,6 @@ sub is_fh{
 			unless exists $type{$type};
 		
 		return $type{$type} == $self->{_is_fh} ? 1 : 0;
-		
 	}
 
 	return $self->{_is_fh};

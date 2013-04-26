@@ -25,15 +25,15 @@ use File::Copy;
 use Verbose;
 use Verbose::ProgressBar;
 
-use Fastq::Parser 0.07;
-use Fastq::Seq;
+use Fastq::Parser 0.08;
+use Fastq::Seq 0.10;
 
 use Fasta::Parser 0.08;
-use Fasta::Seq;
+use Fasta::Seq 0.06;
 
-use Sam::Parser;
-use Sam::Alignment;
-use Sam::Seq 0.08;
+use Sam::Parser 0.11;
+use Sam::Alignment 0.07;
+use Sam::Seq 0.09;
 
 use Shrimp 0.06;
 
@@ -68,8 +68,23 @@ Correct single molecule sequencing reads by iterative mapping of high
 
 =over
 
+=item [Change] MaxCoverage is adjusted each stage to the to account for
+ --sr-pre-fraction settings.
+
+=item [Change] Made shrimp-pre the default mode. Finish-with-aligned only
+ is by default deactivated in this mode regardless of coverage.
+
+=item [Feature] The fractions of short reads mapped in pre stages are 
+ controlled individually for each stage by --sr-pre-praction in .cfg.
+
 =item [Feature] shrimp-pre. Pre correct long reads with fraction of short 
  reads to increase overall speed.
+
+=item [Feature] Usage of latest Fastq::Parser module allows direct reading
+ of gzipped short read files.
+
+=item [Feature] Specify --overwrite to replace already exiting output
+ directories.
 
 =back
 
@@ -669,13 +684,6 @@ if(@$opt_sr_file){
 
 
 ##------------------------------------------------------------------------##
-# configure Sam::Seq
-
-Sam::Seq->MaxCoverage($opt_cov);
-Sam::Seq->BinSize($cfg{'bin-size'});
-
-
-##------------------------------------------------------------------------##
 
 =head1 MAIN
 
@@ -694,11 +702,11 @@ if($opt_sam_file){
 	@TASKS = @{$cfg{'mode-tasks'}{$opt_mode}};
 }else{
 	unless($opt_mode){
-		if($mean_sr_length > 200){
+		if($mean_sr_length > 260){
 			$opt_mode = 'pacbio-ccs';
 			@TASKS = @{$cfg{'mode-tasks'}{$opt_mode}};
 		}else{
-			$opt_mode = 'pacbio-iterative';
+			$opt_mode = 'pacbio-pre';
 			@TASKS = @{$cfg{'mode-tasks'}{$opt_mode}};
 		}
 	}else{
@@ -756,6 +764,10 @@ foreach my $task(@TASKS){
 	if($task eq 'read-sam'){
 		# $VS->exit("task not yet implemented")
 		# TODO: sam2cns w/o reference
+		# configure Sam::Seq
+		Sam::Seq->MaxCoverage($opt_cov);
+		Sam::Seq->BinSize($cfg{'bin-size'});
+
 		$LR = read_sam();
 		$sam_chunk_offsets = create_sorted_sam();
 		$lr_chunk_offsets = correct_sr_mt($sam_chunk_offsets, $lr_chunk_offsets);
@@ -770,7 +782,7 @@ foreach my $task(@TASKS){
 		$lr_chunk_offsets = prepare_lr();
 		
 		# decide how to finish (realign mapped only or everything)
-		unless(defined $opt_finish_aligned_only){
+		unless(defined $opt_finish_aligned_only && $opt_mode eq 'pacbio-iterative'){
 			# compute long-read - short-read coverage
 			$lr_bps_total += $_ for @lr_bps;
 			$sr_bps_total += $_ for @sr_bps;
@@ -784,6 +796,10 @@ foreach my $task(@TASKS){
 		
 		
 	}elsif($task eq 'shrimp-iter-1'){
+
+		# configure Sam::Seq
+		Sam::Seq->MaxCoverage($opt_cov);
+		Sam::Seq->BinSize($cfg{'bin-size'});
 
 		run_shrimp(
 			sr_files => $opt_sr_file,
@@ -805,6 +821,10 @@ foreach my $task(@TASKS){
 		$LR = undef;
 
 	}elsif($task eq 'shrimp-iter-2'){
+
+		# configure Sam::Seq
+		Sam::Seq->MaxCoverage($opt_cov);
+		Sam::Seq->BinSize($cfg{'bin-size'});
 
 		run_shrimp(
 			sr_files => $opt_sr_file,
@@ -829,9 +849,16 @@ foreach my $task(@TASKS){
 
 	}elsif($task eq 'shrimp-pre-1'){
 
+		# configure Sam::Seq
+		Sam::Seq->MaxCoverage($opt_cov * $cfg{'sr-pre-fraction'}{$task});
+		Sam::Seq->BinSize($cfg{'bin-size'});
+
 		run_shrimp(
 			sr_files => $opt_sr_file,
-			stop_after => $sr_count_total * $cfg{'sr-pre-fraction'},
+			($sr_count_total > 1_000_000
+				? (stop_after => $sr_count_total * $cfg{'sr-pre-fraction'}{$task})
+				: ()
+			),
 			shrimp => {
 				%{$cfg{$task}}, # basic shrimp params from cfg
 				'verbose' => 1,
@@ -849,11 +876,18 @@ foreach my $task(@TASKS){
 
 		$LR = undef;
 
-	}elsif($task =~ m/shrimp-pre-2/){
+	}elsif($task =~ m/shrimp-pre-[2-5]/){
+
+		# configure Sam::Seq
+		Sam::Seq->MaxCoverage($opt_cov * $cfg{'sr-pre-fraction'}{$task});
+		Sam::Seq->BinSize($cfg{'bin-size'});
 
 		run_shrimp(
 			sr_files => $opt_sr_file,
-			stop_after => $sr_count_total * $cfg{'sr-pre-fraction'} *2,
+			($sr_count_total > 1_000_000
+				? (stop_after => $sr_count_total * $cfg{'sr-pre-fraction'}{$task})
+				: ()
+			),
 			shrimp => {
 				%{$cfg{$task}}, # basic shrimp params from cfg
 				'verbose' => 1,
@@ -871,31 +905,14 @@ foreach my $task(@TASKS){
 	
 		$LR = undef;
 
-	}elsif($task =~ m/shrimp-pre-3/){
-
-		run_shrimp(
-			sr_files => $opt_sr_file,
-			stop_after => $sr_count_total * $cfg{'sr-pre-fraction'} *2,
-			shrimp => {
-				%{$cfg{$task}}, # basic shrimp params from cfg
-				'verbose' => 1,
-				'log' => task_file_name(suffix => "_shrimp.log"),
-				'ref' => task_file_name(".fm", task => $TASKS[$TC-1] ),
-				#'--al' => task_file_name(suffix => "_sr.fq"),
-				'--threads' => $opt_threads,
-				'--qv-offset' => $sr_qv_offset_total,
-			}
-		);
-
-		$sam_chunk_offsets = create_sorted_sam();
-
-		$lr_chunk_offsets = correct_sr_mt($sam_chunk_offsets, $lr_chunk_offsets);
-	
-		$LR = undef;
 ############################################################################		
 		
 		
 	}elsif($task eq 'shrimp-ccs'){
+
+		# configure Sam::Seq
+		Sam::Seq->MaxCoverage($opt_cov);
+		Sam::Seq->BinSize($cfg{'bin-size'});
 
 		run_shrimp(			
 			sr_files => $opt_sr_file,
@@ -916,6 +933,10 @@ foreach my $task(@TASKS){
 		$LR = undef;
 		
 	}elsif($task eq 'shrimp-finish'){
+
+		# configure Sam::Seq
+		Sam::Seq->MaxCoverage($opt_cov);
+		Sam::Seq->BinSize($cfg{'bin-size'});
 
 		my $sr_finish_files;
 
@@ -1092,15 +1113,9 @@ sub run_shrimp{
 		@_
 	};
 	
-
-	$V->hline;
-	$V->hline;
-	$V->verbose($p->{stop_after});
-	
 	$V->nline;
 	$V->nline;
 	$VS->verbose("Running task ".$TASKS[$TC]);
-	
 	
 	# Index genome file first and save projection for multiple short read
 	#  files
@@ -1119,9 +1134,6 @@ sub run_shrimp{
 	
 	# run shrimp
 	$shrimp_ldx->run->finish;
-
-
-
 
 	# init temporary sam writer
 	my $tsp = $p->{ram_sam} ? undef : Sam::Parser->new(
@@ -1191,7 +1203,7 @@ sub run_shrimp{
 			}
 		}
 	
-		# read SAM alignmetn section
+		# read SAM alignment section
 		my $rsp_c = 0;
 		my $add_c = 0;
 		my $src_lib_sum = 0;
@@ -1238,6 +1250,7 @@ sub run_shrimp{
 				}
 				
 				# shrimp pre, cancel after first fraction of reads
+				# TODO: adjust length of ProgressBar
 				if($p->{stop_after} && $src > $p->{stop_after}){
 					$V->verbose('$src: '.$src);
 					$shrimp->cancel(); # cancel shrimp
@@ -1373,17 +1386,13 @@ sub prepare_lr{
 					$VS->exit('Non-unique long read id ('. $lr->id .') in '. $_);
 				}
 				# convert FASTQ to FASTA
-				#print Dumper($lr->id, 
 				$lr{$lr->id} = Fasta::Seq->new(
 					id => $lr->id,
 					desc => $lr->desc,
 					seq => lc($lr->seq), # convert seq to lower case
 				)
-				#);
 			}
 		}
-		
-		
 	}
 
 	# write sorted/indexed fq/fa lr file for pbc

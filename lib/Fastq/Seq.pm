@@ -37,6 +37,9 @@ Class for handling FASTQ sequences.
 
 =over
 
+=item [BugFix] C<< $fq->qual-window >> sets end of last window correctly if
+ it coincides with last position of sequence.
+
 =item [Feature] Added C<< $fq->compelment >> and C<< $fq->reverse_compelment >>
 
 =item [BugFix] C<< $fq->substr_seq >> dies on no arguments
@@ -762,6 +765,8 @@ sub base_content{
 
 sub qual_window{
 	my ($self, $sorted_by_occurance) = (@_);
+	
+	use Data::Dumper;
 	# sliding window
 	# each window starts/ends above $min, values below $min are allowed as long
 	# as the mean of the window values is higher than $min.
@@ -785,7 +790,8 @@ sub qual_window{
 
 	# init first window
 	$wsum += $_ for @s[0..$wsize-1];
-	unless($wsum < $wmin){
+	unless($wsum < $wmin){ # init window start
+		#print "high init\n";
 		$re[0][0] = 0;
 		$wlen+=$wsize;
 	}; 
@@ -794,9 +800,11 @@ sub qual_window{
 	my $i=$wsize;
 	my $j=0;
 	
+	#print " "x($wsize-1), $wsum,"\n";
 	# loop
 	for(;$i < @s; $i++){
 		$wsum+=($s[$i]- $s[$j]); # new window sum
+		#print " "x$i, $wsum,"\n";
 		if($wsum < $wmin){# low
 			if($wlen){# high ends
 				my $x = $i-1;
@@ -826,6 +834,7 @@ sub qual_window{
 			unless($wlen){
 				if($s[$j+1] >= $Qual_window_min){ # high init only on over min pos
 					# high init
+					#print "high init\n";
 					$re[@re][0] = $j+1;
 					$wlen = $wsize;
 				}
@@ -836,11 +845,13 @@ sub qual_window{
 		$j++;
 	}
 	
-	# check final condition
-	unless($wsum < $wmin){
+	# set high end to last pos if seq ended high.
+	# print $wlen , "\t", $wsum, "\t", $wmin,"\n";
+	if($wlen){
+		# print "yeah\n";
 		$re[$#re][1] = scalar @s;
 	}
-
+	
 	return $sorted_by_occurance ? sort{$b->[1] <=> $a->[1]}@re : @re;	
 
 }

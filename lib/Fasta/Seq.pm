@@ -468,7 +468,7 @@ sub substr_seq{
 	
 }
 
-=head2
+=head2 desc_append
 
 Append description by given attributes. Attributed are appended with
  whitespace delimiter.
