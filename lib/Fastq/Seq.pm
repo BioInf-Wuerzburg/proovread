@@ -5,12 +5,14 @@ package Fastq::Seq;
 use warnings;
 use strict;
 
-use Verbose;
-
 use overload
 	'""' => \&string,
 	'.' => \&cat;
 	
+# preference libs in same folder over @INC
+use lib '../';
+use Verbose;
+
 	
 our $VERSION = '0.10';
 our ($REVISION) = '$Revision$' =~ /(\d+)/;
