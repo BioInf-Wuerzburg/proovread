@@ -64,6 +64,16 @@ Correct single molecule sequencing reads by iterative mapping of high
 
 =head1 CHANGELOG
 
+=head2 0.91
+
+=over
+
+=item [BugFix] Terminating shrimp early requires monitoring the short read
+ count from the shrimp log and comparing it to the cutoff. Uninitialized 
+ count causes errors in this comparison.
+
+=back
+
 =head2 0.90
 
 =over
@@ -1251,7 +1261,7 @@ sub run_shrimp{
 				
 				# shrimp pre, cancel after first fraction of reads
 				# TODO: adjust length of ProgressBar
-				if($p->{stop_after} && $src > $p->{stop_after}){
+				if($src && $p->{stop_after} && $src > $p->{stop_after}){
 					$V->verbose('$src: '.$src);
 					$shrimp->cancel(); # cancel shrimp
 					last;
