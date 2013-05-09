@@ -50,6 +50,9 @@ TODO
 
 =over
 
+=item [BugFix] Changed C<< $fh->tell >> to C<< tell($fh) >>. 
+ C<< IO::Handle->tell >> is only supported in latest module version.
+
 =item [Change] STDIN is not dupped anymore. Dupped STDIN prevents subsequent
  reading of STDIN in main.
 
@@ -153,6 +156,8 @@ Initial Parser module. Provides Constructor and generic accessor
 =item Synopsis
 
 =item Tests
+
+=item empty file currently throws "NOT FASTA" exception
 
 =back
 
@@ -312,7 +317,7 @@ sub check_format{
 	my ($self) = @_;
 	my $fh = $self->fh;
 	die sprintf("%s: %s",(caller 0)[3],"Format checking only works at the start of the file") 
-		if $fh->tell;
+		if tell($fh);
 	my $c =$fh->getc(); # read first char
 	# unread first char
 	$self->is_fh('GZIP') 

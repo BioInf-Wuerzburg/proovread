@@ -68,6 +68,13 @@ Correct single molecule sequencing reads by iterative mapping of high
 
 =over
 
+=item [Feature] SeqFilter reads filtered chimera annotations to --substr
+ to trim chimeric reads.
+
+=item [Feature] ChimeraToSeqFilter.pl creates filtered chimera annotations.
+
+=item [Change] Only cleanup if finished w/o errors.
+
 =item [BugFix] Terminating shrimp early requires monitoring the short read
  count from the shrimp log and comparing it to the cutoff. Uninitialized 
  count causes errors in this comparison.
@@ -995,26 +1002,30 @@ my $opt_fa_raw = task_file_name(task => '', suffix => "_corr.raw.fa");
 my $opt_fq_raw = task_file_name(task => '', suffix => "_corr.raw.fq");
 my $opt_fa_fil = task_file_name(task => '', suffix => "_corr.fil.fa");
 my $opt_fq_fil = task_file_name(task => '', suffix => "_corr.fil.fq");
-my $opt_chim = task_file_name(task => '', suffix => "_corr.chimera.tsv");
 
 $VS->verbose("Creating raw output sequences");
 
 copy(task_file_name(".fa", task=>$TASKS[$TC]), $opt_fa_raw);
 copy(task_file_name(".fq", task=>$TASKS[$TC]), $opt_fq_raw);
-copy(task_file_name(".fc", task=>$TASKS[$TC]), $opt_chim);
 
-seq_filter() if $cfg{'seq-filter'};
+my $opt_chim_raw = task_file_name(".fc", task=>$TASKS[$TC]);
+my $opt_chim_fil = task_file_name(task => '', suffix => "_chim.tsv");
+
+chim_filter('--in' => $opt_chim_raw, '--out' => $opt_chim_fil);
+
+seq_filter('--substr' => $opt_chim_fil) if $cfg{'seq-filter'};
 
 # lets see if we came this far
 $no_error++;
 
 # put in END to wait for memory to be cleaned
+
 END{
-	unless ($opt_keep){
-		$VS->verbose("Cleaning up");
-		remove_tree(@tmp_dirs) 
-	};
 	if ($no_error){
+		unless ($opt_keep){
+			$VS->verbose("Cleaning up");
+			remove_tree(@tmp_dirs) 
+		};
 		$VS->verbose("Done");
 	} 
 }
@@ -1264,7 +1275,7 @@ sub run_shrimp{
 				# shrimp pre, cancel after first fraction of reads
 				# TODO: adjust length of ProgressBar
 				if($src && $p->{stop_after} && $src > $p->{stop_after}){
-					$V->verbose('$src: '.$src);
+					#$V->verbose('$src: '.$src);
 					$shrimp->cancel(); # cancel shrimp
 					last;
 				}
@@ -1438,7 +1449,9 @@ sub correct_sr_mt{
 		'--coverage'	=> $opt_cov,
 		'--append'		=> 1,
 		$opt_mode eq 'external-sam' # no ref
-			? ()
+			? (@$opt_lr_file
+				?	('--ref' => $opt_lr_file->[0])
+				:	())
 			: ('--ref' 		=> $TC == 1
 						 	 ? task_file_name(".f[aq]", task => $TASKS[$TC-1] )
 						 	 : task_file_name(".fq", task => $TASKS[$TC-1] )),
@@ -1602,6 +1615,26 @@ sub copy_custom_cfg{
 }
 
 
+=head2 chim_filter
+
+Run ChimeraToSeqFilter on raw chimera output
+
+=cut
+
+sub chim_filter{
+
+	my $params = param_join(\(%{$cfg{'chimera-filter'}}, @_ ));
+
+	my $cmd_chim_fil = "perl $RealBin/ChimeraToSeqFilter.pl $params\n";
+	
+	$V->nline;
+	$VS->verbose("Filtering chimera annotations");
+	$VB->hline;
+	$VB->verbose($cmd_chim_fil);
+	qx($cmd_chim_fil);
+	
+}
+
 =head2 seq_filter
 
 Run SeqFilter on raw output
@@ -1610,7 +1643,7 @@ Run SeqFilter on raw output
 
 sub seq_filter{
 
-	my $params = param_join(\%{$cfg{'seq-filter'}});
+	my $params = param_join(\(%{$cfg{'seq-filter'}}, @_ ));
 
 	my $cmd_fa_fil = "$RealBin/SeqFilter $params --in $opt_fq_raw --fasta --out $opt_fa_fil\n";
 	my $cmd_fq_fil = "$RealBin/SeqFilter $params --in $opt_fq_raw --out $opt_fq_fil\n";
