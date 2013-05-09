@@ -337,6 +337,7 @@ $VB->verbose("$0-$VERSION, rev$REVISION, $MODIFIED");
 $VS->verbose("Reading core config");
 my $cfg_core_file = "$RealBin/../proovread.cfg"; 
 my %cfg = do $cfg_core_file;
+$V->exit("An error ocuured while processing the config file: $@") if $@; # capture do errors on cfg
 
 =item [--create-cfg=<CFGFILENAME>] [<CWD>/proovread_cfg.pm]
 
@@ -375,6 +376,7 @@ if($cfg){
 	}
 	$VS->verbose("Reading custom config: $cfg");
 	%cfg = (%cfg, do "$cfg"); 
+	$V->exit("An error ocuured while processing the config file: $@") if $@; # capture do errors on cfg
 }
 
 $VS->verbose("Reading command line options");
@@ -792,7 +794,7 @@ foreach my $task(@TASKS){
 		$lr_chunk_offsets = prepare_lr();
 		
 		# decide how to finish (realign mapped only or everything)
-		unless(defined $opt_finish_aligned_only && $opt_mode eq 'pacbio-iterative'){
+		if(! defined ($opt_finish_aligned_only) && $opt_mode eq 'pacbio-iterative'){
 			# compute long-read - short-read coverage
 			$lr_bps_total += $_ for @lr_bps;
 			$sr_bps_total += $_ for @sr_bps;
