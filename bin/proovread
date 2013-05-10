@@ -44,7 +44,7 @@ use Time::HiRes qw(usleep);
 use Data::Dumper;
 $Data::Dumper::Sortkeys = 1;
 
-our $VERSION = '0.90';
+our $VERSION = '0.91';
 our ($REVISION) = '$Revision$' =~ /(\d+)/;
 our ($MODIFIED) = '$Date$' =~ /Date: (\S+\s\S+)/;
 
@@ -67,6 +67,9 @@ Correct single molecule sequencing reads by iterative mapping of high
 =head2 0.91
 
 =over
+
+=item [Feature] 'external-sam' mode accepts reference file including HCR 
+ information.
 
 =item [Feature] SeqFilter reads filtered chimera annotations to --substr
  to trim chimeric reads.
@@ -296,11 +299,11 @@ Correct single molecule sequencing reads by iterative mapping of high
 
 =over
 
-=item masking stats -> FastaFilter
+=item read-sam on with .fq reference, hcrs fail on .fa
 
-=item dont overwrite output
+=item test multi-file support for non-standard modes
 
-=item dont write to existing folders
+=item masking stats -> SeqFilter
 
 =back
 
@@ -1448,23 +1451,34 @@ sub correct_sr_mt{
 		'--max-reads'	=> $cfg{'chunk-size'},
 		'--coverage'	=> $opt_cov,
 		'--append'		=> 1,
+		
 		$opt_mode eq 'external-sam' # no ref
 			? (@$opt_lr_file
 				?	('--ref' => $opt_lr_file->[0])
 				:	())
 			: ('--ref' 		=> $TC == 1
-						 	 ? task_file_name(".f[aq]", task => $TASKS[$TC-1] )
-						 	 : task_file_name(".fq", task => $TASKS[$TC-1] )),
+				? task_file_name(".f[aq]", task => $TASKS[$TC-1] )
+				: task_file_name(".fq", task => $TASKS[$TC-1] )),
+		
 		$TASKS[$TC] =~ m/iter-1|pre-1|pre-2|pre-3/ # calculate hcrs on first iter for second iter
 			? ('--min-lcr-length' => $min_lcr_length) # params from config
 			: ('--min-hcr-length' => 0),
-		($TASKS[$TC] eq 'shrimp-finish' || $TASKS[$TC] eq 'read-sam') # calculate hcrs on first iter for second iter
+		
+		($TASKS[$TC] eq 'shrimp-finish') # calculate hcrs on first iter for second iter
 			? (
 				'--ignore-hcr' => 1, 
 				'--max-ins-length' => 0,
 				$cfg{'detect-chimera'} ? ('--detect-chimera' => 1) : ()
 			  ) # params from config
 			: (),
+
+		($TASKS[$TC] eq 'read-sam') # calculate hcrs on first iter for second iter
+			? (@$opt_lr_file ? ('--ignore-hcr' => 1)	: (),
+				'--max-ins-length' => 0,
+				$cfg{'detect-chimera'} ? ('--detect-chimera' => 1) : ()
+			  ) # params from config
+			: (),
+		
 		$cfg
 		 	? ('--cfg'	=> $cfg) 
 		 	: (),
