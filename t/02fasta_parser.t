@@ -1,6 +1,6 @@
 #!/usr/bin/env perl
 
-# $Id: Verbose.pm 644 2013-01-18 16:04:44Z dumps $
+# $Id: 02fasta_parser.t 55 2013-05-15 11:41:39Z s187512 $
 
 use strict;
 use warnings;
@@ -13,27 +13,28 @@ use lib "$RealBin/../lib/";
 
 BEGIN { use_ok('Fasta::Parser'); }
 
-my $class = 'Fasta::Parser';
+my $Class = 'Fasta::Parser';
 my ($fp, $fpr, $fpr_string);
-my $fpr_dat_file = "$RealBin/fasta.fa";
 
-my $seq1_string = <<'FASTA';
->gi|129295|sp|P01013|OVAX_CHICK GENE X PROTEIN (OVALBUMIN-RELATED)
-QIKDLLVSSSTDLDTTLVLVNAIYFKGMWKTAFNAEDTREMPFHVTKQESKPVQMMCMNNSFNVATLPAEKMKILELPFASGDLSMLVLLPDEVSDLERIEKTINFEKLTEWTNPNTMEKRRVKVYLPQMKIEEKYNLTSVLMALGMTDLFIPSANLTGISSAESLKISQAVHGAFMELSEDGIEMAGSTGVIEDIKHSPESEQFRADHPFLFLIKHNPTNTIVYFGRYWSP
-FASTA
-my $seq2_string = <<SEQSTRING;
->gi|444439576|ref|NR_074891.1| Escherichia coli O157:H7 str. Sakai strain Sakai 16S ribosomal RNA, complete sequence
-AAATTGAAGAGTTTGATCATGGCTCAGATTGAACGCTGGCGGCAGGCCTAACACATGCAAGTCGAACGGTAACAGGAAGAAGCTTGCTTCTTTGCTGACGAGTGGCGGACGGGTGAGTAATGTCTGGGAAACTGCCTGATGGAGAGGGATAACTACTGGAAACGGTAGCTAATACCGCATAACGTCGCAAGACCAAAGAGGGGGACCTTCGGGCCTCTTGCCATCGGATGTGCCCAGATGGGATTAGCTAGTAGGTGGGGTAACGGCTCACCTAGGCGACGATCCCTAGCTGGTCTGAGAGGATGACCAGCCACACTGGAACTGAGACACGGTCCAGACTCCTACGGGAGGCAGCAGTGGGGAATATTGCACAATGGGCGCAAGCCTGATGCAGCCATGCCGCGTGTATGAAGAAGGCCTTCGGGTTGTAAAGTACTTTCAGCGGGGAGGAAGGGAGTAAAGTTAATACCTTTGCTCATTGACGTTACCCGCAGAAGAAGCACCGGCTAACTCCGTGCCAGCAGCCGCGGTAATACGGAGGGTGCAAGCGTTAATCGGAATTACTGGGCGTAAAGCGCACGCAGGCGGTTTGTTAAGTCAGATGTGAAATCCCCGGGCTCAACCTGGGAACTGCATCTGATACTGGCAAGCTTGAGTCTCGTAGAGGGGGGTAGAATTCCAGGTGTAGCGGTGAAATGCGTAGAGATCTGGAGGAATACCGGTGGCGAAGGCGGCCCCCTGGACGAAGACTGACGCTCAGGTGCGAAAGCGTGGGGAGCAAACAGGATTAGATACCCTGGTAGTCCACGCCGTAAACGATGTCGACTTGGAGGTTGTGCCCTTGAGGCGTGGCTTCCGGAGCTAACGCGTTAAGTCGACCGCCTGGGGAGTACGGCCGCAAGGTTAAAACTCAAATGAATTGACGGGGGCCCGCACAAGCGGTGGAGCATGTGGTTTAATTCGATGCAACGCGAAGAACCTTACCTGGTCTTGACATCCACAGAACTTTCCAGAGATGGATTGGTGCCTTCGGGAACTGTGAGACAGGTGCTGCATGGCTGTCGTCAGCTCGTGTTGTGAAATGTTGGGTTAAGTCCCGCAACGAGCGCAACCCTTATCCTTTGTTGCCAGCGGTCCGGCCGGGAACTCAAAGGAGACTGCCAGTGATAAACTGGAGGAAGGTGGGGATGACGTCAAGTCATCATGGCCCTTACGACCAGGGCTACACACGTGCTACAATGGCGCATACAAAGAGAAGCGACCTCGCGAGAGCAAGCGGACCTCATAAAGTGCGTCGTAGTCCGGATTGGAGTCTGCAACTCGACTCCATGAAGTCGGAATCGCTAGTAATCGTGGATCAGAATGCCACGGTGAATACGTTCCCGGGCCTTGTACACACCGCCCGTCACACCATGGGAGTGGGTTGCAAAAGAAGTAGGTAGCTTAACCTTCGGGAGGGCGCTTACCACTTTGTGATTCATGACTGGGGTGAAGTCGTAACAAGGTAACCGTAGGGGAACCTGCGGTTGGATCACCTCCTTA
-SEQSTRING
-my $seq3_string = <<SEQSTRING;
->gi|436904082|gb|JX952207.1| Homo sapiens precursor microRNA HepG2-8, complete sequence
-AGGGTCCAGCAGGGAGGGGTGGCAGGGATTCCCGCCTGTTACAGAGACTCCCCCACACCTTTCTCCCAACAGGTGTTCCCG
-SEQSTRING
+#--------------------------------------------------------------------------#
+
+=head2 sample data
+
+=cut
+
+(my $Dat_file = $FindBin::RealScript) =~ s/t$/dat/; # data
+(my $Dmp_file = $FindBin::RealScript) =~ s/t$/dmp/; # data structure dumped
+(my $Tmp_file = $FindBin::RealScript) =~ s/t$/tmp/; # data structure dumped
+
+my $Dat = do { local $/; local @ARGV = $Dat_file; <> }; # slurp data to string
+my @Dat = split(/(?<=\n)(?=>)/, $Dat);
+
+my @Dmp = do "$Dmp_file"; # read and eval the dumped structure
 
 
 # new
 subtest 'new and DESTROY' => sub{
-	$fp = new_ok($class);
+	$fp = new_ok($Class);
 	
 	#  default attributes
 	is($fp->{mode}, '<', 'Default attribute "mode"');
@@ -46,17 +47,17 @@ subtest 'new and DESTROY' => sub{
 	$fp = undef;
 	is(fileno($fh), undef, 'Autoclose filehandle');
 	# read from file
-	$fpr = new_ok($class, [
+	$fpr = new_ok($Class, [
 		mode => '<', 
-		file => $fpr_dat_file,
+		file => $Dat_file,
 	]);
 	#  default attributes
 	is($fpr->{mode}, '<', 'Custom attribute "mode"');
-	is($fpr->{file}, $fpr_dat_file, 'Custom attribute "file"');
+	is($fpr->{file}, $Dat_file, 'Custom attribute "file"');
 	
 		# large file
 	# create large file
-	my $fasta_large = ($seq1_string.$seq2_string.$seq3_string)x10000;
+	my $fasta_large = ($Dat)x10000;
 	$fpr_string = Fasta::Parser->new(file => \$fasta_large);
 	
 };
@@ -87,14 +88,22 @@ subtest 'filehandle' => sub{
 subtest 'next_seq' => sub{
 	can_ok($fpr, 'next_seq');
 
-	is($fpr->next_seq->string, $seq1_string, 'Get $obj->next_seq()');	
-	is($fpr->next_seq->string, $seq2_string, 'Get $obj->next_seq()');
-	is($fpr->next_seq->string, $seq3_string, 'Get $obj->next_seq()');
+	for(my $i=0; $i<@Dat; $i++){
+		is($fpr->next_seq->string, $Dat[$i], 'Get $obj->next_seq()');	
+	}
 	is($fpr->next_seq, undef, 'Get $obj->next_seq() eof');
-	is($fpr->next_seq->string, $seq1_string, 'Get $obj->next_seq() restart after eof');
+	is($fpr->next_seq->string, $Dat[0], 'Get $obj->next_seq() restart after eof');
 };
 
 # check_format
+subtest 'check_format' => sub{
+	can_ok($fpr, 'check_format');
+	is(Fasta::Parser->new(file => \("Not a fasta record"))->check_format, 
+		undef, '$obj->check_format on not FASTA is undef');
+	my $fp = Fasta::Parser->new(file => $Dat_file);
+	isa_ok($fp->check_format, $Class, '$obj->check_format on FASTA');
+	isa_ok($fp->check_format, $Class, '$obj->check_format on FASTA');
+};
 
 # seek
 
@@ -125,18 +134,17 @@ subtest 'sample_seqs' => sub{
 
 subtest 'new write parser' => sub{
 	# writer
-	my $fpw_tmp_file = 'fasta.tmp';
-	my $fpw = new_ok($class, [
+	my $fpw = new_ok($Class, [
 		mode => '+>', 
-		file => $fpw_tmp_file,
+		file => $Tmp_file,
 	]);
 	
 	#  default attributes
 	is($fpw->{mode}, '+>', 'Writing mode "mode"');
-	is($fpw->{file}, $fpw_tmp_file, 'Writer mode "file"');
-	is(-e $fpw_tmp_file, 1, 'Create custom file'); # copy of STDIN needs to be greater than 3
+	is($fpw->{file}, $Tmp_file, 'Writer mode "file"');
+	is(-e $Tmp_file, 1, 'Create custom file'); # copy of STDIN needs to be greater than 3
 	
-	unlink $fpw_tmp_file;
+	unlink $Tmp_file;
 };
 
 # append_seq

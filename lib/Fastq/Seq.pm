@@ -14,7 +14,7 @@ use lib '../';
 use Verbose;
 
 	
-our $VERSION = '0.10';
+our $VERSION = '0.11';
 our ($REVISION) = '$Revision$' =~ /(\d+)/;
 our ($MODIFIED) = '$Date$' =~ /Date: (\S+\s\S+)/;
 
@@ -34,6 +34,15 @@ Class for handling FASTQ sequences.
 =cut
 
 =head1 CHANGELOG
+
+=head2 0.11
+
+=over
+
+=item [Feature] C<< Fastq::Seq->CheckFormat(1) >> enables a format check 
+ foreach newly created Fastq::Seq object.
+
+=back
 
 =head2 0.10
 
@@ -128,14 +137,6 @@ Initial Alignment module. Provides Constructor and generic accessor
 
 =over
 
-=item Synopsis
-
-=item Tests
-
-=item Version
-
-=item seq_decr qual_id qual_descr
-
 =back
 
 =cut
@@ -188,11 +189,37 @@ our %Tr;
 $Tr{64} = eval 'sub{ $_[0] =~ tr/'.$o33.'/'.$o64.'/;}';
 $Tr{33} = eval 'sub{ $_[0] =~ tr/'.$o64.'/'.$o33.'/;}';
 
+=head2 $CheckFormat
+
+If true, enables format check in each call to C<new>. Default off.
+
+=cut
+
+our $CheckFormat = 0;
+
+
 ##------------------------------------------------------------------------##
 
 =head1 Class METHODS
 
 =cut
+
+=head2 CheckFormat
+
+Get/set global format check flag. Default 0, 1 to activate. If activated, 
+ C<< $fq->check_format >> is called in every call to C<< Fastq::Seq->new >>.
+ This also effects Fastq::Seq objects created with Fastq::Parser. Slows 
+ down the constructor/parser. 
+
+=cut
+
+sub CheckFormat{
+	my ($proto, $bool) = @_;
+	if(defined $bool){
+		$CheckFormat =  $bool ? 1 : 0;
+	}
+	return $CheckFormat;
+}
 
 =head2 Complement
 
@@ -472,7 +499,13 @@ sub new{
 		}
 	}
 	
-	return bless $self, $proto;
+	bless $self, $proto;
+	
+	if($CheckFormat){
+		$self->check_format();
+	}
+	
+	return $self;
 }
 
 
@@ -483,6 +516,38 @@ sub new{
 =head1 Object METHODS
 
 =cut
+
+=head2 check_format
+
+Checks format of Fastq::Seq object. seq_head needs to start with "@", qual_head
+ with "+", seq and qual need to be of identical length and if phred_offset 
+ is defined, the qual ist tested to respect corresponding boundaries. Dies
+ on failure, returns object on success.
+
+=cut
+
+sub check_format{
+	my $self = shift;
+	# @
+	die __PACKAGE__."::check_format: seq_head does not start with '\@'\n"."$self" 
+		unless $self->{seq_head} =~ /^@/;
+	# +
+	die __PACKAGE__."::check_format: qual_head does not start with '+'\n"."$self" 
+		unless $self->{qual_head} =~ /^\+/;
+	# length
+	die __PACKAGE__."::check_format: seq and qual differ in length\n"."$self" 
+		unless length($self->seq) == length($self->qual);
+	
+	# phred offset
+	if(defined $self->phred_offset()){
+		my @phreds = $self->phreds();
+		if(my @out_of_b = grep{$_ < 0 ||  $_ > 40}@phreds){
+			die __PACKAGE__."::check_format: Detected phreds (".join(",",@out_of_b).") out of boundaries (0-40)\n"."$self"
+		}
+	}
+	return $self;
+}
+
 
 =head2 reverse_complement
 

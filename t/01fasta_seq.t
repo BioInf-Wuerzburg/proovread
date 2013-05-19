@@ -1,6 +1,6 @@
 #!/usr/bin/env perl
 
-# $Id: Verbose.pm 644 2013-01-18 16:04:44Z dumps $
+# $Id: 01fasta_seq.t 55 2013-05-15 11:41:39Z s187512 $
 
 use strict;
 use warnings;
@@ -51,6 +51,20 @@ my $seq_string = <<SEQSTRING;
 QIKDLLVSSSTDLDTTLVLVNAIYFKGMWKTAFNAEDTREMPFHVTKQESKPVQMMCMNNSFNVATLPAEKMKILELPFASGDLSMLVLLPDEVSDLERIEKTINFEKLTEWTNPNTMEKRRVKVYLPQMKIEEKYNLTSVLMALGMTDLFIPSANLTGISSAESLKISQAVHGAFMELSEDGIEMAGSTGVIEDIKHSPESEQFRADHPFLFLIKHNPTNTIVYFGRYWSP
 SEQSTRING
 
+my $seq_raw_no_desc = <<SEQ;
+>Some_id:with_stuff/and#more
+ATACGTAGCTAGCTELVISATCGATCGATCG
+SEQ
+
+my $seq_obj_no_desc = {
+	'seq_head' => '>Some_id:with_stuff/and#more',
+	'desc' => '',
+	'byte_offset' => undef,
+	'id' => 'Some_id:with_stuff/and#more',
+	'seq' => 'ATACGTAGCTAGCTELVISATCGATCGATCG'
+};
+
+
 #--------------------------------------------------------------------------#
 =head2 load module
 
@@ -77,10 +91,14 @@ subtest 'new empty object' => sub{
 
 # string
 my $fa = Fasta::Seq->new($seq_raw);
+my $fa_no_desc = Fasta::Seq->new($seq_raw_no_desc);
 
 subtest 'new from string' => sub{
 	foreach my $attr(keys %$seq_obj){
 		is($fa->{$attr}, $seq_obj->{$attr}, "attribute $attr")
+	}
+	foreach my $attr(keys %$seq_obj_no_desc){
+		is($fa_no_desc->{$attr}, $seq_obj_no_desc->{$attr}, "attribute $attr")
 	}
 };
 

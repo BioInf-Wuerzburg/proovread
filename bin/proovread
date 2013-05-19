@@ -68,6 +68,18 @@ Correct single molecule sequencing reads by iterative mapping of high
 
 =over
 
+=item [Change] Rearranged order of preparations to allow folder creation
+ prior to parameter log.
+
+=item [BugFix] 'external-sam' with reference did not set --ref-offset for 
+ sam2cns.
+
+=item [Feature] config settings and commandline parameter are dumped directly
+ to a file instead of being printed to log.
+
+=item [BugFix] chim_filter() did not create valid input for param_join() and
+ hence failed to create valid parameter for ChimeraToSeqFilter.
+
 =item [Feature] 'external-sam' mode accepts reference file including HCR 
  information.
 
@@ -311,7 +323,7 @@ Correct single molecule sequencing reads by iterative mapping of high
 
 ##------------------------------------------------------------------------##
 
-my $no_error;
+my $no_fatal;
 
 # verbose
 my $V = Verbose->new(
@@ -568,20 +580,63 @@ $opt_sam_file && ! -f $opt_sam_file && pod2usage("Cannot find $opt_sam_file");
 
 
 ##------------------------------------------------------------------------##
-# print parameter
+
+=head2 create folder structure
+
+=cut
+
+$opt_prefix = 'proovread' unless defined $opt_prefix;
+
+# DEPRECATED
+#unless ($opt_prefix){
+#	my @time = (localtime(time))[reverse(0..5)];
+#	$time[0]+=1900;
+#	$time[1]++;
+#	$opt_prefix = 'pr_'.sprintf("%4d-%02d-%02d_%02d-%02d-%02d", @time)
+#}
+
+# create tmp folders
+if(-e $opt_prefix){
+	if(-d $opt_prefix){
+		if($opt_overwrite){
+			remove_tree($opt_prefix);
+		}else{
+			$VS->exit("Output directory already exists and is not empty")
+			unless is_empty_dir($opt_prefix);
+		}
+	}else{
+		$VS->exit("Output directory already exists, yet is no directory")
+	} 
+} 
+make_path($opt_prefix);
+
+
+
+##------------------------------------------------------------------------##
+
+=head2 log parameter
+
+=cut
+
 # 'cause I'm lazy
-$V->nline;
+
+
+my $opt_param_log = task_file_name(task => '', suffix => "_parameter.log");
+open(PARAM, '>', $opt_param_log) or $V->exit("$!: $opt_param_log");
+
+$VS->verbose("Logging parameter to $opt_param_log");
+
 my $cfg_string = Dumper(\%cfg);
 $cfg_string =~ s/^.*\n//;
 $cfg_string =~ s/\n.*$//;
-$VS->verbose("Custom config parameter\n".$cfg_string);
+print PARAM "Custom config parameter\n",$cfg_string;
 
-$V->nline;
 my $cmd_string = Dumper(\%opt);
 $cmd_string =~ s/^.*\n//;
 $cmd_string =~ s/\n.*$//; 
-$VS->verbose("Command line parameter\n".$cmd_string);
+print PARAM "Command line parameter\n",$cmd_string;
 
+close PARAM;
 
 ##------------------------------------------------------------------------##
 
@@ -593,124 +648,124 @@ my $sr_qv_offset_total;
 my @sr_matched;
 my @sr_bps;
 
-$VS->verbose("Checking short read files");
-
-# short read files
-foreach(@$opt_sr_file){
-	-e $_ || $VS->exit("Cannot find short read file: $_");
-
-	$V->verbose("\n".basename($_));
-	
-	# test if short reads are FASTQ/FASTA
-	my $fp;
-	my $sr_length;
-	my $sr_length_dev = '0';
-	my $sr_qv_offset;
-	my $sr_count;
-	
-	# FASTQ
-	if($fp = Fastq::Parser->new(file => $_)->check_format){ 
-		# format
-		$V->verbose("Detected FASTQ format");
-		
-		# length
-		($sr_length, $sr_length_dev) = $fp->guess_seq_length;
-		$V->verbose(sprintf("Estimated short read length: %d +-%d", $sr_length, $sr_length_dev ));
-		if(!$opt_ignore_sr_length && $sr_length > 1000){
-			$V->exit(
-				"Estimated short reads length > 1000\n"
-				."Are you sure you specified the correct data? "
-				."To run the pipeline on this data, which by design is not really suited, "
-				."you need to specify --ignore-sr-length"
-			);
-		}
-		
-		# offset
-		unless (defined $cfg{'sr-qv-offset'}){ # manual overwrite from config
-			$sr_qv_offset = $fp->guess_phred_offset; 
-			$V->exit(
-				"Estimating short read quality offset failed.\n"
-				."See 'sr-qv-offset' in the advanced section for manual overwrite"
-			) unless defined $sr_qv_offset;
-			$V->verbose(sprintf("Etimated short read quality offset: %d", $sr_qv_offset));
-			
-			if(defined($sr_qv_offset_total)){
-				$sr_qv_offset_total == $sr_qv_offset || $VB->exit('Different formats/quality offsets in short read files not allowed');
-			}else{
-				$sr_qv_offset_total = $sr_qv_offset;
-			}
-		}
-		
-		# count
-		$sr_count = $fp->guess_seq_count();
-		$V->verbose(sprintf("Estimating approximate number of short reads: %s", Verbose->Humanize($sr_count)));
-	
-	
-	# FASTA
-	}elsif($fp = Fasta::Parser->new(file=> $_)->check_format){
-		# format
-		$V->verbose("Detected FASTA format");
-
-		# length		
-		($sr_length, $sr_length_dev) = $fp->guess_seq_length;
-		$V->verbose(sprintf("Estimating short read length: %d +-%d", $sr_length, $sr_length_dev));
-		if(!$opt_ignore_sr_length && $sr_length > 1000){
-			$V->exit(
-				"Estimated short reads length > 1000\n"
-				."Are you sure you specified the correct data? "
-				."To run the pipeline on this data, which by design is not really suited, "
-				."you need to specify --ignore-sr-length"
-			);
-		}
-		
-		if(defined($sr_qv_offset_total)){
-			$sr_qv_offset_total == 0 || $VB->exit('Different formats/quality offsets in short read files not allowed');
-		}else{
-			$sr_qv_offset_total = 0;
-		}
-
-		# count
-		$sr_count = $fp->guess_seq_count();
-		$V->verbose(sprintf("Estimating approximate number of short reads: %s", Verbose->Humanize($sr_count)));
-
-		
-	}else{
-		$V->exit("Short read file $_ neither FASTQ nor FASTA format");
-	}
-
-	# push
-	push @sr_length, $sr_length;
-	push @sr_length_dev, $sr_length_dev;
-	push @sr_count, $sr_count;
-	push @sr_bps, ($sr_count * $sr_length);
-	$sr_count_total+= $sr_count;
-}
-
-$sr_qv_offset_total = $cfg{'sr-qv-offset'} unless defined $sr_qv_offset_total;
-
 my $mean_sr_length;
 my $mean_sr_dev;
 my $min_lcr_length;
+
 if(@$opt_sr_file){
-	$mean_sr_length += $_ for @sr_length;
-	$mean_sr_length /= @sr_length;
-
-	$mean_sr_dev += $_ for @sr_length_dev;
-	$mean_sr_dev /= @sr_length_dev;
-
-	$min_lcr_length = $mean_sr_length + $mean_sr_dev;
-	$min_lcr_length += $min_lcr_length * 0.15; # add another 15 percent
-	$min_lcr_length = int($min_lcr_length + 0.5);
+	$VS->verbose("Checking short read files");
+	
+	# short read files
+	foreach(@$opt_sr_file){
+		-e $_ || $VS->exit("Cannot find short read file: $_");
+	
+		$V->verbose("\n".basename($_));
+		
+		# test if short reads are FASTQ/FASTA
+		my $fp;
+		my $sr_length;
+		my $sr_length_dev = '0';
+		my $sr_qv_offset;
+		my $sr_count;
+		
+		# FASTQ
+		if($fp = Fastq::Parser->new(file => $_)->check_format){ 
+			# format
+			$V->verbose("Detected FASTQ format");
+			
+			# length
+			($sr_length, $sr_length_dev) = $fp->guess_seq_length;
+			$V->verbose(sprintf("Estimated short read length: %d +-%d", $sr_length, $sr_length_dev ));
+			if(!$opt_ignore_sr_length && $sr_length > 1000){
+				$V->exit(
+					"Estimated short reads length > 1000\n"
+					."Are you sure you specified the correct data? "
+					."To run the pipeline on this data, which by design is not really suited, "
+					."you need to specify --ignore-sr-length"
+				);
+			}
+			
+			# offset
+			unless (defined $cfg{'sr-qv-offset'}){ # manual overwrite from config
+				$sr_qv_offset = $fp->guess_phred_offset; 
+				$V->exit(
+					"Estimating short read quality offset failed.\n"
+					."See 'sr-qv-offset' in the advanced section for manual overwrite"
+				) unless defined $sr_qv_offset;
+				$V->verbose(sprintf("Etimated short read quality offset: %d", $sr_qv_offset));
+				
+				if(defined($sr_qv_offset_total)){
+					$sr_qv_offset_total == $sr_qv_offset || $VB->exit('Different formats/quality offsets in short read files not allowed');
+				}else{
+					$sr_qv_offset_total = $sr_qv_offset;
+				}
+			}
+			
+			# count
+			$sr_count = $fp->guess_seq_count();
+			$V->verbose(sprintf("Estimating approximate number of short reads: %s", Verbose->Humanize($sr_count)));
+		
+		
+		# FASTA
+		}elsif($fp = Fasta::Parser->new(file=> $_)->check_format){
+			# format
+			$V->verbose("Detected FASTA format");
+	
+			# length		
+			($sr_length, $sr_length_dev) = $fp->guess_seq_length;
+			$V->verbose(sprintf("Estimating short read length: %d +-%d", $sr_length, $sr_length_dev));
+			if(!$opt_ignore_sr_length && $sr_length > 1000){
+				$V->exit(
+					"Estimated short reads length > 1000\n"
+					."Are you sure you specified the correct data? "
+					."To run the pipeline on this data, which by design is not really suited, "
+					."you need to specify --ignore-sr-length"
+				);
+			}
+			
+			if(defined($sr_qv_offset_total)){
+				$sr_qv_offset_total == 0 || $VB->exit('Different formats/quality offsets in short read files not allowed');
+			}else{
+				$sr_qv_offset_total = 0;
+			}
+	
+			# count
+			$sr_count = $fp->guess_seq_count();
+			$V->verbose(sprintf("Estimating approximate number of short reads: %s", Verbose->Humanize($sr_count)));
+	
+			
+		}else{
+			$V->exit("Short read file $_ neither FASTQ nor FASTA format");
+		}
+	
+		# push
+		push @sr_length, $sr_length;
+		push @sr_length_dev, $sr_length_dev;
+		push @sr_count, $sr_count;
+		push @sr_bps, ($sr_count * $sr_length);
+		$sr_count_total+= $sr_count;
+	}
+	
+	$sr_qv_offset_total = $cfg{'sr-qv-offset'} unless defined $sr_qv_offset_total;
+	
+	if(@$opt_sr_file){
+		$mean_sr_length += $_ for @sr_length;
+		$mean_sr_length /= @sr_length;
+	
+		$mean_sr_dev += $_ for @sr_length_dev;
+		$mean_sr_dev /= @sr_length_dev;
+	
+		$min_lcr_length = $mean_sr_length + $mean_sr_dev;
+		$min_lcr_length += $min_lcr_length * 0.15; # add another 15 percent
+		$min_lcr_length = int($min_lcr_length + 0.5);
+	}
 }
 
 
 
-##------------------------------------------------------------------------##
-
-=head1 MAIN
+=head2 mode
 
 =cut
-
 
 # globals
 my $PG_line = '@PG ID:unknown';
@@ -737,37 +792,26 @@ if($opt_sam_file){
 	}
 }
 
-
-
-$V->nline;
 $VS->verbose('Running mode: '.$opt_mode);
 
-$opt_prefix = 'proovread' unless defined $opt_prefix;
 
-# DEPRECATED
-#unless ($opt_prefix){
-#	my @time = (localtime(time))[reverse(0..5)];
-#	$time[0]+=1900;
-#	$time[1]++;
-#	$opt_prefix = 'pr_'.sprintf("%4d-%02d-%02d_%02d-%02d-%02d", @time)
-#}
 
-# create tmp folders
+
+=head2 create temporary folders
+
+=cut
+
 my @tmp_dirs = (map{$opt_prefix."/".$_}@TASKS);
-if(-e $opt_prefix){
-	if(-d $opt_prefix){
-		if($opt_overwrite){
-			remove_tree($opt_prefix);
-		}else{
-			$VS->exit("Output directory already exists and is not empty")
-			unless is_empty_dir($opt_prefix);
-		}
-	}else{
-		$VS->exit("Output directory already exists, yet is no directory")
-	} 
-} 
+make_path(@tmp_dirs);
 
-make_path($opt_prefix, @tmp_dirs);
+
+
+##------------------------------------------------------------------------##
+
+=head1 MAIN
+
+=cut
+
 
 my $LR;
 my @LR_IDS;
@@ -801,7 +845,7 @@ foreach my $task(@TASKS){
 			-e $_ || $VS->exit("Cannot find long read file: $_");
 		}
 		
-		$lr_chunk_offsets = prepare_lr();
+		$lr_chunk_offsets = prepare_lr() if @$opt_lr_file; # 'external-sam does not require LR
 		
 		# decide how to finish (realign mapped only or everything)
 		if(! defined ($opt_finish_aligned_only) && $opt_mode eq 'pacbio-iterative'){
@@ -1011,20 +1055,43 @@ $VS->verbose("Creating raw output sequences");
 copy(task_file_name(".fa", task=>$TASKS[$TC]), $opt_fa_raw);
 copy(task_file_name(".fq", task=>$TASKS[$TC]), $opt_fq_raw);
 
-my $opt_chim_raw = task_file_name(".fc", task=>$TASKS[$TC]);
+my $opt_chim_raw = task_file_name(task => $TASKS[$TC], suffix => ".fc");
 my $opt_chim_fil = task_file_name(task => '', suffix => "_chim.tsv");
 
 chim_filter('--in' => $opt_chim_raw, '--out' => $opt_chim_fil);
 
-seq_filter('--substr' => $opt_chim_fil) if $cfg{'seq-filter'};
+
+
+if($cfg{'seq-filter'}){
+	$V->nline;
+	$VS->verbose("Quality trimming raw output");
+	seq_filter(
+		%{$cfg{'seq-filter'}},
+		'--substr' => $opt_chim_fil,
+		'--in' => $opt_fq_raw,
+		'--out' => $opt_fq_fil
+	);
+}
+
+
+if($cfg{'seq-filter'} && -s $opt_fq_fil){ # no need to create FASTA from empty FASTQ
+	$V->nline;
+	$VS->verbose("Converting to FASTA file");
+	seq_filter(
+		'--in' => $opt_fq_fil,
+		'--out' => $opt_fa_fil,
+		'--fasta' => '',
+	);
+}
+
 
 # lets see if we came this far
-$no_error++;
+$no_fatal++;
 
 # put in END to wait for memory to be cleaned
 
 END{
-	if ($no_error){
+	if ($no_fatal){
 		unless ($opt_keep){
 			$VS->verbose("Cleaning up");
 			remove_tree(@tmp_dirs) 
@@ -1139,7 +1206,6 @@ sub run_shrimp{
 		@_
 	};
 	
-	$V->nline;
 	$V->nline;
 	$VS->verbose("Running task ".$TASKS[$TC]);
 	
@@ -1373,7 +1439,6 @@ Read the pacbio long read file and create a new, indexed long read file,
 
 sub prepare_lr{
 
-	$V->nline;
 	$VS->verbose("Preparing long reads");
 
 	# read fasta/fastq, write and sort by id
@@ -1592,7 +1657,7 @@ Create a file name depending on current $TC and $opt_prefix
 sub task_file_name{
 	my $p = {
 		root => $opt_prefix,
-		task => $TASKS[$TC],
+		task => $TASKS[$TC || 0],
 		prefix => $opt_prefix,
 		suffix => (@_%2 ? shift : ''),
 		@_
@@ -1637,15 +1702,17 @@ Run ChimeraToSeqFilter on raw chimera output
 
 sub chim_filter{
 
-	my $params = param_join(\(%{$cfg{'chimera-filter'}}, @_ ));
+	my %params = (%{$cfg{'chimera-filter'}}, @_);
+	my $params = param_join(\%params);
 
-	my $cmd_chim_fil = "perl $RealBin/ChimeraToSeqFilter.pl $params\n";
+	my $cmd_chim_fil = "perl $RealBin/ChimeraToSeqFilter.pl $params";
 	
 	$V->nline;
 	$VS->verbose("Filtering chimera annotations");
 	$VB->hline;
 	$VB->verbose($cmd_chim_fil);
 	qx($cmd_chim_fil);
+	$VB->hline;
 	
 }
 
@@ -1655,24 +1722,40 @@ Run SeqFilter on raw output
 
 =cut
 
+#sub seq_filter{
+#	my %params = (%{$cfg{'seq-filter'}}, @_);
+#	my $params = param_join(\%params);
+#
+#	my $cmd_fq_fil = "$RealBin/SeqFilter $params --in $opt_fq_raw --out $opt_fq_fil";
+#	
+#	$V->nline;
+#	$VS->verbose("Quality trimming raw output");
+#	$VB->hline;
+#	$VB->verbose($cmd_fq_fil);
+#	qx($cmd_fq_fil);
+#	$VB->hline;
+#	
+#	$VS->verbose("Converting to FASTA file");
+#	my $cmd_fa_fil = "$RealBin/SeqFilter --in $opt_fq_fil --fasta --out $opt_fa_fil";
+#	$VB->hline;
+#	$VB->verbose($cmd_fa_fil);
+#	qx($cmd_fa_fil);
+#	$VB->hline;
+#	
+#}
+
 sub seq_filter{
+	my %params = @_;
+	my $params = param_join(\%params);
 
-	my $params = param_join(\(%{$cfg{'seq-filter'}}, @_ ));
-
-	my $cmd_fa_fil = "$RealBin/SeqFilter $params --in $opt_fq_raw --fasta --out $opt_fa_fil\n";
-	my $cmd_fq_fil = "$RealBin/SeqFilter $params --in $opt_fq_raw --out $opt_fq_fil\n";
-	
-	$V->nline;
-	$VS->verbose("Quality trimming raw output");
-	$VB->hline;
-	$VB->verbose($cmd_fa_fil);
-	qx($cmd_fa_fil);
+	my $cmd = "$RealBin/SeqFilter $params";
 	
 	$VB->hline;
-	$VB->verbose($cmd_fq_fil);
-	qx($cmd_fq_fil);
-	
+	$VB->verbose($cmd);
+	qx($cmd);
+	$VB->hline;
 }
+
 
 =head2 byfile
 

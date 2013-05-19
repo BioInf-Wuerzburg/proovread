@@ -10,6 +10,9 @@ use lib '../';
 
 use Verbose;
 
+use IO::File;
+use IO::Uncompress::Gunzip;
+
 our $VERSION = '0.08';
 our ($REVISION) = '$Revision$' =~ /(\d+)/;
 our ($MODIFIED) = '$Date$' =~ /Date: (\S+\s\S+)/;
@@ -39,7 +42,7 @@ Visualizes progress in an self-updating pv like ProgressBar, inlcuding ETA
   # Counter based progress
   my $iter = 10000;
   my $pg = Verbose::ProgressBar->new(
-    size => $iter$fh
+    size => $iter
   )
   
   my $i;
@@ -191,7 +194,7 @@ sub update{
 	$self->{level} > $self->{report_level} && return;
 	
 	if (!defined ($value) && defined($self->{_fh})){
-		$self->{value} = tell($self->{_fh});
+		$self->{value} = $self->{_fh}->tell;
 	}elsif(!$value){
 		$self->{value} = $value = 0;
 	}else{

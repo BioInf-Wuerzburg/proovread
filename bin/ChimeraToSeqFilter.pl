@@ -137,6 +137,10 @@ if(@ARGV && !($ARGV[0] =~ /^-/) && !$opt_in){
 	$opt_in = $ARGV[0];
 }
 
+my $oh = \*STDOUT;
+$opt_out && open($oh, '>', $opt_out) or die "$!: $opt_out";
+select $oh;
+
 pod2usage(1) if $opt_help;
 $opt_in || pod2usage(exitval=>1, msg=>'Input file required');
 $opt_verbose = 0 if $opt_quiet; 

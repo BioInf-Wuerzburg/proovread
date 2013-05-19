@@ -63,8 +63,11 @@ SHRiMP (2.2.0) gmapper interface.
 
 =over
 
-=item [Feature] << $shrimp->cancel(<MESSAGE>) >> does not report anything
-unless a message is given.
+=item [BugFix] "Grepped" child pid is checked and "ps" is reported
+ on failure.
+
+=item [BugFix] Added maximum 5 seconds sleep loop for error log parsing
+ to handle delayed creation.
 
 =item [BugFix] Correctly creating flag only parameter if specified with 
  value '' and ignoring them if specified as undef. 
@@ -378,7 +381,7 @@ sub cancel {
 #		$pid." doesnt exist -> probably already finished\n");
 	};
 
-	$msg && $V->verbose($msg);
+	$V->verbose($msg || "Shrimp run canceled");
 }
 
 
@@ -581,8 +584,9 @@ sub _run_pipe_open {
 		# get the entry for the all running gmapper processes
 		# search for entry, where open pid is parent and then take the childs id as new id
 		#sleep(1);
-		my $ps = qx(ps -eF | grep -v grep | grep $self->{bin});
+		my $ps = qx(ps -eF | grep -v grep | grep $self->{bin} | grep $open_pid);
 		($self->{_pid}) = $ps  =~ /^\S+\s+(\d+)\s+$open_pid/m;
+		$V->exit("Could not determine childs pid\n$ps") unless $self->{_pid} and $self->{_pid} =~ /^\d+$/;
 	}
 
 	$self->{_result_reader} = $rdr;

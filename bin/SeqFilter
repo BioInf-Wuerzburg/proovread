@@ -1,6 +1,6 @@
 #!/usr/bin/env perl
 
-# $Id: Verbose.pm 644 2013-01-18 16:04:44Z dumps $
+# $Id: SeqFilter 59 2013-05-16 12:57:10Z s187512 $
 
 use warnings;
 use strict;
@@ -14,13 +14,13 @@ use lib "$RealBin/../lib/";
 use Verbose;
 use Verbose::ProgressBar;
 
-use Fastq::Parser 0.07;
-use Fastq::Seq 0.10;
+use Fastq::Parser 0.09;
+use Fastq::Seq 0.11;
 
-use Fasta::Parser 0.06;
+use Fasta::Parser 0.08;
 use Fasta::Seq 0.06;
 
-our $VERSION = '1.01';
+our $VERSION = '1.04';
 
 =head1 NAME
 
@@ -30,7 +30,59 @@ SeqFilter - Versatile FASTA/FASTQ sequence file analysis and modification tool.
 
 =head1 CHANGELOG seqz (combined Fasta-/FastqFilter)
 
-=head1 1.01
+=head2 1.04
+
+=over
+
+=item [Feature] C<--check-format> to check individual FASTQ entries for 
+ correct format.
+
+=back
+
+=head2 1.03
+
+=over
+
+=item [DocFix] Some fixes in the documentation.
+
+=item [Change] C<--rev-comp> uses opt2handle as well.
+
+=item [Change] Consistent evaluation of parameter that specify one
+ of the 'LIST', '-', 'FILE.
+
+=item [Feature] C<--ids-pattern> allows to filter sequences based
+ on a provided ID pattern.
+
+=back
+
+=head2 1.02
+
+=over
+
+=item [BugFix] --base-content percentage are now calculated based on 
+ C<$filtered_length> and not C<$total_length>
+
+=item [Feature] Renaming of ids including access to global output seq counter.
+
+=item [BugFix] Accept "--substr FROM" without "TO". Means substr to end of seq.
+
+=item [Feature] Specify C<--rev-comp *> to apply reverse complement to
+ all sequences of the file.
+
+=item [BugFix] Fixed error determining size of gzipped files.
+
+=item [Feature] Directly read gzipped files using of the latest 
+ feature of Fasta::Parser / Fastq::Parser.
+
+=item [BugFix] Fixed an incorrect progress display at eof.
+
+=item [BugFix] Replacement in --substr-perl-style was not splitted correctly
+
+=item [Feature] C<--substr> FROM > TO returns TO-FROM as reverse complement.
+
+=back
+
+=head2 1.01
 
 =over
 
@@ -51,7 +103,7 @@ SeqFilter - Versatile FASTA/FASTQ sequence file analysis and modification tool.
 
 =back
 
-=head 1.00
+=head2 1.00
 
 =over
 
@@ -72,7 +124,7 @@ SeqFilter - Versatile FASTA/FASTQ sequence file analysis and modification tool.
 =item [Feature] substring extraction and modification of sequences based
  on coordinates file.
 
-=bach
+=back
 
 =head2 1.03 [Thomas Hackl 2013-01-28]
 
@@ -131,13 +183,15 @@ Added --ids, --ids-exclude
 
 Versioned, Verbose::ProgressBar, --min-length
 
+=back
+
 =cut
 
 =head1 TODO
 
 =over
 
-=item paired
+=item peek
 
 =back
 
@@ -171,9 +225,9 @@ Input FASTA/FASTQ file. Default STDIN.
 
 =cut
 
-$opt{'in=s'} = \(my $opt_in = undef);
+$opt{'in=s'} = \(my $opt_in = '-');
 
-=item [--out=<STRING>]
+=item [--out=<FILE/->]
 
 Output file. Default off. Specify '-' for STDOUT.
 
@@ -181,7 +235,7 @@ Output file. Default off. Specify '-' for STDOUT.
 
 $opt{'out=s'} = \(my $opt_out = undef);
 
-=item [--tsv=<STRING>/'-']
+=item [--tsv=<STRING/->]
 
 Print tab separated statistics of data AFTER filtering to pathname, 
  default off, specify '-' for STDOUT, but only if '--out' is not redirected 
@@ -195,11 +249,17 @@ Column order is: number of sequences, total length, longest, shortest,
 
 $opt{'tsv=s'} = \(my $opt_tsv = '');
 
-=item [--ids=<FILE>/--ids='-']
+=item [--ids=<FILE/-/IDLIST>]
 
-Pathname to file of sequence IDs or list of IDs to be reported. Reads
- comma-separated, whitespace and newline separated lists. Specify '-' to 
- read IDs form STDIN. Leading '>' or '@' are allowed but not necessary.
+Pathname to file of sequence IDs or a literal list of IDs to be reported. 
+ Reads comma-separated, whitespace and newline separated lists. Specify '-' 
+ to read IDs form STDIN. Leading '>' or '@' are allowed but not necessary.
+
+  # get two seqs by ID
+  SeqFilter fasta.fa --ids "seq35,seq49"
+  # read ids from file
+  SeqFilter fasta.fa --ids ids.list
+  
 
 =cut 
 
@@ -212,6 +272,33 @@ Exclude reads specified by --ids from being reported. Default off.
 =cut 
 
 $opt{'ids-exclude'} = \(my $opt_ids_exclude = undef);
+
+=item [--ids-pattern=<FILE/-/PATTERNLIST>]
+
+A PATTERN or a link to a file containing multiple PATTERN, one per 
+ line, to match against sequence ids. Only matching sequences will
+ be returned.
+
+  # get seqs with ids matching pattern
+  SeqFilter seqs.fq --ids-patt 'comp2_c13_seq*|comp2_c88_seq*' 
+
+=cut
+
+$opt{'ids-pattern=s'} = \(my $opt_ids_pattern = undef);
+
+=item [--ids-rename=<PATTERN>]
+
+Provide a perl substitution pattern as string. The pattern is applied to 
+ every id. Use global "$COUNT" to access the output sequence counter.
+
+  SeqFilter library_1.fq --ids-rename='s/.*\//sprintf("MYLIB1_%05d\/", $COUNT)/e'
+  # creates header:
+  # @MYLIB_00001/1
+  # @MYLIB_00002/1 ...
+
+=cut
+
+$opt{'ids-rename=s'} = \(my $opt_ids_rename = undef);
 
 =item [--min-length=<INT>]
 
@@ -237,14 +324,24 @@ FASTQ only. output FASTA format. Default FASTQ.
 
 $opt{'fasta'} = \(my $opt_fasta = undef);
 
-=item [--rev-comp=<FILE>/----rev-comp='-']
+=item [--rev-comp=<FILE/-/LIST/*>]
 
-Pathname to file of sequence IDs or list of IDs to be transformed. Formatting
- follows the same rules as --ids files.
+Pathname to file of sequence IDs or list of IDs to be transformed, "*" to 
+ transform all sequences. Formatting follows the same rules as --ids files. 
 
 =cut 
 
 $opt{'rev-comp=s'} = \(my $opt_rc = '');
+
+=item [--check-format]
+
+FASTQ only. Check every FASTQ record to have a valid format. '@/+' at the
+ start of id lines, sequence and quality of identical length, phred within
+ boundaries. Slows down the parsing.
+
+=cut
+
+$opt{'check-format!'} = \(my $opt_check_format = undef);
 
 =item [--phred-offset] [auto]
 
@@ -305,7 +402,7 @@ will generate sequences with qualities of at least 5 at every position and
 
 $opt{'trim-lcs=s'} = \(my $opt_slice_lcs = undef);
 
-=item [--substr=<FILE>]    
+=item [--substr=<FILE/-/LIST>]    
 
 Pathname to a FILE containing information for subseq extraction/modification.
 The format is a tsv, by default lines of the format ID FROM TO are expected.
@@ -408,18 +505,18 @@ $opt{'help|?'} = \(my $opt_help);
 
 
 GetOptions(%opt) or pod2usage(1);
-if(@ARGV && !($ARGV[0] =~ /^-/) && !$opt_in){
+if(@ARGV && !($ARGV[0] =~ /^-/)){
 	$opt_in = $ARGV[0];
 }
 
 pod2usage(1) if $opt_help;
 if($opt_max_length && $opt_min_length && ($opt_min_length > $opt_max_length)){
 	pod2usage(exitval=>1, msg=>'min-length has to be smaller than max-length'); 
-}elsif($opt_ids eq '-' && !$opt_in){
-	pod2usage(exitval=>1, msg=>'Cannot read IDS and sequences from STDIN');
 }
-$opt_substr_file && !-e $opt_substr_file && pod2usage(exitval=>1, msg=>'Cannot find SUBSTR file: '.$opt_substr_file);
+
 $opt_verbose = 0 if $opt_quiet; 
+
+
 
 ##------------------------------------------------------------------------##
 
@@ -440,42 +537,58 @@ my $V = Verbose->new(
 
 =cut
 
-# Fasta parser
-if(!$opt_in and ($opt_in and $opt_in eq '-') || ($opt_rc and $opt_rc eq '-')){
-	$V->exit('STDIN already in use, --in missing');
+# check STDIN, check files
+# $opt_in, $opt_ids, $opt_ids_pattern, $opt_substr_file
+# only one can be '-'
+my $opt_stdin;
+
+
+if($opt_in ne '-'){
+	$V->exit("Cannot find input file: $opt_in") if ! -f $opt_in;
+	$V->exit("Empty input file: $opt_in") if -s $opt_in == 0;
+}else{
+	$opt_stdin='--in';
 }
 
-$V->verbose("Reading Input from ".( $opt_in ? $opt_in : "STDIN" ));
+# Fasta parser
+$V->verbose("--in: ".( $opt_in ne '-' ? $opt_in : "STDIN" ));
 
 my $FP;
 my $FASTQ;
 
 if(
 	$FP = Fastq::Parser->new(
-		file => $opt_in, # defaults to STDIN if undef
+		file => $opt_in eq '-' ? undef : $opt_in, # defaults to STDIN if undef
 	)->check_format
 ){
 	$FASTQ = 1;
-	$opt_offset = $FP->guess_phred_offset unless $opt_offset;
+	if($opt_offset){
+		$FP->phred_offset($opt_offset);
+	}else{
+		$opt_offset = $FP->guess_phred_offset 
+	};
 	pod2usage(msg=>'Could not guess phred offset, please specify manually', exitval => 2) 
 		unless $opt_offset;
 	$V->verbose('Detected FASTQ format, phred-offset '.$opt_offset);
 }elsif(
 	$FP = Fasta::Parser->new(
-		file => $opt_in, # defaults to STDIN if undef
+		file => $opt_in eq '-' ? undef : $opt_in, # defaults to STDIN if undef
 	)->check_format
 ){
 	$FASTQ = 0;
 	$V->verbose('Detected FASTA format');
 }else{
-	$V->exit($opt_in." neither FASTA nor FASTQ") unless $FP;
+	$V->exit(( $opt_in ? $opt_in : "STDIN" )." neither FASTA nor FASTQ") unless $FP;
 }
 
+# a fix to handle gzipped files, -s doesnt work on gzip 
+my $file_size = $FP->can('file_size') ? $FP->file_size : -s $FP->fh; 
 
 my $VPB = Verbose::ProgressBar->new(
 	level => 2,
 	report_level => $opt_verbose,
-	size => $FP->fh(),
+	size => $file_size, # size and _fh required for gzip fix
+	_fh => $FP->fh(),
 );
 
 
@@ -501,6 +614,7 @@ my %opt_fq_only = (
 	'phred-mask' => $opt_mask,
 	'trim-window' => $opt_trim,
 	'trim-lcs' => $opt_slice_lcs,
+	'check-format' => $opt_check_format,
 );
 
 if(!$FASTQ){
@@ -509,6 +623,45 @@ if(!$FASTQ){
 	}
 }
 
+##------------------------------------------------------------------------##
+
+=head2 Maybe files parameter
+
+=cut
+
+my ($opt_ids_fh, $opt_rc_fh, $opt_ids_pattern_fh, $opt_substr_fh);
+($opt_ids_fh, $opt_stdin) = opt2handle('--ids',$opt_ids, $opt_stdin);
+($opt_ids_pattern_fh, $opt_stdin) = opt2handle('--ids-pattern',$opt_ids_pattern, $opt_stdin);
+($opt_substr_fh, $opt_stdin) = opt2handle('--substr-file', $opt_substr_file, $opt_stdin);
+
+
+#HERE
+
+my %IDS = read_ids($opt_ids_fh) if $opt_ids;
+
+my %RC_IDS;
+my $RC_ALL;
+if($opt_rc){
+	my $opt_rc_fh;
+	if($opt_rc eq '*'){
+		$RC_ALL++;
+	}elsif($opt_rc eq '-' && $opt_ids eq '-'){
+		if($opt_ids_exclude){
+			$V->exit("It does not make sense to rev-comp the same ids you are going to exclude!");
+		}
+		%RC_IDS = %IDS;
+	}elsif(-f $opt_rc){
+		open($opt_rc_fh, '<', $opt_rc) or $V->exit("$!: $opt_rc");
+	}else{
+		open($opt_rc_fh, '<', \$opt_rc) or $V->exit("$!: $opt_rc");
+	}
+	%RC_IDS = read_ids($opt_rc_fh) if $opt_rc_fh;
+}
+
+
+(my @IDS_PATTERS = <$opt_ids_pattern_fh>) if $opt_ids_pattern;
+chomp(@IDS_PATTERS);
+my %SUBSTR = read_substrs($opt_substr_fh) if $opt_substr_file;
 
 ##------------------------------------------------------------------------##
 
@@ -518,20 +671,6 @@ if(!$FASTQ){
 
 my @opt_base_content = split(/\s*,\s*/, $opt_base_content) if $opt_base_content;
 my @opt_N = sort{$a <=> $b}(split(/\s*,\s*/, $opt_N)) if $opt_N;
-my %IDS = read_ids($opt_ids) if $opt_ids;
-my %RC_IDS;
-if($opt_rc){
-	if($opt_rc eq '-' && $opt_ids eq '-'){
-		if($opt_ids_exclude){
-			$V->exit("It does not make sense to rev-comp the same ids you are going to exclude!");
-		}
-		%RC_IDS = %IDS;
-	}else{
-		%RC_IDS = read_ids($opt_rc) if $opt_rc;
-	}
-}
-
-my %SUBSTR = read_substrs() if $opt_substr_file;
 
 my $tsv;
 if($opt_tsv){
@@ -559,6 +698,10 @@ if($opt_trim){
 	Fastq::Seq->Qual_window_size($wsize);
 }
 
+if($opt_check_format){
+	Fastq::Seq->CheckFormat(1);
+}
+
 # TOTAL
 my @total_L;
 my $total_count;	# total count
@@ -569,6 +712,7 @@ my %total_Ns;
 
 # FILTERED
 my @filtered_L; # lengths of seqs
+my $COUNT = 0;
 my $filtered_length = 0;
 my $filtered_longest = 0;
 my $filtered_shortest = undef;
@@ -610,6 +754,10 @@ while (my $SEQ = $FP->next_seq()){
 		}
 	}
 	
+	if(@IDS_PATTERS){
+		next unless grep{$ID =~m/$_/}@IDS_PATTERS;
+	}
+
 	my @fq = ($SEQ);
 
 	# substr
@@ -620,9 +768,15 @@ while (my $SEQ = $FP->next_seq()){
 	}
 	
 	if($opt_substr_file && exists $SUBSTR{$ID} ){
-		@fq = map{
-			$_->substr_seq(@{$SUBSTR{$ID}});
-		}@fq;
+		my @tmp;
+		foreach my $fq (@fq){
+			my @subs = $fq->substr_seq(@{$SUBSTR{$ID}{coords}});
+			for(my $i=0; $i<@subs; $i++){
+				$subs[$i]->reverse_complement() if $SUBSTR{$ID}{rc}[$i]
+			}
+			push @tmp, @subs;
+		};
+		@fq = @tmp;
 	}
 	
 	# slice by lcs
@@ -642,8 +796,21 @@ while (my $SEQ = $FP->next_seq()){
 		if($opt_min_length){ next if $length < $opt_min_length }; 
 		if($opt_max_length){ next if $length > $opt_max_length };
 
+		# 
+		$COUNT++;
+		
+		# rename ids
+		if($opt_ids_rename){
+			my $id = $SEQ->id();
+			eval '$id =~ '.$opt_ids_rename;
+			$V->exit("Eval error in --ids-rename pattern\n".$@) if $@;
+			$SEQ->id($id);
+		}
+
 		# reverse complement
-		if(keys %RC_IDS){
+		if($RC_ALL){
+			$SEQ->reverse_complement;
+		}elsif(keys %RC_IDS){
 			$SEQ->reverse_complement if $RC_IDS{$ID};
 		}
 		
@@ -677,7 +844,8 @@ while (my $SEQ = $FP->next_seq()){
 	}
 }
 
-$VPB->finish();
+#TODO: adjust to file_s
+$VPB->finish($file_size);
 
 
 =head2 print summary
@@ -728,7 +896,7 @@ foreach (sort{$a <=> $b}keys %filtered_Ns){
 my @BCs;
 if(keys %BCs){
 	foreach my $k(sort keys %BCs){
-		$V->verbose(sprintf("%-15s %10d bp %10.2f %%", "[$k]", $BCs{$k}, (100*$BCs{$k}/$total_length)));
+		$V->verbose(sprintf("%-15s %10d bp %10.2f %%", "[$k]", $BCs{$k}, (100*$BCs{$k}/$filtered_length)));
 		push @BCs, $BCs{$k};
 	}
 }
@@ -751,33 +919,76 @@ if($tsv){
 
 =cut
 
+=head2 opt2handle
+
+Use this method with options accepting <LIST/FILE/-> to decide what was 
+ actually provided and to return a handle to the content. 
+=cut
+
+sub opt2handle{
+	my ($k, $v, $stdin) = @_;
+	my $h;
+	return unless $v; 
+	
+	if($v eq '-'){
+		$V->exit("Cannot read $k from STDIN, already used with $stdin") if $stdin;
+		$h = \*STDIN;
+		$stdin = $k;
+		$V->verbose("$k: STDIN");
+	}elsif(-f $v){
+		$V->verbose("$k: $v");
+		open($h, '<', $v) or $V->exit("$!: $v");
+	}else{
+		open($h, '<', \$v) or $V->exit("$!: $v");;
+	}
+	return $h;	
+}
+
+
+# DEPRECATED -> opt2handle
+#my %mf = (
+#	'--ids' => \$opt_ids, 
+#	'--ids_pattern' => \$opt_ids_pattern,
+#	'--substr_file' => \$opt_substr_file
+#);
+#
+#foreach(qw(--ids --ids_pattern --substr_file)){
+#	next unless ${$mf{$_}}; 
+#	if($mf{$_} eq '-'){
+#		$V->exit("Cannot read $_ from STDIN, already used with $stdin") if $stdin;
+#		${$mf{$_}} = \*STDIN;
+#		$stdin = $_;
+#		$V->verbose("$_: STDIN");
+#	}elsif(-f ${$mf{$_}}){
+#		$V->verbose("$_: ${$mf{$_}}");
+#		open(my $fh, '<', $_);
+#		${$mf{$_}} = $fh;
+#	}else{
+#		open(my $fh, '<', \$_);
+#		${$mf{$_}} = $fh;
+#	}
+#}
+
+
 =head2 read_ids
 
 =cut
 
 sub read_ids{
-	my ($src) = @_;
+	my ($fh) = @_;
 	my @IDS;
-	if($src eq '-'){
-		while(<STDIN>){
-			next unless $_; # ignore empty lines
-			next if /^#/; # ignore comments
-			push @IDS, split(/[\s,\n]+/, $_);
-		}
-	}else{
-		open(IDS, $src) || $V->exit("Can't open file '$src'");
-		while(<IDS>){
-			next unless $_; # ignore empty lines
-			next if /^#/; # ignore comments
-			push @IDS, split(/[\s,\n]+/, $_);
-		}
-		close IDS;
+	while(<$fh>){
+		next unless $_; # ignore empty lines
+		next if /^#/; # ignore comments
+		push @IDS, split(/[\s,\n]+/, $_);
 	}
 	map{s/^[>@]//}@IDS;
 	my %IDS;
 	@IDS{@IDS}=map{1}@IDS;
 	return %IDS;
 }
+
+
 
 =head2 read_substrs
 
@@ -786,20 +997,31 @@ Read substr coordinate file and return
 =cut
 
 sub read_substrs{
+	my ($fh)=@_;
 	my %s;
-	open(SUBS, $opt_substr_file) || $V->exit("Can't open output substrs file: '$opt_substr_file'");
-	while(<SUBS>){
+	while(<$fh>){
 		chomp();
 		next unless $_; # ignore empty lines
 		next if /^#/; # ignore comments
-		my ($id, @f) = split(/\t/, $_, 3);
+		my ($id, @f) = split(/\t/, $_, 4);
 		$id =~ s/^[>@]//;
-		# transform from-to to offset-length
-		my $o = $f[0];
-		my $l = $f[1]-$f[0]+1;
-		push @{$s{$id}}, [$o, $l];
+		unless($opt_substr_perl){
+			# transform from-to to offset-length
+			if(@f==1){
+				push @{$s{$id}{coords}}, [$f[0]];
+				push @{$s{$id}{rc}}, 0;
+			}elsif($f[0] > $f[1]){ # third param is rev-comp
+				push @{$s{$id}{coords}}, [$f[1], $f[0]-$f[1]+1];
+				push @{$s{$id}{rc}}, 1;
+			}else{
+				push @{$s{$id}{coords}}, [$f[0], $f[1]-$f[0]+1];
+				push @{$s{$id}{rc}}, 0;
+			}
+		}else{
+			push @{$s{$id}{coords}}, [@f];
+			push @{$s{$id}{rc}}, 0;
+		}
 	}
-	close SUBS;
 	return %s;	
 }
 
@@ -826,6 +1048,8 @@ sub Nx{
 	}
 	return %Ns;
 }	
+
+
 
 
 =head1 AUTHOR

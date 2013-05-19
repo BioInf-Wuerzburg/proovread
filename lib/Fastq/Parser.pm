@@ -15,7 +15,7 @@ use lib '../';
 use Fastq::Seq 0.10;
 
 
-our $VERSION = '0.08';
+our $VERSION = '0.09';
 our ($REVISION) = '$Revision$' =~ /(\d+)/;
 our ($MODIFIED) = '$Date$' =~ /Date: (.+)/;
 
@@ -45,6 +45,18 @@ TODO
 =cut
 
 =head1 CHANGELOG
+
+=head2 0.09
+
+=over
+
+=item [Change] C<< $fp->next_seq(find_record => 1) >> replaces C<< $fp->next_seq(1) >>.
+ Adjusted C<< $fp->sample_seq() >>.
+
+=item [Change] Removed C<< $fp->next_raw_seq >>. Use C<< $fp->next_seq->string >>
+ instead.
+
+=back
 
 =head2 0.08
 
@@ -163,6 +175,15 @@ Initial Parser module. Provides Constructor and generic accessor
 
 =cut
 
+##------------------------------------------------------------------------##
+
+=head1 Class METHODS
+
+=cut
+
+
+##------------------------------------------------------------------------##
+
 =head1 Constructor METHOD
 
 =head2 new
@@ -231,24 +252,33 @@ sub DESTROY{
 Loop through fastq file and return next 'Fastq::Seq' object. Without 
  parameter, assumes consistent, "four line wise" run through file,
  therefore it will fail if the filehandle is manually set to arbitrary 
- position. 
+ position. Returns undef on eof.
 
-Set the first parameter to TRUE, to perform an additional check to find the 
- actual start of the next valid record before retrieving it. This behaviour
- is useful in combination with any previous C<< $fp->seek >> actions.
+To perform a format checks on the seq object see the Fastq::Seq documention,
+ C<< Fastq::Seq->CheckFormat() >>.
 
-Returns undef on eof.
+use << fp->next_seq('find_record => 1') >> to find the actual start of the 
+ next valid record before retrieving it. This behaviour is useful in 
+ combination with any previous C<< $fp->seek >> actions.
+
 
   $first_seq = $fp->next_seq();
 
   $fp->seek(-1000,2); # go 1000 bytes back from eof
-  $close_to_last_seq = $fp->next_seq(1);
-
+  $close_to_last_seq = $fp->next_seq(find_record => 1);
+  
+  Fastq::Seq->CheckFormat(1); # global setting
+  $checked_seq = $fp->next_seq();
 
 =cut
 
 sub next_seq{
-	my ($self, $safe) = (@_, 0);
+	my $self = shift;
+	my %p = (
+		check_format => 0, 
+		@_
+	);
+	
 	
 	if(@{$self->{_buffer}}){
 		# return fastq seq object
@@ -266,23 +296,22 @@ sub next_seq{
 		defined(my $qs = <$fh>)
 	){
 		
-		if($safe){
-			# safe record start
+		if(exists $p{find_record} && $p{find_record}){
+			# safe record start from any point in file
 			my $lines = 0;
 			until($nh =~ /^@/ && $qh =~ /^\+/){
-				$nh = $ns;
-				$ns = $qh;
-				$qh = $qs;
-				$qs = <$fh>;
+				($nh,$ns,$qh,$qs) = ($ns,$qh,$qs, scalar <$fh>);
 				
 				# eof
 				unless (defined $qs){
-					seek($fh,0,0); # reset to file start
+					# dont know if this makes sense
+					# seek($fh,0,0); # reset to file start
 					return;
 				};
 	
 				# corrupt file
-				die	sprintf("%s: %s, %s",(caller 0)[3],$self->{file}, "Couldn't find record start within next 5 lines, possibly corrupted file or wrong format")
+				die	sprintf("%s: %s, line %d, %s",(caller 0)[3],$self->{file}, $fh->input_line_number, 
+					"Couldn't find record start within last 5 lines, possibly corrupted file or wrong format")	
 					if $lines > 4;
 				
 				$lines++;
@@ -292,7 +321,7 @@ sub next_seq{
 		# return fastq seq object
 		return Fastq::Seq->new(
 			$nh,$ns,$qh,$qs,
-			phred_offset => $self->{phred_offset}
+			phred_offset => $self->{phred_offset},
 		);
 	}
 	
@@ -328,58 +357,59 @@ sub check_format{
 }
 
 
-
-=head2 next_raw_seq
-
-Like C<< $fp->next_seq >> but returns next seq as raw string instead of 
- Fastq::Seq object. Setting the first parameter to TRUE also makes it 
- record safe.
-
-=cut
+# DEPRECATED
+#=head2 next_raw_seq
+#
+#Like C<< $fp->next_seq >> but returns next seq as raw string instead of 
+# Fastq::Seq object. Setting the first parameter to TRUE also makes it 
+# record safe.
+#
+#=cut
 
 sub next_raw_seq{
-	my ($self, $safe) = (@_, 0);
-	my $fh = $self->{fh};
-	
-	if(@{$self->{_buffer}}){
-		# return fastq seq string
-		return join("",	splice(@{$self->{_buffer}}, 0, 4));
-	}
-	
-	if(
-		defined(my $nh = <$fh>) &&
-		defined(my $ns = <$fh>) &&
-		defined(my $qh = <$fh>) &&
-		defined(my $qs = <$fh>)
-	){
-		
-		if($safe){
-			# safe record start
-			my $lines = 0;
-			until($nh =~ /^@/ && $qh =~ /^\+/){
-				$nh = $ns;
-				$ns = $qh;
-				$qh = $qs;
-				$qs = <$fh>;
-				
-				# eof
-				unless (defined $qs){
-					seek($fh,0,0); # reset to file start
-					return;
-				};
-								# corrupt file
-				die	sprintf("%s: %s, %s",(caller 0)[3],$self->{file}, "Couldn't find record start within next 5 lines, possibly corrupted file or wrong format")
-					if $lines > 4;
-				
-				$lines++;
-			}
-		}
-		
-		# return fastq seq string
-		return $nh.$ns.$qh.$qs;
-	}
-	
-	return;
+	die "Use of next_raw_seq is deprecated, use something like next->seq->string instead";
+#	my ($self, $safe) = (@_, 0);
+#	my $fh = $self->{fh};
+#	
+#	if(@{$self->{_buffer}}){
+#		# return fastq seq string
+#		return join("",	splice(@{$self->{_buffer}}, 0, 4));
+#	}
+#	
+#	if(
+#		defined(my $nh = <$fh>) &&
+#		defined(my $ns = <$fh>) &&
+#		defined(my $qh = <$fh>) &&
+#		defined(my $qs = <$fh>)
+#	){
+#		
+#		if($safe){
+#			# safe record start
+#			my $lines = 0;
+#			until($nh =~ /^@/ && $qh =~ /^\+/){
+#				$nh = $ns;
+#				$ns = $qh;
+#				$qh = $qs;
+#				$qs = <$fh>;
+#				
+#				# eof
+#				unless (defined $qs){
+#					seek($fh,0,0); # reset to file start
+#					return;
+#				};
+#								# corrupt file
+#				die	sprintf("%s: %s, %s",(caller 0)[3],$self->{file}, "Couldn't find record start within next 5 lines, possibly corrupted file or wrong format")
+#					if $lines > 4;
+#				
+#				$lines++;
+#			}
+#		}
+#		
+#		# return fastq seq string
+#		return $nh.$ns.$qh.$qs;
+#	}
+#	
+#	return;
 }
 
 
@@ -496,7 +526,7 @@ sub sample_seqs{
 	
 			for($i=$n;$i;$i--){
 				$self->seek(int(rand($size))); # jump to random pos
-				my $fq = $self->next_seq(1); # get next reads with safe start
+				my $fq = $self->next_seq(find_record => 1); # get next reads with safe start
 				if($fq){
 					push @reads, $fq;
 				}else{	# eof

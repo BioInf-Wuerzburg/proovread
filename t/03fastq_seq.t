@@ -1,6 +1,6 @@
 #!/usr/bin/env perl
 
-# $Id: Verbose.pm 644 2013-01-18 16:04:44Z dumps $
+# $Id: 03fastq_seq.t 59 2013-05-16 12:57:10Z s187512 $
 
 use strict;
 use warnings;
@@ -70,6 +70,25 @@ my $seq_obj_pb = {
 BEGIN { use_ok('Fastq::Seq'); }
 
 my $class = 'Fastq::Seq';
+
+#--------------------------------------------------------------------------#
+=head1 ClassMethods
+
+=cut
+
+=head2 CheckFormat
+
+=cut
+
+subtest 'CheckFormat' => sub {
+	can_ok($class, 'CheckFormat');
+	is($Fastq::Seq::CheckFormat, 0, "variable default");
+	is(Fastq::Seq->CheckFormat(), 0, "method get");
+	is(Fastq::Seq->CheckFormat(1), 1, "method set");
+	is($Fastq::Seq::CheckFormat, 1, "method set");
+	is(Fastq::Seq->CheckFormat(0), 0, "method reset");
+	is($Fastq::Seq::CheckFormat, 0, "method set");
+};
 
 #--------------------------------------------------------------------------#
 =head2 new
@@ -188,7 +207,6 @@ subtest 'generics' => sub{
 	is($il->desc(), '', 'desc() reset');
 
 };
-
 
 subtest '$obj->desc_append' => sub{
 	$il->seq_head('@Foo/1');
