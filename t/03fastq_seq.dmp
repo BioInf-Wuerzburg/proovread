@@ -1,0 +1,24 @@
+# empty
+bless({
+	'seq_head' => '@',
+	'seq' => '',
+	'qual_head' => '+',
+	'qual' => '',
+	'phred_offset' => undef,
+}, 'Fastq::Seq' ),
+# il1
+bless({
+	'seq_head' => '@m120727_181124_42164_c100331452550000001523019509161202_s2_p0/47/117_1776',
+	'qual_head' => '+',
+	'phred_offset' => undef,
+	'qual' => '(&,)..(#&.&&&\'!\'"&"++"/.+-$,\'%&%-%.+/&/*(+/&,+.(./)+,+',
+	'seq' => 'CACCGGAAACAAAGCGGACTTTGCTTCTTTTCCATCCATTTTCATTGCGTTTTC'
+}, 'Fastq::Seq' ),
+# il2
+bless({
+	'seq_head' => '@Foo.2:0/1 bar boo',
+	'qual_head' => '+',
+	'phred_offset' => undef,
+	'qual' => 'AAAAAVYYYYYYYYYYYYYbbbbbbbbb_________bbbbYYYYYYYYYYbbb',
+	'seq' => 'CAGGCTAAAACAAACAGGGCCTAGGTTTTTGGTCATCGGGATAAAATGACGGTT'
+}, 'Fastq::Seq' )

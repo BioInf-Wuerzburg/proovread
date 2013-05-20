@@ -39,6 +39,12 @@ Class for handling FASTQ sequences.
 
 =over
 
+=item [Feature] Added test for check_format fatal exceptions to Fastq::Seq.t.
+
+=item [Feature] Added fundamental integrity checks to constructor. STRING
+ needs to be defined and split in 4 lines. ARRAY needs to contain at least
+ 4 lines.
+
 =item [Feature] C<< Fastq::Seq->CheckFormat(1) >> enables a format check 
  foreach newly created Fastq::Seq object.
 
@@ -480,13 +486,18 @@ sub new{
 	if(@_){
 		if(@_%2){ # create object from string
 			my %self;
-			@self{'seq_head','seq','qual_head','qual'} = split(/\n/, shift);
+			my $fq = shift;
+			die __PACKAGE__."::new: STRING undefined" unless defined $fq;
+			my @fq = split(/\n/, $fq);
+			die __PACKAGE__."::new: STRING does not contain 4 lines at:\nx".("-"x78)."x\n$fq" unless @fq == 4;
+			@self{'seq_head','seq','qual_head','qual'} = @fq;
 			$self = {
 				%self,
 				phred_offset => undef,
 				@_	# overwrite defaults
 			};
 		}else{ # create object from array
+			die __PACKAGE__."::new: ARRAY must contain at least 4 lines" unless @_ > 3; # require at least 4 lines
 			$self = {
 				seq_head => $_[0],
 				seq => $_[1],
@@ -529,13 +540,13 @@ Checks format of Fastq::Seq object. seq_head needs to start with "@", qual_head
 sub check_format{
 	my $self = shift;
 	# @
-	die __PACKAGE__."::check_format: seq_head does not start with '\@'\n"."$self" 
+	die __PACKAGE__."::check_format: seq_head does not start with '\@' at:\n#".("-"x78)."#\n"."$self" 
 		unless $self->{seq_head} =~ /^@/;
 	# +
-	die __PACKAGE__."::check_format: qual_head does not start with '+'\n"."$self" 
+	die __PACKAGE__."::check_format: qual_head does not start with '+' at:\n#".("-"x78)."#\n"."$self" 
 		unless $self->{qual_head} =~ /^\+/;
 	# length
-	die __PACKAGE__."::check_format: seq and qual differ in length\n"."$self" 
+	die __PACKAGE__."::check_format: seq and qual differ in length at:\n#".("-"x78)."#\n"."$self"
 		unless length($self->seq) == length($self->qual);
 	
 	# phred offset
