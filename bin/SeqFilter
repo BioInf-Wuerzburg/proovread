@@ -21,6 +21,8 @@ use Fasta::Parser 0.08;
 use Fasta::Seq 0.06;
 
 our $VERSION = '1.04';
+our ($REVISION) = '$Revision: 121 $' =~ /(\d+)/;
+our ($MODIFIED) = '$Date: 2013-05-19 22:57:34 +0200 (Sun, 19 May 2013) $' =~ /Date: (\S+\s\S+)/;
 
 =head1 NAME
 
@@ -33,6 +35,8 @@ SeqFilter - Versatile FASTA/FASTQ sequence file analysis and modification tool.
 =head2 1.04
 
 =over
+
+=item [Feature] C<--version> option. Also $VERSION is logged to stdout.
 
 =item [Feature] C<--check-format> to check individual FASTQ entries for 
  correct format.
@@ -498,6 +502,16 @@ Display this help
 
 $opt{'help|?'} = \(my $opt_help);
 
+=item [--version|-V]
+
+Display current version
+
+=cut
+
+$opt{'version|V'} = \(my $opt_version);
+
+
+
 =back
 
 =cut
@@ -510,6 +524,11 @@ if(@ARGV && !($ARGV[0] =~ /^-/)){
 }
 
 pod2usage(1) if $opt_help;
+if ($opt_version){
+	print "v$VERSION, rev$REVISION, last modified $MODIFIED\n";
+	exit(1);
+}
+
 if($opt_max_length && $opt_min_length && ($opt_min_length > $opt_max_length)){
 	pod2usage(exitval=>1, msg=>'min-length has to be smaller than max-length'); 
 }
@@ -530,6 +549,9 @@ my $V = Verbose->new(
 	line_width => 80,
 	
 );
+
+$V->verbose("$0, v$VERSION, rev$REVISION");
+
 
 ##------------------------------------------------------------------------##
 

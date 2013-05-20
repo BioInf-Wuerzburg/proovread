@@ -1517,14 +1517,12 @@ sub correct_sr_mt{
 		'--coverage'	=> $opt_cov,
 		'--append'		=> 1,
 		
-		$opt_mode eq 'external-sam' # no ref
-			? (@$opt_lr_file
-				?	('--ref' => $opt_lr_file->[0])
-				:	())
-			: ('--ref' 		=> $TC == 1
+		@$opt_lr_file
+			? ('--ref' 		=> $TC == 1
 				? task_file_name(".f[aq]", task => $TASKS[$TC-1] )
-				: task_file_name(".fq", task => $TASKS[$TC-1] )),
-		
+				: task_file_name(".fq", task => $TASKS[$TC-1] ))
+			: (),
+			
 		$TASKS[$TC] =~ m/iter-1|pre-1|pre-2|pre-3/ # calculate hcrs on first iter for second iter
 			? ('--min-lcr-length' => $min_lcr_length) # params from config
 			: ('--min-hcr-length' => 0),
