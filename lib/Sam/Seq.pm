@@ -42,6 +42,15 @@ Class for handling sam reference sequences and its aligned reads.
 
 =head1 CHANGELOG
 
+=head2 0.10
+
+=over
+
+=item [Feature] Added trace to consensus call, which is compressed to cigar
+ string and returned as attribute of the Fastq::Seq.
+
+=back
+
 =head2 0.09
 
 =over
@@ -228,16 +237,16 @@ Default 0, which deactivates the feature.
 
 our $MaxInsLength = 0;
 
-=head2 %Freqs2Phreds
+=head2 %Freqs2phreds
 
 =cut
 
-our %Freqs2Phreds;
-@Freqs2Phreds{0..31} = (map{int((($_/50)**(1/2)*50)+0.5)}(0..39));
-@Freqs2Phreds{32..100} = (40)x69;
+our %Freqs2phreds;
+@Freqs2phreds{0..31} = (map{int((($_/50)**(1/2)*50)+0.5)}(0..39));
+@Freqs2phreds{32..100} = (40)x69;
 
 
-our %Phreds2Freqs = reverse %Freqs2Phreds;
+our %Phreds2freqs = reverse %Freqs2phreds;
 
 =head1 Class METHODS
 
@@ -316,33 +325,33 @@ sub MaxInsLength{
 }
 
 
-=head2 Freqs2Phreds
+=head2 Freqs2phreds
 
 Convert a LIST of frequencies to a LIST of phreds based on precomputed values
  from 
 
 =cut
 
-sub Freqs2Phreds{
+sub Freqs2phreds{
 	my $class = shift;
 	return map{
 		$_ = 100 if $_> 100;
-		$Freqs2Phreds{int($_)};
+		$Freqs2phreds{int($_)};
 	}@_;
 }
 
 
-=head2 Phreds2Freqs
+=head2 Phreds2freqs
 
 Convert a LIST of Phreds to a LIST of frequencies based on precomputed values.
 
 =cut
 
-sub Phreds2Freqs{
+sub Phreds2freqs{
 	my $class = shift;
 	return map{
 		$_ = 40 if $_> 40;
-		$Phreds2Freqs{int($_)};
+		$Phreds2freqs{int($_)};
 	}@_;
 }
 
@@ -351,9 +360,11 @@ sub Phreds2Freqs{
 Takes a reference to an ARRAY of counts, converts the counts to probabilities
  and computes and returns the shannon entropy to describe its composition.
  Omits undef values.
-  
+
+NOTE: Not a Class Method
+
   # R
-  hx = function(x){
+  Hx = function(x){
   	p = x/sum(x); 
   	-(sum(sapply(p, function(pi){pi*log2(pi)})))
   }
@@ -369,6 +380,22 @@ sub Hx{
 	my $Hx;
 	$Hx -= $_ for map{$_ * (log($_)/log(2)) }@Px;
 	return $Hx;
+}
+
+
+=head2 Trace2cigar
+
+Compress a trace string (MMMDMMIIMMDMM) to a cigar string (3M1D2M2I2M1D2M)
+
+=cut
+
+sub Trace2cigar{
+	my ($class, $trace) = @_;
+	my $cigar = '';
+	while($trace =~ m/(\w)(\g{1}*)/g){
+		$cigar .= length($1.$2).$1;
+	}
+	return $cigar;
 }
 
 
@@ -989,7 +1016,8 @@ sub chimera{
 				}
 			}
 
-			push @hx_delta, Hx(\@col) - $hx_gt; 
+			# delta of combined entropy and greater entropy of both single ones
+			push @hx_delta, Hx(\@col) - $hx_gt;
 			
 		}
 		
@@ -1432,7 +1460,7 @@ sub _add_pre_calc_fq{
 	foreach my $coords (@_){
 		my ($seq) = $self->ref->substr_seq($coords);
 		my @seq = split (//, $seq->seq);
-		my @freqs = Sam::Seq->Phreds2Freqs($seq->phreds);
+		my @freqs = Sam::Seq->Phreds2freqs($seq->phreds);
 		
 		for(my $i=0; $i<length($seq->seq); $i++){
 			# never add 0, if nothing more matches, a 0 count might be introduced
@@ -1456,6 +1484,7 @@ sub _consensus{
 #	my $qual = '';
 #	my $covs = '';
 	my @freqs;
+	my $trace;
 	my $col_c = -1;
 	foreach my $col (@{$self->{_state_matrix}}){
 		$col_c++;
@@ -1463,6 +1492,7 @@ sub _consensus{
 		unless (scalar @$col){
 			$seq.= $self->{ref} ? substr($self->{ref}{seq}, $col_c, 1) : 'n';
 			push @freqs, 0;
+			$trace.='M';
 			next;
 		}
 		
@@ -1498,25 +1528,36 @@ sub _consensus{
 		unless ($max_freq){
 			$seq.= $self->{ref} ? substr($self->{ref}{seq}, $col_c, 1) : 'n';
 			push @freqs, 0;
+			$trace.='M';
 			next;
 		}
 		
 		# insertion on reference
-		next if $idx == 4; 
+		if ($idx == 4){
+			$trace.='I';
+			next 
+		}; 
 		
 		# get most prominent state
 		my $con = $states_rev{$idx};
 		$seq.= $con;
 		push @freqs, ($max_freq) x length($con);
+		$trace.= length($con) == 1 ? 'M' : 'M'.('D'x (length($con)-1));
 	}
 
+	# compress trace to cigar
+	
+	
+	
 	$self->{con} = Fastq::Seq->new(
 		'@'.$self->{id},
 		$seq,
 		'+',
-		Fastq::Seq->Phreds2Char( [Sam::Seq->Freqs2Phreds(@freqs)] , $self->{phred_offset} ),
+		Fastq::Seq->Phreds2Char( [Sam::Seq->Freqs2phreds(@freqs)] , $self->{phred_offset} ),
 		cov => Fastq::Seq->Phreds2Char([@freqs], $self->{phred_offset}),
-		phred_offset => $self->{phred_offset}
+		phred_offset => $self->{phred_offset},
+		trace => $trace,
+		cigar => Sam::Seq->Trace2cigar($trace),
 	);
 	
 	return $self;
@@ -1631,7 +1672,6 @@ sub _stddev{
 	# above mean
 	return sqrt($mean2);
 }
-
 
 
 

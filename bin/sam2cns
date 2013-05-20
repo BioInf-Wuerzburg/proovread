@@ -17,6 +17,8 @@ use Getopt::Long;
 use FindBin qw($RealBin);
 use lib "$RealBin/../lib/";
 
+use List::Util;
+
 use Verbose;
 use Verbose::ProgressBar;
 
@@ -342,7 +344,7 @@ my $fmh;
 open($fmh, $mode, $fm_out) || $v->exit("Can't open output read file: '$fm_out'");
 my $fch;
 open($fch, $mode, $fc_out) || $v->exit("Can't open output read file: '$fc_out'");
-
+print $fch join("\t", '#id', qw(from to score)),"\n";
 
 
 my %PB;
@@ -421,20 +423,30 @@ foreach my $pb_id(@PB_IDS){
 	
 	# chimera
 	if($opt_detect_chimera){
-		my @chimera_coords = $PB{$pb_id}->chimera();
-		if(@chimera_coords){
-			# reorder chimera coords
-			# prepend a 0, since we want to substr not the chimera regions, 
-			# but the sequence between chimera regions
-			my @coords = map{@{$_->{col_range}}}@chimera_coords;
-			unshift(@coords,0);
-			
+		my @coords = $PB{$pb_id}->chimera(); 
+		if(@coords){
 			my $i;
-			for($i=0; $i<@chimera_coords; $i++){
-				print $fch join("\t", $pb_id, $coords[$i*2],$coords[$i*2+1]), "\n";
-				print $fch "#\t",$chimera_coords[$i]->{score},"\n";
+			for($i=0; $i<@coords; $i+=2){
+				
+				my $fr = $coords[$i]{col_range}[0];
+				my $to = $coords[$i]{col_range}[1];
+				my $sc = $coords[$i]{score};
+				
+				# use cigar to compute correct location of chimera coords on corrected seq.
+				# -I, +D
+				# get read cigar, eg 80M2D3M1IM4
+				my %cigar = (M=>0, I=>0, D=>0);
+				while($con->{cigar} =~ m/(\d+)(\w)/g && $cigar{M}+$cigar{I} < $fr){
+					$cigar{$2}+=$1;
+				}
+				
+				my $pos_corr = $cigar{D}-$cigar{I}; # corrected string has additional nucs
+					# at D's and has lost nucs at I's
+				$fr+=$pos_corr;
+				$to+=$pos_corr;
+
+				printf $fch("%s\t%d\t%d\t%s\n", $pb_id, $fr, $to, $sc);
 			}
-			print $fch join("\t", $pb_id, $coords[++$i]), "\n";
 		}
 	}
 	

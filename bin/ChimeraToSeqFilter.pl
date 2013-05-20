@@ -168,51 +168,34 @@ my $V = Verbose->new(
 
 $V->verbose("Reading Input from ".( $opt_in ? $opt_in : "STDIN" ));
 
-my %read = (id => '');
+my %read = (id => '', coords =>[]);
 
 my $bpc;
 
 open(CHIM, '<', $opt_in) or $V->exit($!);
+my $header = scalar <CHIM>;
+
 
 while(<CHIM>){
 	chomp();
-	unless(/^#/){
-		my ($id, $from, $to) = split(/\t/, $_);
-		if($id ne $read{id}){# new read
-			# process old read
-				# sloppy bug fix for a bug somewhere in Sam::Seq chimera coords
-				# sometimes the "to" coord of the last bp is infact the coord
-				# of the second last bp - smaller than the last "from"
-
-			map{if($_->[1] > $_->[2]){$_->[2] = $_->[1]+50}}@{$read{bps}};
-			my @bps = grep{$_->[0] >= $opt_min_score}@{$read{bps}};
-			
-			if(@bps){
-				
-				#
-				my @coords = map{@$_[1,2]}@bps;
-				unshift(@coords, 0);
-				my $i;
-				for($i=0; $i<@coords-1; $i+=2){
-					printf ("%s\t%s\t%s\n", $read{id}, $coords[$i], $coords[$i+1]);
-				}
-				printf ("%s\t%s\n", $read{id}, $coords[$i]);
+	my ($id, $from, $to, $score) = split(/\t/, $_);
+	if($id ne $read{id}){# new read
+		if(@{$read{coords}}){
+			my @coords = @{$read{coords}};
+			unshift(@coords, 0);
+			my $i;
+			for($i=0; $i<@coords-1; $i+=2){
+				printf ("%s\t%s\t%s\n", $read{id}, $coords[$i], $coords[$i+1]);
 			}
-			
-			# create new read
-			$bpc=0;
-			%read = ();
-			$read{id}=$id;	
-			$read{bps}[$bpc]=[$to];
-			#$read{from}=[$from]; # 0, what else
-		}else{
-			push(@{$read{bps}[$bpc]}, $from);
-			$bpc++;
-			push(@{$read{bps}[$bpc]}, $to) if $to;
+			printf ("%s\t%s\n", $read{id}, $coords[$i]);
 		}
+		# create new read
+		%read = (id => $id, coords => []);
+
 	}else{
-		my ($sharp, $score) = split(/\t/, $_);
-		unshift(@{$read{bps}[$bpc]}, $score);
+		if($score >= $opt_min_score){
+			push @{$read{coords}}, $from, $to;
+		}
 	}
 
 }
