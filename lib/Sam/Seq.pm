@@ -1481,8 +1481,6 @@ sub _consensus{
 	my $self = shift;
 	my %states_rev = reverse %{$self->{_states}}; # works since values are also unique
 	my $seq = '';
-#	my $qual = '';
-#	my $covs = '';
 	my @freqs;
 	my $trace;
 	my $col_c = -1;

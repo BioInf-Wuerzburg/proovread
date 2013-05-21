@@ -434,6 +434,19 @@ foreach my $pb_id(@PB_IDS){
 	# chimera
 	if($opt_detect_chimera){
 		my @coords = $PB{$pb_id}->chimera(); 
+		
+		#-----------------------------------------------------------------#
+		#my %cigar = (M=>0, I=>0, D=>0);
+		#while($con->{cigar} =~ m/(\d+)(\w)/g){
+		#	$cigar{$2}+=$1;
+		#}
+		#my $pred_len = $cigar{M}+$cigar{D};
+		#my $corr_len = length($PB{$pb_id}{ref}->seq)+$cigar{D}-$cigar{I};
+		#printf("%s\t%s\t%s\n", length($con->seq), $pred_len, $corr_len) if $pred_len !=  $corr_len or length($con->seq) != $corr_len;
+		#
+		#-----------------------------------------------------------------#
+		
+		
 		if(@coords){
 			my $i;
 			for($i=0; $i<@coords; $i+=2){
@@ -446,7 +459,7 @@ foreach my $pb_id(@PB_IDS){
 				# -I, +D
 				# get read cigar, eg 80M2D3M1IM4
 				my %cigar = (M=>0, I=>0, D=>0);
-				while($con->{cigar} =~ m/(\d+)(\w)/g && $cigar{M}+$cigar{I} < $fr){
+				while($con->{cigar} =~ m/(\d+)(\w)/g && ($cigar{M}+$cigar{I} < $fr)){
 					$cigar{$2}+=$1;
 				}
 				
@@ -454,6 +467,8 @@ foreach my $pb_id(@PB_IDS){
 					# at D's and has lost nucs at I's
 				$fr+=$pos_corr;
 				$to+=$pos_corr;
+
+				die "FuckingFuckFuck" if $fr > length($PB{$pb_id}{ref}->seq);
 
 				printf $fch("%s\t%d\t%d\t%s\n", $pb_id, $fr, $to, $sc);
 			}
