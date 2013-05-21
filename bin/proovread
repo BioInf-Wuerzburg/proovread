@@ -1130,6 +1130,8 @@ sub read_sam{
 		mode => '+>',
 	);
 	
+	$VS->verbose("Reading sam file");
+	
 	# read sam header
 	
 	while(my %h = $rsp->next_header_line('SQ|PG')){

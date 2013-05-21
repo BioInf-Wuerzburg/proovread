@@ -449,7 +449,7 @@ foreach my $pb_id(@PB_IDS){
 		
 		if(@coords){
 			my $i;
-			for($i=0; $i<@coords; $i+=2){
+			for($i=0; $i<@coords; $i++){
 				
 				my $fr = $coords[$i]{col_range}[0];
 				my $to = $coords[$i]{col_range}[1];
