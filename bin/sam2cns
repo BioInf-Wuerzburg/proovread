@@ -449,6 +449,7 @@ foreach my $pb_id(@PB_IDS){
 		
 		if(@coords){
 			my $i;
+			my %cigar = (M=>0, I=>0, D=>0);
 			for($i=0; $i<@coords; $i++){
 				
 				my $fr = $coords[$i]{col_range}[0];
@@ -458,8 +459,9 @@ foreach my $pb_id(@PB_IDS){
 				# use cigar to compute correct location of chimera coords on corrected seq.
 				# -I, +D
 				# get read cigar, eg 80M2D3M1IM4
-				my %cigar = (M=>0, I=>0, D=>0);
-				while($con->{cigar} =~ m/(\d+)(\w)/g && ($cigar{M}+$cigar{I} < $fr)){
+				# /g remembers position even between multiple calls to while on same cigar
+				# hence we can just always add to %cigar outside the for loop
+				while($con->{cigar} =~ m/(\d+)(\w)/g && ($cigar{M}+$cigar{I} < $fr)){ 
 					$cigar{$2}+=$1;
 				}
 				
