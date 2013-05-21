@@ -468,7 +468,16 @@ foreach my $pb_id(@PB_IDS){
 				$fr+=$pos_corr;
 				$to+=$pos_corr;
 
-				die "FuckingFuckFuck" if $fr > length($PB{$pb_id}{ref}->seq);
+				if($to > length($con->seq)){
+					use Data::Dumper;
+					die Dumper({
+						cigar => \%cigar,
+						poscorr => $pos_corr,
+						conlen => length ($con->seq),
+						reflen => length ($PB{$pb_id}{ref}->seq),
+						coords => $coords[$i],
+					});
+				};
 
 				printf $fch("%s\t%d\t%d\t%s\n", $pb_id, $fr, $to, $sc);
 			}
