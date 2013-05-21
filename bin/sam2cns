@@ -24,7 +24,7 @@ use Verbose::ProgressBar;
 
 use Sam::Parser;
 use Sam::Alignment ':flags';
-use Sam::Seq;
+use Sam::Seq 0.10;
 
 use Fasta::Parser;
 use Fasta::Seq;
@@ -32,7 +32,7 @@ use Fasta::Seq;
 use Fastq::Parser;
 use Fastq::Seq 0.08;
 
-our $VERSION  = '0.04';
+our $VERSION  = '0.05';
 our ($REVISION) = '$Revision$' =~ /(\d+)/;
 our ($MODIFIED) = '$Date$' =~ /Date: (\S+\s\S+)/;
 
@@ -54,6 +54,17 @@ Compute consensus sequences based on SAM file.
 =cut
 
 =head1 CHANGELOG
+
+=head2 0.05
+
+=over
+
+=item [Feature] sam2cns uses the compressed cigar string from 
+ C<< Sam::Seq->consensus >> to exactly project the chimera breakpoints from
+ the reference coordinates onto the corrected sequence. These coordinates
+ are reported to the chimera coords tsv.
+
+=back
 
 =head2 0.04
 
@@ -472,7 +483,7 @@ foreach my $pb_id(@PB_IDS){
 
 				if($to > length($con->seq)){
 					use Data::Dumper;
-					die Dumper({
+					die "Chimera Breakpoint outside of sequence", Dumper({
 						cigar => \%cigar,
 						poscorr => $pos_corr,
 						conlen => length ($con->seq),

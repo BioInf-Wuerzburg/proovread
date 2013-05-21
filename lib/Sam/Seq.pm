@@ -19,7 +19,7 @@ use Fastq::Seq;
 use Fasta::Seq;
 
 
-our $VERSION = '0.09';
+our $VERSION = '0.10';
 our ($REVISION) = '$Revision$' =~ /(\d+)/;
 our ($MODIFIED) = '$Date$' =~ /Date: (\S+\s\S+)/;
 
@@ -47,7 +47,7 @@ Class for handling sam reference sequences and its aligned reads.
 =over
 
 =item [Feature] Added trace to consensus call, which is compressed to cigar
- string and returned as attribute of the Fastq::Seq.
+ string and returned as attributes "trace" and "cigar" of the Fastq::Seq.
 
 =back
 

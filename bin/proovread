@@ -25,15 +25,15 @@ use File::Copy;
 use Verbose;
 use Verbose::ProgressBar;
 
-use Fastq::Parser 0.08;
-use Fastq::Seq 0.10;
+use Fastq::Parser 0.09;
+use Fastq::Seq 0.11;
 
 use Fasta::Parser 0.08;
 use Fasta::Seq 0.06;
 
 use Sam::Parser 0.11;
 use Sam::Alignment 0.07;
-use Sam::Seq 0.09;
+use Sam::Seq 0.10;
 
 use Shrimp 0.06;
 
@@ -67,6 +67,8 @@ Correct single molecule sequencing reads by iterative mapping of high
 =head2 0.91
 
 =over
+
+=item [BugFix] --substr chimera out of seq boundaries due to error in sam2cns.
 
 =item [Change] The primary format of prepared reads is now only FASTA if 
  FASTA was provided, but FASTQ if FASTQ is provided to allow for HCR 
