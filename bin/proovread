@@ -386,7 +386,7 @@ my $cfg;
 for(my $i=0; $i<@ARGV; $i++){
 	if($ARGV[$i] =~ /--create-cfg$/){
 		my $cfg_custom_file = $i < $#ARGV ? $ARGV[$i+1] : basename($cfg_core_file);
-		$VS->verbose("Creating custom config file: $cfg_custom_file");
+		$VS->verbose("Creating custom config file `$cfg_custom_file`");
 		copy_custom_cfg($cfg_core_file, $cfg_custom_file);
 		exit(0);
 	}
@@ -398,9 +398,9 @@ for(my $i=0; $i<@ARGV; $i++){
 
 if($cfg){
 	unless(-e $cfg){
-		$VS->exit("Cannot find config file: $cfg");
+		$VS->exit("Cannot find config file `$cfg`");
 	}
-	$VS->verbose("Reading custom config: $cfg");
+	$VS->verbose("Reading custom config `$cfg`");
 	%cfg = (%cfg, do "$cfg"); 
 	$V->exit("An error ocuured while processing the config file: $@") if $@; # capture do errors on cfg
 }
@@ -566,7 +566,7 @@ $opt{'h|help'} = \(my $opt_help);
 GetOptions(%opt) or pod2usage(1);
 $opt_help && pod2usage(1);
 $opt_sam_file || (@$opt_lr_file && @$opt_sr_file) || pod2usage("Either --long-reads and --short-reads or --sam required");
-$opt_sam_file && ! -f $opt_sam_file && pod2usage("Cannot find $opt_sam_file");
+$opt_sam_file && ! -f $opt_sam_file && pod2usage("Cannot find sam file `$opt_sam_file`");
 
 
 ##------------------------------------------------------------------------##
@@ -616,9 +616,9 @@ make_path($opt_prefix);
 
 
 my $opt_param_log = task_file_name(task => '', suffix => "_parameter.log");
-open(PARAM, '>', $opt_param_log) or $V->exit("$!: $opt_param_log");
+open(PARAM, '>', $opt_param_log) or $V->exit("$!: `$opt_param_log`");
 
-$VS->verbose("Logging parameter to $opt_param_log");
+$VS->verbose("Logging parameter to `$opt_param_log`");
 
 my $cfg_string = Dumper(\%cfg);
 $cfg_string =~ s/^.*\n//;
@@ -651,7 +651,7 @@ if(@$opt_sr_file){
 	
 	# short read files
 	foreach(@$opt_sr_file){
-		-e $_ || $VS->exit("Cannot find short read file: $_");
+		-e $_ || $VS->exit("Cannot find short read file `$_`");
 	
 		$V->verbose("\n".basename($_));
 		
@@ -836,7 +836,7 @@ foreach my $task(@TASKS){
 		
 		# long read files
 		foreach(@$opt_lr_file){
-			-e $_ || $VS->exit("Cannot find long read file: $_");
+			-e $_ || $VS->exit("Cannot find long read file `$_`");
 		}
 		
 		$lr_chunk_offsets = read_long() if @$opt_lr_file; # 'external-sam does not require LR
@@ -1130,7 +1130,7 @@ sub read_sam{
 		mode => '+>',
 	);
 	
-	$VS->verbose("Reading sam file");
+	$VS->verbose("Reading sam file `$opt_sam_file`");
 	
 	# read sam header
 	
@@ -1246,7 +1246,7 @@ sub run_shrimp{
 			$pg_step = int(($sr_count[$sr_file_c]/10000)+0.5) || 1; # never be zero
 		}
 		
-		$VS->verbose("Mapping short reads $sr_file");
+		$VS->verbose("Mapping short reads `$sr_file`");
 
 		# init shrimp handler
 		my $shrimp = Shrimp->new( 
@@ -1383,7 +1383,7 @@ sub create_sorted_sam{
 	my $opt_sam_out = task_file_name(".sam");
 	
 	$V->nline;
-	$VS->verbose("Creating filtered sam ".$opt_sam_out);
+	$VS->verbose("Creating filtered sam `$opt_sam_out`");
 	
 	open(OUT, '>',$opt_sam_out) or $VB->exit($!);
 	
@@ -1447,7 +1447,7 @@ sub read_long{
 		my $lrpr;
 		$lrpr = Fasta::Parser->new(file => $_)->check_format();
 		$lrpr = Fastq::Parser->new(file => $_)->check_format() unless $lrpr;
-		$lrpr || $VS->exit("Unknown format in '--long-read' file: ".$_);
+		$lrpr || $VS->exit("Unknown format in '--long-read' file `$_`");
 		
 		my $lr_count = $lrpr->guess_seq_count();
 		push @lr_count, $lr_count;
@@ -1692,7 +1692,9 @@ sub task_file_name{
 		@_
 	};
 	
-	return sprintf('%1$s/%2$s/%3$s%4$s', $p->{root}, $p->{task}, $p->{prefix}, $p->{suffix});
+	my $tfn = sprintf('%1$s/%2$s/%3$s%4$s', $p->{root}, $p->{task}, $p->{prefix}, $p->{suffix});
+	$tfn =~ tr{/}{}s;
+	return $tfn;
 }
 
 
@@ -1703,7 +1705,7 @@ sub task_file_name{
 sub copy_custom_cfg{
 	my ($cfg_core_file, $cfg_custom_file) = @_;	
 	open(COR, $cfg_core_file) or $VS->exit($!);
-	open(CUS,'>',$cfg_custom_file) or $VS->exit("Couldn't create config file: $cfg_custom_file");
+	open(CUS,'>',$cfg_custom_file) or $VS->exit("Couldn't create config file `$cfg_custom_file`");
 	
 	while(<COR>){
 		if(/^#/){

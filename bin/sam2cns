@@ -474,6 +474,7 @@ foreach my $pb_id(@PB_IDS){
 						cigar => \%cigar,
 						poscorr => $pos_corr,
 						conlen => length ($con->seq),
+						concigar => $con->{cigar},
 						reflen => length ($PB{$pb_id}{ref}->seq),
 						coords => $coords[$i],
 					});
