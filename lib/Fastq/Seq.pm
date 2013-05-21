@@ -844,7 +844,6 @@ sub base_content{
 sub qual_window{
 	my ($self, $sorted_by_occurance) = (@_);
 	
-	use Data::Dumper;
 	# sliding window
 	# each window starts/ends above $min, values below $min are allowed as long
 	# as the mean of the window values is higher than $min.

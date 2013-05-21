@@ -321,7 +321,13 @@ if($opt_ref_pat){
 	# init fastq/fasta parser
 	$rpr = Fastq::Parser->new(file => $opt_ref_file)->check_format;
 	if($rpr){
-		$rpr->guess_phred_offset();
+		my $po = $rpr->guess_phred_offset();
+		$v->exit("Detected [$po] and specified [$opt_qv_offset] phred offsets differ!") if defined ($opt_qv_offset) && defined ($po) && $po != $opt_qv_offset;
+		$po = $po || $opt_qv_offset;
+		$v->exit("Cannot guess phred offset from provided reference file, please specify --qv-offset")
+			unless $po;
+		$rpr->phred_offset($po);
+		
 	}else{
 		$rpr = Fasta::Parser->new(file => $opt_ref_file)->check_format;
 		unless ($opt_ignore_hcr){

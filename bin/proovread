@@ -68,6 +68,10 @@ Correct single molecule sequencing reads by iterative mapping of high
 
 =over
 
+=item [Change] The primary format of prepared reads is now only FASTA if 
+ FASTA was provided, but FASTQ if FASTQ is provided to allow for HCR 
+ restoration.
+
 =item [Change] Rearranged order of preparations to allow folder creation
  prior to parameter log.
 
@@ -480,7 +484,16 @@ External SAM file to compute corrected consensus sequences from.
  
 =cut
 
-$opt{'sam=s'} = \(my $opt_sam = $cfg{'sam'});
+$opt{'sam=s'} = \(my $opt_sam_file = $cfg{'sam'});
+
+=item [--lr-qv-offset=<INT>]
+
+Required if you use --sam and --long together and the phred offset cannot be
+ determined automatically from --long read file.
+ 
+=cut
+
+$opt{'lr-qv-offset=i'} = \(my $opt_lr_qv_offset = $cfg{'lr-qv-offset'});
 
 =item [--ram-sam] [OFF]
 
@@ -548,29 +561,6 @@ $opt{'h|help'} = \(my $opt_help);
 
 ##------------------------------------------------------------------------##
 
-=head1 DEVEL OPTIONS
-
-=cut
-
-=over
-
-=cut
-
-=item [--sam=<SAM>]
-
-Use an already created SAM file to create corrected sequences instead of 
- mapping reads to the raw pacbio reads.
- 
-=cut
-
-$opt{'sam=s'} = \(my $opt_sam_file = $cfg{'sam'});
-
-=back
-
-=cut
-
-##------------------------------------------------------------------------##
-
 
 # parse options, test files
 GetOptions(%opt) or pod2usage(1);
@@ -580,6 +570,10 @@ $opt_sam_file && ! -f $opt_sam_file && pod2usage("Cannot find $opt_sam_file");
 
 
 ##------------------------------------------------------------------------##
+
+=head1 PRE
+
+=cut
 
 =head2 create folder structure
 
@@ -1444,10 +1438,7 @@ sub read_long{
 	# read fasta/fastq, write and sort by id
 	my %lr;
 
-	my $lrpw = Fasta::Parser->new( 
-		file => task_file_name(".fa", task => $TASKS[$TC] ), 
-		mode => '+>'
-	);
+	my $lrpw;
 
 	foreach(@$opt_lr_file){
 		
@@ -1455,7 +1446,7 @@ sub read_long{
 		$lrpr = Fasta::Parser->new(file => $_)->check_format();
 		$lrpr = Fastq::Parser->new(file => $_)->check_format() unless $lrpr;
 		$lrpr || $VS->exit("Unknown format in '--long-read' file: ".$_);
-	
+		
 		my $lr_count = $lrpr->guess_seq_count();
 		push @lr_count, $lr_count;
 		my ($lr_length, $lr_dev) =  $lrpr->guess_seq_length;
@@ -1463,7 +1454,12 @@ sub read_long{
 		push @lr_bps, ($lr_length * $lr_count);
 		
 	
-		if(ref $lrpr eq 'Fasta::Parser'){
+		if(ref $lrpr eq 'Fasta::Parser'){ # FASTA ref
+			$lrpw = Fasta::Parser->new( 
+				file => task_file_name(".fa", task => $TASKS[$TC] ), 
+				mode => '+>'
+			);
+			
 			while(my $lr = $lrpr->next_seq){
 				if(exists $lr{$lr->id}){
 					$VS->exit('Non-unique long read id ('. $lr->id .') in '. $_);
@@ -1472,18 +1468,48 @@ sub read_long{
 				$lr->seq(lc($lr->seq())); 
 				$lr{$lr->id} = $lr;
 			}
-		}else{
-			while(my $lr = $lrpr->next_seq){
-				if(exists $lr{$lr->id}){
-					$VS->exit('Non-unique long read id ('. $lr->id .') in '. $_);
-				}
-				# convert FASTQ to FASTA
-				$lr{$lr->id} = Fasta::Seq->new(
-					id => $lr->id,
-					desc => $lr->desc,
+		}else{ # FASTQ ref
+			if($opt_mode eq 'external-sam'){
+				my $po = $lrpr->guess_phred_offset || $opt_lr_qv_offset;
+				$V->exit("Cannot guess phred offset from provided reference file, please specify --lr-qv-offset")
+					unless $po;
+				$V->exit("Only offset 33 and 64 are supported")
+					unless $po;
+					
+				$lrpw = Fastq::Parser->new( 
+					file => task_file_name(".fq", task => $TASKS[$TC] ), 
+					mode => '+>',
+				);
+
+				$lrpr->phred_offset($po);
+				
+				while(my $lr = $lrpr->next_seq){
+					if(exists $lr{$lr->id}){
+						$VS->exit('Non-unique long read id ('. $lr->id .') in '. $_);
+					}
 					# convert seq to lower case, allow HCRs in external-sam
-					seq => $opt_mode ne 'external-sam' ? lc($lr->seq) : $lr->seq,
-				)
+					$lr->phred_transform if $po == 64;
+					$lr{$lr->id} = $lr;
+				}
+				
+
+			}else{
+				$lrpw = Fasta::Parser->new( 
+					file => task_file_name(".fa", task => $TASKS[$TC] ), 
+					mode => '+>'
+				);
+				while(my $lr = $lrpr->next_seq){
+					if(exists $lr{$lr->id}){
+						$VS->exit('Non-unique long read id ('. $lr->id .') in '. $_);
+					}
+					# convert FASTQ to FASTA
+					$lr{$lr->id} = Fasta::Seq->new(
+						id => $lr->id,
+						desc => $lr->desc,
+						# convert seq to lower case, allow HCRs in external-sam
+						seq => $opt_mode ne 'external-sam' ? lc($lr->seq) : $lr->seq,
+					)
+				}
 			}
 		}
 	}
@@ -1558,6 +1584,7 @@ sub correct_sr_mt{
 			'--prefix'		=> task_file_name(".".$ci),
 			'--sam-offset' => $sam_chunk_offsets->[$ci], 
 			'--ref-offset' => $lr_chunk_offsets->[$ci],
+			'--qv-offset' => 33,
 		);
 		
 		# params

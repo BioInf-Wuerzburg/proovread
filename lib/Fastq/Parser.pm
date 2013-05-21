@@ -50,6 +50,11 @@ TODO
 
 =over
 
+=item [BugFix] Descision for ::Gunzip was based on -T evaluation of file. 
+ This prevented a file opening in case of writeing, since to file exists at
+ all. Now -B is tested and if true ::Gunzip is used, else file is opened 
+ with provided mode.
+
 =item [Change] C<< $fp->next_seq(find_record => 1) >> replaces C<< $fp->next_seq(1) >>.
  Adjusted C<< $fp->sample_seq() >>.
 
@@ -220,10 +225,10 @@ sub new{
 	my $fh;
 	# open file in read/write mode
 	if($self->{file}){
-		if(-T $self->{file}){
-			open ($fh, $self->{mode}, $self->{file}) or die sprintf("%s: %s, %s",(caller 0)[3],$self->{file}, $!);
-		}else{ # assume gzip input
+		if(-B $self->{file}){
 			$fh = IO::Uncompress::Gunzip->new($self->{file});
+		}else{ # assume gzip input
+			open ($fh, $self->{mode}, $self->{file}) or die sprintf("%s: %s, %s",(caller 0)[3],$self->{file}, $!);
 		}
 	}
 
