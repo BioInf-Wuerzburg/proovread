@@ -845,7 +845,7 @@ foreach my $task(@TASKS){
 			-e $_ || $VS->exit("Cannot find long read file: $_");
 		}
 		
-		$lr_chunk_offsets = prepare_lr() if @$opt_lr_file; # 'external-sam does not require LR
+		$lr_chunk_offsets = read_long() if @$opt_lr_file; # 'external-sam does not require LR
 		
 		# decide how to finish (realign mapped only or everything)
 		if(! defined ($opt_finish_aligned_only) && $opt_mode eq 'pacbio-iterative'){
@@ -1430,14 +1430,14 @@ sub create_sorted_sam{
 
 
 
-=head2 prepare_lr
+=head2 read_long
 
 Read the pacbio long read file and create a new, indexed long read file,
  ordered the same way as the sorted sam files.
 
 =cut
 
-sub prepare_lr{
+sub read_long{
 
 	$VS->verbose("Preparing long reads");
 
@@ -1468,7 +1468,8 @@ sub prepare_lr{
 				if(exists $lr{$lr->id}){
 					$VS->exit('Non-unique long read id ('. $lr->id .') in '. $_);
 				}
-				$lr->seq(lc($lr->seq())); # convert seq to lower case
+				# convert seq to lower case, allow HCRs in external-sam
+				$lr->seq(lc($lr->seq())); 
 				$lr{$lr->id} = $lr;
 			}
 		}else{
@@ -1480,7 +1481,8 @@ sub prepare_lr{
 				$lr{$lr->id} = Fasta::Seq->new(
 					id => $lr->id,
 					desc => $lr->desc,
-					seq => lc($lr->seq), # convert seq to lower case
+					# convert seq to lower case, allow HCRs in external-sam
+					seq => $opt_mode ne 'external-sam' ? lc($lr->seq) : $lr->seq,
 				)
 			}
 		}
@@ -1536,7 +1538,7 @@ sub correct_sr_mt{
 			: (),
 
 		($TASKS[$TC] eq 'read-sam') # calculate hcrs on first iter for second iter
-			? (@$opt_lr_file ? ('--ignore-hcr' => 1)	: (),
+			? (@$opt_lr_file ? ()	: ('--ignore-hcr' => 1),
 				'--max-ins-length' => 0,
 				$cfg{'detect-chimera'} ? ('--detect-chimera' => 1) : ()
 			  ) # params from config

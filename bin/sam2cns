@@ -324,6 +324,10 @@ if($opt_ref_pat){
 		$rpr->guess_phred_offset();
 	}else{
 		$rpr = Fasta::Parser->new(file => $opt_ref_file)->check_format;
+		unless ($opt_ignore_hcr){
+			$opt_ignore_hcr++;
+			$v->verbose('Cannot restore HCR information from FASTA, --ignore-hcr set to TRUE');
+		}
 	}
 	$v->exit("Unknown format of reference file: $opt_ref_file") unless $rpr;
 }
