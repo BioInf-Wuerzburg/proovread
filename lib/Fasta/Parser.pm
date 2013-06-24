@@ -1,6 +1,6 @@
 package Fasta::Parser;
 
-# $Id$
+# $Id: Parser.pm 119 2013-05-09 15:40:39Z s187512 $
 
 use warnings;
 use strict;
@@ -15,8 +15,8 @@ use Fasta::Seq 0.06;
 
 
 our $VERSION = '0.08';
-our ($REVISION) = '$Revision$' =~ /(\d+)/;
-our ($MODIFIED) = '$Date$' =~ /Date: (\S+\s\S+)/;
+
+
 
 
 

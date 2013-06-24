@@ -1,6 +1,6 @@
 package Fastq::Parser;
 
-# $Id$
+# $Id: Parser.pm 128 2013-05-21 10:07:49Z s187512 $
 
 use warnings;
 use strict;
@@ -16,8 +16,8 @@ use Fastq::Seq 0.10;
 
 
 our $VERSION = '0.09';
-our ($REVISION) = '$Revision$' =~ /(\d+)/;
-our ($MODIFIED) = '$Date$' =~ /Date: (.+)/;
+
+
 
 
 

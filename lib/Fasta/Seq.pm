@@ -3,7 +3,7 @@ package Fasta::Seq;
 use warnings;
 use strict;
 
-# $Id$
+# $Id: Seq.pm 113 2013-04-26 16:23:35Z s187512 $
 
 # preference libs in same folder over @INC
 use lib '../';
@@ -16,8 +16,8 @@ use overload
 
 
 our $VERSION = '0.06';
-our ($REVISION) = '$Revision$' =~ /(\d+)/;
-our ($MODIFIED) = '$Date$' =~ /Date: (\S+\s\S+)/;
+
+
 
 ##------------------------------------------------------------------------##
 

@@ -3,7 +3,7 @@ package Sam::Seq;
 use warnings;
 use strict;
 
-# $Id$
+# $Id: Seq.pm 134 2013-05-21 14:24:48Z s187512 $
 
 use List::Util;
 
@@ -20,8 +20,8 @@ use Fasta::Seq;
 
 
 our $VERSION = '0.10';
-our ($REVISION) = '$Revision$' =~ /(\d+)/;
-our ($MODIFIED) = '$Date$' =~ /Date: (\S+\s\S+)/;
+
+
 
 
 =head1 NAME 
@@ -763,9 +763,19 @@ sub add_aln_by_score{
 	my ($self, $aln) = @_;
 	
 	my $bin = $self->bin($aln);
+	return 0 if $aln->cigar() =~ /S/; # omit alignments outside bins
 	my $bases = length($aln->seq);
 	my $nscore = $aln->opt('AS') / $bases;
-	
+#	use Data::Dumper;
+#	print Dumper({
+#		$aln->opt('AS'),
+#		aln => $aln->cigar,
+#		length => $self->len,
+#		bin => $bin,
+#		bin_max_bases => $self->{bin_max_bases},
+#		bin_bases => scalar @{$self->{_bin_bases}},
+#		qname => $aln->qname
+#	});
 	# if bin_bases are full, check if new nscore is good enough
 	if( $self->{_bin_bases}[$bin] > $self->{bin_max_bases} ){
 		# ignore scores, that are too low
@@ -1484,6 +1494,7 @@ sub _consensus{
 	my @freqs;
 	my $trace;
 	my $col_c = -1;
+	
 	foreach my $col (@{$self->{_state_matrix}}){
 		$col_c++;
 		# uncovered col
@@ -1538,6 +1549,8 @@ sub _consensus{
 		
 		# get most prominent state
 		my $con = $states_rev{$idx};
+		use Data::Dumper;
+		printf "%s %s\n", $con, $idx if $con =~ /-/;
 		$seq.= $con;
 		push @freqs, ($max_freq) x length($con);
 		$trace.= length($con) == 1 ? 'M' : 'M'.('D'x (length($con)-1));

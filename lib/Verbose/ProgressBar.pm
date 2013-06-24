@@ -3,7 +3,7 @@ package Verbose::ProgressBar;
 use warnings;
 use strict;
 
-# $Id$
+# $Id: ProgressBar.pm 121 2013-05-19 20:57:34Z s187512 $
 
 # preference libs in same folder over @INC
 use lib '../';
@@ -14,8 +14,8 @@ use IO::File;
 use IO::Uncompress::Gunzip;
 
 our $VERSION = '0.08';
-our ($REVISION) = '$Revision$' =~ /(\d+)/;
-our ($MODIFIED) = '$Date$' =~ /Date: (\S+\s\S+)/;
+
+
 
 $|++;
 

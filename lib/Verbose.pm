@@ -3,13 +3,13 @@ package Verbose;
 use warnings;
 use strict;
 
-# $Id$
+# $Id: Verbose.pm 14 2013-01-18 16:14:48Z s187512 $
 
 # preference libs in same folder over @INC
 use lib './';
 
-our ($REVISION) = '$Revision$' =~ /(\d+)/;
-our ($MODIFIED) = '$Date$' =~ /Date: (\S+\s\S+)/;
+
+
 our $VERSION = '0.07';
 
 

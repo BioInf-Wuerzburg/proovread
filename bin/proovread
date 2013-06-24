@@ -1,13 +1,5 @@
 #!/usr/bin/env perl
 
-##------------------------------------------------------------------------##
-# LICENCE
-#
-#
-# $Id$
-#
-##------------------------------------------------------------------------##
-
 use warnings;
 use strict;
 
@@ -32,10 +24,11 @@ use Fasta::Parser 0.08;
 use Fasta::Seq 0.06;
 
 use Sam::Parser 0.11;
-use Sam::Alignment 0.07;
+use Sam::Alignment 0.07 ':flags';
 use Sam::Seq 0.10;
 
 use Shrimp 0.06;
+use Bowtie2 0.01;
 
 use threads;
 use Thread::Queue;
@@ -44,9 +37,9 @@ use Time::HiRes qw(usleep);
 use Data::Dumper;
 $Data::Dumper::Sortkeys = 1;
 
-our $VERSION = '0.91';
-our ($REVISION) = '$Revision$' =~ /(\d+)/;
-our ($MODIFIED) = '$Date$' =~ /Date: (\S+\s\S+)/;
+our $VERSION = '1.00';
+
+
 
 
 =head1 NAME
@@ -63,6 +56,20 @@ Correct single molecule sequencing reads by iterative mapping of high
 =cut
 
 =head1 CHANGELOG
+
+=head2 1.00
+
+=over
+
+=item [Feature] Bowtie2.
+
+=item [Feature] C<< --sr-qv-offset >> as command line option.
+
+=item [Feature] C<< --sample >> runs the F.antasticus sample set.
+
+=back
+
+=cut
 
 =head2 0.91
 
@@ -350,7 +357,7 @@ my $VB = Verbose->new(
 	format => "{MESSAGE}\n",
 );
 
-$VB->verbose("$0-$VERSION, rev$REVISION, $MODIFIED");
+
 
 
 =head1 OPTIONS
@@ -497,6 +504,14 @@ Required if you use --sam and --long together and the phred offset cannot be
 
 $opt{'lr-qv-offset=i'} = \(my $opt_lr_qv_offset = $cfg{'lr-qv-offset'});
 
+=item [--sr-qv-offset=<INT>]
+
+Required if phred offset cannot be determined automatically from --short read file.
+ 
+=cut
+
+$opt{'sr-qv-offset=i'} = \(my $opt_sr_qv_offset = $cfg{'sr-qv-offset'});
+
 =item [--ram-sam] [OFF]
 
 By default, while mapping, a temporary SAM file is created and an index to
@@ -547,6 +562,13 @@ Overwrite output folder if it already exists.
 
 $opt{'overwrite'} = \(my $opt_overwrite = $cfg{'overwrite'});
 
+=item [--sample]
+
+Run the sample data set.
+
+=cut
+
+$opt{'sample!'} = \(my $opt_sample);
 
 =item [-h, --help]
 
@@ -567,6 +589,13 @@ $opt{'h|help'} = \(my $opt_help);
 # parse options, test files
 GetOptions(%opt) or pod2usage(1);
 $opt_help && pod2usage(1);
+
+if($opt_sample){
+	$opt_lr_file = ["$RealBin/../sample/F.antasticus_long_error.fq"];
+	$opt_sr_file = ["$RealBin/../sample/F.antasticus_short.fq"];
+	$opt_sr_qv_offset = 33;
+} 
+
 $opt_sam_file || (@$opt_lr_file && @$opt_sr_file) || pod2usage("Either --long-reads and --short-reads or --sam required");
 $opt_sam_file && ! -f $opt_sam_file && pod2usage("Cannot find sam file `$opt_sam_file`");
 
@@ -682,7 +711,7 @@ if(@$opt_sr_file){
 			}
 			
 			# offset
-			unless (defined $cfg{'sr-qv-offset'}){ # manual overwrite from config
+			unless (defined $opt_sr_qv_offset){ # manual overwrite from config
 				$sr_qv_offset = $fp->guess_phred_offset; 
 				$V->exit(
 					"Estimating short read quality offset failed.\n"
@@ -742,7 +771,7 @@ if(@$opt_sr_file){
 		$sr_count_total+= $sr_count;
 	}
 	
-	$sr_qv_offset_total = $cfg{'sr-qv-offset'} unless defined $sr_qv_offset_total;
+	$sr_qv_offset_total = $opt_sr_qv_offset unless defined $sr_qv_offset_total;
 	
 	if(@$opt_sr_file){
 		$mean_sr_length += $_ for @sr_length;
@@ -1033,6 +1062,44 @@ foreach my $task(@TASKS){
 		
 		$LR = undef;
 		
+	}elsif($task eq 'bowtie2'){
+				# configure Sam::Seq
+		Sam::Seq->MaxCoverage($opt_cov);
+		Sam::Seq->BinSize($cfg{'bin-size'});
+
+		my $sr_finish_files;
+
+		if($opt_finish_aligned_only){
+			my @sr_files;
+			# collect all dumped short read files from previous iterations
+			foreach my $task (@TASKS[1..$TC-1]){
+				push @sr_files, map{
+					task_file_name(task => $task, suffix=> "_sr".$_.".fq")
+				}(0..$#sr_count);
+			}
+			$sr_finish_files = \@sr_files;
+		}else{
+			$sr_finish_files = $opt_sr_file;
+		}
+	
+		
+		run_bowtie2(
+			sr_files => $sr_finish_files,
+			bowtie2 => {
+				%{$cfg{$task}}, # basic task params from cfg
+				'ref' => task_file_name('.fa', task => $TASKS[$TC-1] ),
+				'--threads' => $opt_threads,
+				$sr_qv_offset_total == 64 
+					? ('--phred64' => '') 
+					: (),
+			}
+		);
+		
+		$sam_chunk_offsets = create_sorted_sam();
+
+		$lr_chunk_offsets = correct_sr_mt($sam_chunk_offsets, $lr_chunk_offsets);
+		
+		$LR = undef;
 	}else{
 		$VB->exit("unknown task: ".$task);
 	}
@@ -1377,6 +1444,141 @@ sub run_shrimp{
 }
 
 
+
+=head2 run_bowtie2
+
+=cut
+
+sub run_bowtie2{
+		my $p = {
+		sr_files => [],
+		bowtie2 => {},
+		tmp_sam => task_file_name("_tmp.sam"),
+		ram_sam => $opt_ram_sam,
+		stop_after => 0,
+		@_
+	};
+	
+	$V->nline;
+	$VS->verbose("Running task ".$TASKS[$TC]);
+	
+	# Index genome file first and save projection for multiple short read
+	#  files
+	$VS->verbose("Indexing Long reads");
+	
+	# init bowtie2 handler
+	my $bowtie2 = Bowtie2->new( 
+		%{$p->{bowtie2}},
+		'log' => task_file_name(suffix => "_bowtie2_idx.log"),
+		'pre' => task_file_name("_bowtie2_idx"),
+	);
+
+	$bowtie2->bowtie2_build();
+
+	$VB->hline();
+	$VB->verbose($bowtie2->status());
+	my $stdout = $bowtie2->stdout();
+	$VB->verbose(join("", <$stdout>));
+	my $stderr = $bowtie2->stderr();
+	$VB->verbose(join("", <$stderr>));
+	$VB->hline();
+
+	$bowtie2->finish();
+
+	
+	# run bowtie2
+
+	# init temporary sam writer
+	my $tsp = $p->{ram_sam} ? undef : Sam::Parser->new(
+		file => $p->{tmp_sam},
+		mode => '+>',
+	);
+
+
+	my $sr_file_c = 0;
+	my $pg_rsp;
+	my $pg_step;
+	
+	### foreach sr file read mappings	
+	foreach my $sr_file (@{$p->{sr_files}}){
+
+		$pg_rsp = Verbose::ProgressBar->new(size => $sr_count[$sr_file_c]);
+		$pg_step = int(($sr_count[$sr_file_c]/10000)+0.5) || 1; # never be zero
+		
+		$VS->verbose("Mapping short reads `$sr_file`");
+
+		# init shrimp handler
+		$bowtie2->bowtie2( 
+			%{$p->{bowtie2}},
+			'ref' => undef,
+			'-x' => task_file_name("_bowtie2_idx"),
+			'-U' => $sr_file,
+		);
+
+		$VB->verbose($bowtie2->status); 
+
+		# init input stream parser
+		my $rsp = Sam::Parser->new(
+			fh => $bowtie2->stdout,
+		#	is => sub{! $_[0]->is(UNMAPPED)}
+		);
+		
+		# read the header and create $LR only on first short read file
+		if($sr_file_c == 0){
+			# read SAM header
+			while(my %h = $rsp->next_header_line('SQ|PG')){
+				# @PG
+				if($h{tag} eq '@PG'){
+					$PG_line = $h{raw};
+					next;
+				}
+				$LR->{$h{'SN'}} = Sam::Seq->new(
+					id => $h{SN}, 
+					len => $h{LN},
+					sam => $tsp,	# indexed sam file, containing aln data
+				);
+			}
+		}
+		
+		# read SAM alignment section
+		my $rsp_c = 0;
+		my $add_c = 0;
+		my $src_lib_sum = 0;
+		my $src = 0;
+		# shrimp log
+		my $slh = $bowtie2->stderr;
+		
+		while(my $aln = $rsp->next_aln()){
+			next if $aln->rname() eq '*';
+			# try to add aln, if sufficient score, add to temporary sam file
+			if($LR->{$aln->rname}->add_aln_by_score($aln)){
+				$add_c++; 
+				$tsp->append_aln($aln);
+			};
+			$rsp_c++;
+		}
+
+
+#		# get final short read count of this file
+#		if($TASKS[$TC] eq 'shrimp-finish' && $opt_finish_aligned_only){
+#			$pg_rsp->finish($sr_matched[$sr_file_c]);
+#		}else{
+#			$pg_rsp->finish($sr_count[$sr_file_c]);
+#		}
+
+
+		$VB->hline();
+		my $stderr = $bowtie2->stderr();
+		$VB->verbose(join("", <$stderr>));
+		$VB->hline();
+
+		# finish shrimp run
+		$bowtie2->finish;
+		$sr_file_c++;
+	}
+}
+
+
 =head2 create_sorted_sam
 
 =cut
@@ -1661,7 +1863,7 @@ sub correct_sr_mt{
 	qx(cat $fq_glob_sorted > $fq_file);
 	qx(cat $fa_glob_sorted > $fa_file);
 	qx(cat $fm_glob_sorted > $fm_file);
-	qx(cat $fc_glob_sorted > $fc_file);
+	qx(echo -e "#id\tfrom\tto\tscore" > $fc_file; cat $fc_glob_sorted >> $fc_file);
 	
 	unlink @fq_glob unless $opt_keep > 1;
 	unlink @fa_glob unless $opt_keep > 1;
@@ -1755,27 +1957,6 @@ Run SeqFilter on raw output
 
 =cut
 
-#sub seq_filter{
-#	my %params = (%{$cfg{'seq-filter'}}, @_);
-#	my $params = param_join(\%params);
-#
-#	my $cmd_fq_fil = "$RealBin/SeqFilter $params --in $opt_fq_raw --out $opt_fq_fil";
-#	
-#	$V->nline;
-#	$VS->verbose("Quality trimming raw output");
-#	$VB->hline;
-#	$VB->verbose($cmd_fq_fil);
-#	qx($cmd_fq_fil);
-#	$VB->hline;
-#	
-#	$VS->verbose("Converting to FASTA file");
-#	my $cmd_fa_fil = "$RealBin/SeqFilter --in $opt_fq_fil --fasta --out $opt_fa_fil";
-#	$VB->hline;
-#	$VB->verbose($cmd_fa_fil);
-#	qx($cmd_fa_fil);
-#	$VB->hline;
-#	
-#}
 
 sub seq_filter{
 	my %params = @_;

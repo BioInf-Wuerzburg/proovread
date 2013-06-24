@@ -21,8 +21,8 @@ use Fasta::Parser 0.08;
 use Fasta::Seq 0.06;
 
 our $VERSION = '1.04';
-our ($REVISION) = '$Revision: 121 $' =~ /(\d+)/;
-our ($MODIFIED) = '$Date: 2013-05-19 22:57:34 +0200 (Sun, 19 May 2013) $' =~ /Date: (\S+\s\S+)/;
+
+
 
 =head1 NAME
 
@@ -525,7 +525,7 @@ if(@ARGV && !($ARGV[0] =~ /^-/)){
 
 pod2usage(1) if $opt_help;
 if ($opt_version){
-	print "v$VERSION, rev$REVISION, last modified $MODIFIED\n";
+	print "$VERSION";
 	exit(1);
 }
 
@@ -550,7 +550,7 @@ my $V = Verbose->new(
 	
 );
 
-$V->verbose("$0, v$VERSION, rev$REVISION");
+$V->verbose("$0-$VERSION");
 
 
 ##------------------------------------------------------------------------##

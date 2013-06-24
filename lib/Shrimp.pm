@@ -3,7 +3,7 @@ package Shrimp;
 use warnings;
 use strict;
 
-# $Id$
+# $Id: Shrimp.pm 121 2013-05-19 20:57:34Z s187512 $
 
 use File::Temp;
 
@@ -13,8 +13,8 @@ use lib './';
 use Verbose;
 
 our $VERSION = '0.06';
-our ($REVISION) = '$Revision$' =~ /(\d+)/;
-our ($MODIFIED) = '$Date$' =~ /Date: (\S+\s\S+)/;
+
+
 
 
 $|++;

@@ -3,7 +3,7 @@ package Sam::Alignment;
 use warnings;
 use strict;
 
-# $Id$
+# $Id: Alignment.pm 113 2013-04-26 16:23:35Z s187512 $
 
 use overload '""' => \&raw;
 
@@ -13,8 +13,8 @@ use lib '../';
 
 
 our $VERSION = '0.07';
-our ($REVISION) = '$Revision$' =~ /(\d+)/;
-our ($MODIFIED) = '$Date$' =~ /Date: (\S+\s\S+)/;
+
+
 
 
 =head1 NAME 

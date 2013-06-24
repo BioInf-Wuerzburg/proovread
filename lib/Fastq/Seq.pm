@@ -1,6 +1,6 @@
 package Fastq::Seq;
 
-# $Id$
+# $Id: Seq.pm 128 2013-05-21 10:07:49Z s187512 $
 
 use warnings;
 use strict;
@@ -15,8 +15,8 @@ use Verbose;
 
 	
 our $VERSION = '0.11';
-our ($REVISION) = '$Revision$' =~ /(\d+)/;
-our ($MODIFIED) = '$Date$' =~ /Date: (\S+\s\S+)/;
+
+
 
 
 ##------------------------------------------------------------------------##

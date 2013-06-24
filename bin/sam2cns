@@ -4,7 +4,7 @@
 # LICENCE
 #
 #
-# $Id$
+# $Id: sam2cns 134 2013-05-21 14:24:48Z s187512 $
 #
 ##------------------------------------------------------------------------##
 
@@ -33,8 +33,8 @@ use Fastq::Parser;
 use Fastq::Seq 0.08;
 
 our $VERSION  = '0.05';
-our ($REVISION) = '$Revision$' =~ /(\d+)/;
-our ($MODIFIED) = '$Date$' =~ /Date: (\S+\s\S+)/;
+
+
 
 
 =head1 NAME
@@ -58,6 +58,8 @@ Compute consensus sequences based on SAM file.
 =head2 0.05
 
 =over
+
+=item [BugFix] Do not add header to chimera file to make its concatenable.
 
 =item [Feature] sam2cns uses the compressed cigar string from 
  C<< Sam::Seq->consensus >> to exactly project the chimera breakpoints from
@@ -343,7 +345,7 @@ if($opt_ref_pat){
 		$rpr = Fasta::Parser->new(file => $opt_ref_file)->check_format;
 		unless ($opt_ignore_hcr){
 			$opt_ignore_hcr++;
-			$v->verbose('Cannot restore HCR information from FASTA, --ignore-hcr set to TRUE');
+			# $v->verbose('Cannot restore HCR information from FASTA, --ignore-hcr set to TRUE');
 		}
 	}
 	$v->exit("Unknown format of reference file: $opt_ref_file") unless $rpr;
@@ -365,7 +367,7 @@ my $fmh;
 open($fmh, $mode, $fm_out) || $v->exit("Can't open output read file: '$fm_out'");
 my $fch;
 open($fch, $mode, $fc_out) || $v->exit("Can't open output read file: '$fc_out'");
-print $fch join("\t", '#id', qw(from to score)),"\n";
+#print $fch (join("\t", '#id', qw(from to score)),"\n") if ! -s $fch;
 
 
 my %PB;

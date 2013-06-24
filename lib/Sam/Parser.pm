@@ -3,7 +3,7 @@ package Sam::Parser;
 use warnings;
 use strict;
 
-# $Id$
+# $Id: Parser.pm 605 2012-12-09 12:03:56Z dumps $
 
 # preference libs in same folder over @INC
 use lib '../';
@@ -12,8 +12,8 @@ use Sam::Alignment qw(:flags);
 
 
 our $VERSION = '0.11';
-our ($REVISION) = '$Revision$' =~ /(\d+)/;
-our ($MODIFIED) = '$Date$' =~ /Date: (\S+\s\S+)/;
+
+
 
 
 =head1 NAME 
