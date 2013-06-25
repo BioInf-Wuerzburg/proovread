@@ -46,6 +46,9 @@ Class for handling sam reference sequences and its aligned reads.
 
 =over
 
+=item [Feature] Some mappers, e.g. bowtie2 create a two asymetric gaps instead of 
+ a mismatch, if it is cheaper. This case is now correctly handled like a mismatch. 
+
 =item [Feature] Added trace to consensus call, which is compressed to cigar
  string and returned as attributes "trace" and "cigar" of the Fastq::Seq.
 
@@ -563,7 +566,14 @@ sub State_matrix{
 			}elsif($cigar[$i+1] eq 'I'){
 				if($i){
 					# append to prev state
-					$states[$#states] .= substr($seq,$qpos,$cigar[$i]);
+					if($states[$#states] eq '-'){
+						# some mappers, e.g. bowtie2 produce 1D1I instead of 
+						# mismatchas (1M), as it is cheaper. This needs to be 
+						# corrected to a MM
+						$states[$#states] = substr($seq,$qpos,$cigar[$i]);
+					}else{
+						$states[$#states] .= substr($seq,$qpos,$cigar[$i]);
+					}	
 				}else{
 					$states[0] = substr($seq,$qpos,$cigar[$i]);		
 				}
@@ -1550,7 +1560,7 @@ sub _consensus{
 		# get most prominent state
 		my $con = $states_rev{$idx};
 		use Data::Dumper;
-		printf "%s %s\n", $con, $idx if $con =~ /-/;
+		printf "%s\t%s %s\n", $self->{ref}->id(), $con, $idx if $con =~ /-/;
 		$seq.= $con;
 		push @freqs, ($max_freq) x length($con);
 		$trace.= length($con) == 1 ? 'M' : 'M'.('D'x (length($con)-1));
