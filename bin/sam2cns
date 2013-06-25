@@ -59,6 +59,10 @@ Compute consensus sequences based on SAM file.
 
 =over
 
+=item [BugFix] Only test C<< --max-reads >> if actually set.
+
+=item [BugFix] C<< --min-lcr-length >> defaults to 120 instead of undef.
+
 =item [BugFix] Do not add header to chimera file to make its concatenable.
 
 =item [Feature] sam2cns uses the compressed cigar string from 
@@ -251,13 +255,13 @@ Append output if output file already exists
 
 $opt{'append!'} = \(my $opt_append);
 
-=item [--min-lcr-length=<INT>] [0]
+=item [--min-lcr-length=<INT>] [120]
 
 Minimum length of unmasked nts between hcrs
 
 =cut
 
-$opt{'--min-lcr-length=i'} = \(my $lcr_min_length);
+$opt{'--min-lcr-length=i'} = \(my $lcr_min_length = 120);
 
 =item [--min-hcr-length=<INT>] [0]
 
@@ -373,7 +377,6 @@ open($fch, $mode, $fc_out) || $v->exit("Can't open output read file: '$fc_out'")
 my %PB;
 
 
-
 # ref
 if($rpr){ # read fasta to get ref id, length and seq
 	$rpr->seek($opt_ref_offset) if $opt_ref_offset;
@@ -418,7 +421,7 @@ if($rpr){
 			$ref_id = $aln->rname;
 			push @PB_IDS, $ref_id;
 			$ref_seen++;
-			last if $ref_seen > $opt_max_reads;
+			last if $opt_max_reads && $ref_seen > $opt_max_reads;
 		}
 		$opt_detect_chimera		# binning required for chimera detection
 			? $PB{$aln->rname}->add_aln_by_score($aln)
@@ -499,7 +502,6 @@ foreach my $pb_id(@PB_IDS){
 			}
 		}
 	}
-	
 	
 	# undef state matrix to make memory availabe again
 	$PB{$pb_id}{_state_matrix} = {}; 
