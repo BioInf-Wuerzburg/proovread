@@ -1062,29 +1062,13 @@ foreach my $task(@TASKS){
 		
 		$LR = undef;
 		
-	}elsif($task eq 'bowtie2'){
+	}elsif($task =~ m/bowtie2-/){
 				# configure Sam::Seq
 		Sam::Seq->MaxCoverage($opt_cov);
 		Sam::Seq->BinSize($cfg{'bin-size'});
 
-		my $sr_finish_files;
-
-		if($opt_finish_aligned_only){
-			my @sr_files;
-			# collect all dumped short read files from previous iterations
-			foreach my $task (@TASKS[1..$TC-1]){
-				push @sr_files, map{
-					task_file_name(task => $task, suffix=> "_sr".$_.".fq")
-				}(0..$#sr_count);
-			}
-			$sr_finish_files = \@sr_files;
-		}else{
-			$sr_finish_files = $opt_sr_file;
-		}
-	
-		
 		run_bowtie2(
-			sr_files => $sr_finish_files,
+			sr_files => $opt_sr_file,
 			bowtie2 => {
 				%{$cfg{$task}}, # basic task params from cfg
 				'ref' => task_file_name('.fa', task => $TASKS[$TC-1] ),
@@ -1100,6 +1084,7 @@ foreach my $task(@TASKS){
 		$lr_chunk_offsets = correct_sr_mt($sam_chunk_offsets, $lr_chunk_offsets);
 		
 		$LR = undef;
+
 	}else{
 		$VB->exit("unknown task: ".$task);
 	}
