@@ -1145,7 +1145,7 @@ END{
 			$VS->verbose("Cleaning up");
 			remove_tree(@tmp_dirs) 
 		};
-		$V->verbose("Total time spent", format => '[{TIME_FULL}] {MESSAGE} {TIME_ELAPSED}\n');
+		$V->verbose("Total time spent", format => "{TIME_FULL}] {MESSAGE} {TIME_ELAPSED}\n");
 		$VS->verbose("Done");
 	} 
 }
