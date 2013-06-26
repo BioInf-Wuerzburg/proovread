@@ -57,9 +57,13 @@ Correct single molecule sequencing reads by iterative mapping of high
 
 =head1 CHANGELOG
 
+=cut
+
 =head2 1.00
 
 =over
+
+=item [Feature] Ignore long reads shorter than 200% of mean short read length
 
 =item [Feature] Bowtie2.
 
@@ -1654,6 +1658,10 @@ sub read_long{
 			);
 			
 			while(my $lr = $lrpr->next_seq){
+				if(($lr->seq) < 2*$mean_sr_length){
+					$V->verbose("Ignoring stubby (".length($lr->seq)."bp) read: ".$lr->id);
+					next;
+				}
 				if(exists $lr{$lr->id}){
 					$VS->exit('Non-unique long read id ('. $lr->id .') in '. $_);
 				}
