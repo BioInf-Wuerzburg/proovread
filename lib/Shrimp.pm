@@ -583,10 +583,14 @@ sub _run_pipe_open {
 		# little hack to verify the listeners pid
 		# get the entry for the all running gmapper processes
 		# search for entry, where open pid is parent and then take the childs id as new id
-		#sleep(1);
 		my $ps = qx(ps -eF | grep -v grep | grep $self->{bin} | grep $open_pid);
 		($self->{_pid}) = $ps  =~ /^\S+\s+(\d+)\s+$open_pid/m;
-		$V->exit("Could not determine childs pid\n$ps") unless $self->{_pid} and $self->{_pid} =~ /^\d+$/;
+		unless ($self->{_pid} and $self->{_pid} =~ /^\d+$/){
+			sleep(1);
+			$ps = qx(ps -eF | grep -v grep | grep $self->{bin} | grep $open_pid);
+			($self->{_pid}) = $ps  =~ /^\S+\s+(\d+)\s+$open_pid/m;
+		}
+		$V->exit("Could not determine childs pid\n$ps") unless $self->{_pid} and $self->{_pid} =~ /^\d+$/; 
 	}
 
 	$self->{_result_reader} = $rdr;
