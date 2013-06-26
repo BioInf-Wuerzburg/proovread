@@ -1138,12 +1138,14 @@ $no_fatal++;
 
 # put in END to wait for memory to be cleaned
 
+
 END{
 	if ($no_fatal){
 		unless ($opt_keep){
 			$VS->verbose("Cleaning up");
 			remove_tree(@tmp_dirs) 
 		};
+		$V->verbose("Total time spent", format => '[{TIME_FULL}] {MESSAGE} {TIME_ELAPSED}\n');
 		$VS->verbose("Done");
 	} 
 }
