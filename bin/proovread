@@ -650,7 +650,7 @@ make_path($opt_prefix);
 # 'cause I'm lazy
 
 
-my $opt_param_log = task_file_name(task => '', suffix => "_parameter.log");
+my $opt_param_log = task_file_name(task => '', suffix => ".parameter.log");
 open(PARAM, '>', $opt_param_log) or $V->exit("$!: `$opt_param_log`");
 
 $VS->verbose("Logging parameter to `$opt_param_log`");
@@ -844,6 +844,7 @@ make_path(@tmp_dirs);
 
 my $LR;
 my @LR_IDS;
+my @LR_IDS_IGNORED;
 my $lr_chunk_offsets;
 my @lr_count;
 my @lr_length;
@@ -902,7 +903,7 @@ foreach my $task(@TASKS){
 				%{$cfg{$task}}, # basic shrimp params from cfg
 				'verbose' => 1,
 				'log' => task_file_name(suffix => "_shrimp.log"),
-				'ref' => task_file_name('.fa', task => $TASKS[$TC-1] ),
+				'ref' => task_file_name('.masked.fa', task => $TASKS[$TC-1] ),
 				#'--al' => task_file_name(suffix => "_sr.fq"),
 				'--threads' => $opt_threads,
 				'--qv-offset' => $sr_qv_offset_total,
@@ -927,7 +928,7 @@ foreach my $task(@TASKS){
 				%{$cfg{$task}}, # basic shrimp params from cfg
 				'verbose' => 1,
 				'log' => task_file_name(suffix => "_shrimp.log"),
-				'ref' => task_file_name(".fm", task => $TASKS[$TC-1] ),
+				'ref' => task_file_name(".masked.fa", task => $TASKS[$TC-1] ),
 				#'--al' => task_file_name(suffix => "_sr.fq"),
 				'--threads' => $opt_threads,
 				'--qv-offset' => $sr_qv_offset_total,
@@ -958,7 +959,7 @@ foreach my $task(@TASKS){
 				%{$cfg{$task}}, # basic shrimp params from cfg
 				'verbose' => 1,
 				'log' => task_file_name(suffix => "_shrimp.log"),
-				'ref' => task_file_name('.fa', task => $TASKS[$TC-1] ),
+				'ref' => task_file_name('.masked.fa', task => $TASKS[$TC-1] ),
 				#'--al' => task_file_name(suffix => "_sr.fq"),
 				'--threads' => $opt_threads,
 				'--qv-offset' => $sr_qv_offset_total,
@@ -987,7 +988,7 @@ foreach my $task(@TASKS){
 				%{$cfg{$task}}, # basic shrimp params from cfg
 				'verbose' => 1,
 				'log' => task_file_name(suffix => "_shrimp.log"),
-				'ref' => task_file_name(".fm", task => $TASKS[$TC-1] ),
+				'ref' => task_file_name(".masked.fa", task => $TASKS[$TC-1] ),
 				#'--al' => task_file_name(suffix => "_sr.fq"),
 				'--threads' => $opt_threads,
 				'--qv-offset' => $sr_qv_offset_total,
@@ -1048,13 +1049,20 @@ foreach my $task(@TASKS){
 			$sr_finish_files = $opt_sr_file;
 		}
 	
+		# cerate a unmasked reference for finish run
+		seq_filter(
+			'--in' => task_file_name('.fq', task => $TASKS[$TC-1] ),
+			'--out' => task_file_name('.unmasked.fa', task => $TASKS[$TC-1] ),
+			'--fasta' => '',
+			'--quiet' => '',
+		);
 		
 		run_shrimp(
 			sr_files => $sr_finish_files,
 			shrimp => {
 				%{$cfg{$task}}, # basic shrimp params from cfg
 				'verbose' => 1,
-				'ref' => task_file_name('.fa', task => $TASKS[$TC-1] ),
+				'ref' => task_file_name('.unmasked.fa', task => $TASKS[$TC-1] ),
 				'--threads' => $opt_threads,
 				'--qv-offset' => $sr_qv_offset_total,
 			}
@@ -1067,15 +1075,29 @@ foreach my $task(@TASKS){
 		$LR = undef;
 		
 	}elsif($task =~ m/bowtie2-/){
-				# configure Sam::Seq
+		# configure Sam::Seq
 		Sam::Seq->MaxCoverage($opt_cov);
 		Sam::Seq->BinSize($cfg{'bin-size'});
+
+		# cerate a unmasked reference for finish run
+		my $ref_file;
+		if($task =~ m/-finish/){
+			$ref_file = task_file_name('.unmasked.fa', task => $TASKS[$TC-1] );
+
+			seq_filter(
+				'--in' => task_file_name('.masked.fa', task => $TASKS[$TC-1] ),
+				'--out' => $ref_file,
+				'--fasta' => '',
+			);
+		}else{
+			$ref_file = task_file_name('.masked.fa', task => $TASKS[$TC-1] )
+		}
 
 		run_bowtie2(
 			sr_files => $opt_sr_file,
 			bowtie2 => {
 				%{$cfg{$task}}, # basic task params from cfg
-				'ref' => task_file_name('.fa', task => $TASKS[$TC-1] ),
+				'ref' => $ref_file,
 				'--threads' => $opt_threads,
 				$sr_qv_offset_total == 64 
 					? ('--phred64' => '') 
@@ -1097,18 +1119,16 @@ foreach my $task(@TASKS){
 
 
 # create final output
-my $opt_fa_raw = task_file_name(task => '', suffix => "_corr.raw.fa");
-my $opt_fq_raw = task_file_name(task => '', suffix => "_corr.raw.fq");
-my $opt_fa_fil = task_file_name(task => '', suffix => "_corr.fil.fa");
-my $opt_fq_fil = task_file_name(task => '', suffix => "_corr.fil.fq");
+my $opt_fq_raw = task_file_name(task => '', suffix => ".corr.raw.fq");
+my $opt_fa_fil = task_file_name(task => '', suffix => ".corr.fil.fa");
+my $opt_fq_fil = task_file_name(task => '', suffix => ".corr.fil.fq");
 
 $VS->verbose("Creating raw output sequences");
 
-copy(task_file_name(".fa", task=>$TASKS[$TC]), $opt_fa_raw);
 copy(task_file_name(".fq", task=>$TASKS[$TC]), $opt_fq_raw);
 
-my $opt_chim_raw = task_file_name(task => $TASKS[$TC], suffix => ".fc");
-my $opt_chim_fil = task_file_name(task => '', suffix => "_chim.tsv");
+my $opt_chim_raw = task_file_name(task => $TASKS[$TC], suffix => ".chim.tsv");
+my $opt_chim_fil = task_file_name(task => '', suffix => ".chim.tsv");
 
 chim_filter('--in' => $opt_chim_raw, '--out' => $opt_chim_fil);
 
@@ -1582,14 +1602,20 @@ sub create_sorted_sam{
 	
 	open(OUT, '>',$opt_sam_out) or $VB->exit($!);
 	
+	my @lr_ids;
 	# header section
 	printf OUT ("\@HD\tVN:%s\tSO:%s\n", "unknown", "unknown");
 	foreach my $pb_id (@LR_IDS){
-		unless (defined $LR->{$pb_id}){
-			die $pb_id;
+		if (defined $LR->{$pb_id}){
+			push @lr_ids, $pb_id;
+			printf OUT ("\@SQ\tSN:%s\tLN:%s\n", $pb_id, $LR->{$pb_id}->len);
+		}else{
+			push @LR_IDS_IGNORED, $pb_id;
+			# $V->exit("Lost read $pb_id");
 		}
-		printf OUT ("\@SQ\tSN:%s\tLN:%s\n", $pb_id, $LR->{$pb_id}->len);
 	}
+	
+	@LR_IDS = @lr_ids;
 	
 	# header @PG
 	print OUT $PG_line;
@@ -1653,7 +1679,7 @@ sub read_long{
 	
 		if(ref $lrpr eq 'Fasta::Parser'){ # FASTA ref
 			$lrpw = Fasta::Parser->new( 
-				file => task_file_name(".fa", task => $TASKS[$TC] ), 
+				file => task_file_name(".masked.fa", task => $TASKS[$TC] ), 
 				mode => '+>'
 			);
 			
@@ -1678,7 +1704,7 @@ sub read_long{
 					unless $po;
 					
 				$lrpw = Fastq::Parser->new( 
-					file => task_file_name(".fq", task => $TASKS[$TC] ), 
+					file => task_file_name(".masked.fq", task => $TASKS[$TC] ), 
 					mode => '+>',
 				);
 
@@ -1696,7 +1722,7 @@ sub read_long{
 
 			}else{
 				$lrpw = Fasta::Parser->new( 
-					file => task_file_name(".fa", task => $TASKS[$TC] ), 
+					file => task_file_name(".masked.fa", task => $TASKS[$TC] ), 
 					mode => '+>'
 				);
 				while(my $lr = $lrpr->next_seq){
@@ -1748,7 +1774,7 @@ sub correct_sr_mt{
 		
 		@$opt_lr_file
 			? ('--ref' 		=> $TC == 1
-				? task_file_name(".f[aq]", task => $TASKS[$TC-1] )
+				? task_file_name(".masked.f[aq]", task => $TASKS[$TC-1] )
 				: task_file_name(".fq", task => $TASKS[$TC-1] ))
 			: (),
 			
@@ -1756,9 +1782,10 @@ sub correct_sr_mt{
 			? ('--min-lcr-length' => $min_lcr_length) # params from config
 			: ('--min-hcr-length' => 0),
 		
-		($TASKS[$TC] eq 'shrimp-finish') # calculate hcrs on first iter for second iter
+		($TASKS[$TC] =~ /-finish/) # calculate hcrs on first iter for second iter
 			? (
-				'--ignore-hcr' => 1, 
+				'--ignore-hcr' => 1,
+				'--mask-weak-reads' => 0, 
 				'--max-ins-length' => 0,
 				$cfg{'detect-chimera'} ? ('--detect-chimera' => 1) : ()
 			  ) # params from config
@@ -1827,20 +1854,20 @@ sub correct_sr_mt{
 	$VS->verbose("Merging corrected output");
 	my $fq_file = task_file_name(".fq");
 	my $fq_glob = task_file_name(".[0-9]*.fq");
-	my $fa_file = task_file_name(".fa");
-	my $fa_glob = task_file_name(".[0-9]*.fa");
-	my $fm_file = task_file_name(".fm");
-	my $fm_glob = task_file_name(".[0-9]*.fm");
-	my $fc_file = task_file_name(".fc");
-	my $fc_glob = task_file_name(".[0-9]*.fc");
+	my $fa_file = task_file_name(".masked.fa");
+	my $fa_glob = task_file_name(".[0-9]*.masked.fa");
+	my $fi_file = task_file_name(suffix => ".ignored.tsv", task => '');
+	my $fi_glob = task_file_name(".[0-9]*.ignored.tsv");
+	my $fc_file = task_file_name(".chim.tsv");
+	my $fc_glob = task_file_name(".[0-9]*.chim.tsv");
 	
 	my @fq_glob = sort byfile glob $fq_glob;
 	my @fa_glob = sort byfile glob $fa_glob;
-	my @fm_glob = sort byfile glob $fm_glob;
+	my @fi_glob = sort byfile glob $fi_glob;
 	my @fc_glob = sort byfile glob $fc_glob;
 	my $fq_glob_sorted = join(" ", @fq_glob);
 	my $fa_glob_sorted = join(" ", @fa_glob);
-	my $fm_glob_sorted = join(" ", @fm_glob);
+	my $fi_glob_sorted = join(" ", @fi_glob);
 	my $fc_glob_sorted = join(" ", @fc_glob);
 	
 	# create offset idx for reference
@@ -1852,17 +1879,18 @@ sub correct_sr_mt{
 		push @ref_idxs, $offset;   
 	}
 	
-	# remove last on, its just the eof
+	# remove last one, its just the eof
 	pop(@ref_idxs);
 	
 	qx(cat $fq_glob_sorted > $fq_file);
 	qx(cat $fa_glob_sorted > $fa_file);
-	qx(cat $fm_glob_sorted > $fm_file);
+	qx(cat $fi_glob_sorted >> $fi_file);
 	qx(echo -e "#id\tfrom\tto\tscore" > $fc_file; cat $fc_glob_sorted >> $fc_file);
+	
 	
 	unlink @fq_glob unless $opt_keep > 1;
 	unlink @fa_glob unless $opt_keep > 1;
-	unlink @fm_glob unless $opt_keep > 1;
+	unlink @fi_glob unless $opt_keep > 1;
 	unlink @fc_glob unless $opt_keep > 1;
 	
 	return \@ref_idxs;

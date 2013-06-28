@@ -32,6 +32,11 @@ use Fasta::Seq;
 use Fastq::Parser;
 use Fastq::Seq 0.08;
 
+use constant {
+	OFFSET => 0,
+	LENGTH => 1,
+};
+
 our $VERSION  = '0.05';
 
 
@@ -245,7 +250,7 @@ Boolean. Dectect, tag, and if possible resolve chimeric sequences.
 
 =cut
 
-$opt{'detect-chimera'} = \(my $opt_detect_chimera);
+$opt{'detect-chimera!'} = \(my $opt_detect_chimera);
 
 =item [--append] [OFF]
 
@@ -278,6 +283,12 @@ Maximum allowed length for inserts.
 =cut
 
 $opt{'--max-ins-length=i'} = \(my $opt_max_ins_length = 4);
+
+=item [--mask-weak-reads=<INT>] [5]
+
+=cut
+
+$opt{'--mask-weak-reads=i'} = \(my $opt_mask_weak_reads = 10);
 
 $opt{'--chimera-min-score'} = \(my $opt_chimera_min_score = 0);
 
@@ -356,19 +367,19 @@ if($opt_ref_pat){
 }
 
 # output files
-my $fq_out = $opt_pre.'.fq';
-my $fa_out = $opt_pre.'.fa';
-my $fm_out = $opt_pre.'.fm';
-my $fc_out = $opt_pre.'.fc';
+my $fq_out =  $opt_pre.'.fq';
+my $fam_out = $opt_pre.'.masked.fa';
+my $fqi_out = $opt_pre.'.ignored.tsv'; # ignored
+my $fc_out =  $opt_pre.'.chim.tsv'; # chimera annot
 
 my $mode = $opt_append ? ">>" : ">";
 
 my $fqh;
 open($fqh, $mode, $fq_out) || $v->exit("Can't open output read file: '$fq_out'");
-my $fah;
-open($fah, $mode, $fa_out) || $v->exit("Can't open output read file: '$fa_out'");
 my $fmh;
-open($fmh, $mode, $fm_out) || $v->exit("Can't open output read file: '$fm_out'");
+open($fmh, $mode, $fam_out) || $v->exit("Can't open output read file: '$fam_out'");
+my $fih;
+open($fih, $mode, $fqi_out) || $v->exit("Can't open output read file: '$fqi_out'");
 my $fch;
 open($fch, $mode, $fc_out) || $v->exit("Can't open output read file: '$fc_out'");
 #print $fch (join("\t", '#id', qw(from to score)),"\n") if ! -s $fch;
@@ -404,6 +415,7 @@ if($rpr){ # read fasta to get ref id, length and seq
 my @PB_IDS;
 
 $sp->seek($opt_sam_offset) if $opt_sam_offset;
+# w/ reference
 if($rpr){
 	while(my $aln = $sp->next_aln()){
 		# try to add aln, if sufficient score, add to temporary sam file
@@ -412,6 +424,7 @@ if($rpr){
 			? $PB{$aln->rname}->add_aln_by_score($aln)
 			: $PB{$aln->rname}->add_aln($aln);
 	}
+# w/o reference
 }else{
 	my $ref_seen = 0; # since we read the entire header to %PB, we need to count ref seqs
 	my $ref_id = '';
@@ -443,6 +456,30 @@ foreach my $pb_id(@PB_IDS){
 				push @hcrs, [$1, $2];
 			}
 		};
+	}
+	
+	if($opt_mask_weak_reads && ! @hcrs){
+		if($PB{$pb_id}->{_aln_idc} < $opt_mask_weak_reads){
+			my $seq = $PB{$pb_id}->{ref};
+			unless (ref $seq eq "Fastq::Seq"){
+				$seq = Fastq::Seq->new(
+					substr($seq->seq_head, 1),
+					$seq->seq,
+					'+',
+					'!' x length ($seq->seq),
+					phred_offset => 33,
+				);
+			}else{
+				$seq->qual('!' x length ($seq->seq)),
+			}
+			
+			unless ($seq->desc() =~ /IGNORED:low_support/){
+				$seq->desc_append("IGNORED:low support"); 
+				# write to ignored fastq
+				print $fih $seq->id,"\n";
+			}
+			next;
+		}
 	}
 	
 	my $con = $PB{$pb_id}->consensus(@hcrs);
@@ -507,6 +544,9 @@ foreach my $pb_id(@PB_IDS){
 	$PB{$pb_id}{_state_matrix} = {}; 
 
 	if($opt_hcr_mask_length){
+		# $hcrs[$i][0] == $hcrs[$i][OFFSET] := offset
+		# $hcrs[$i][1] == $hcrs[$i][LENGTH] := length
+		
 		# clone
 		my $con_mask = $con->new;
 		# compute high coverage regions 
@@ -514,7 +554,7 @@ foreach my $pb_id(@PB_IDS){
 		if(@hcrs){
 			my $i = 0;
 			# create a description string of hcrs in seq
-			my @hcrs_string = map{"HCR".++$i.":".$_->[0].','.$_->[1]}@hcrs;
+			my @hcrs_string = map{"HCR".++$i.":".$_->[OFFSET].','.$_->[LENGTH]}@hcrs;
 			# add desc to header
 			$con->{seq_head}.= ' '.join(" ", @hcrs_string);
 			# mask hcrs minus overlap ends
@@ -522,33 +562,49 @@ foreach my $pb_id(@PB_IDS){
 			
 			# add sticky ends
 			foreach(@hcrs){
-				$_->[0]+=$opt_hcr_sticky_length; 
-				$_->[1]-=($opt_hcr_sticky_length * 2);
+				$_->[OFFSET]+=$opt_hcr_sticky_length; 
+				$_->[LENGTH]-=($opt_hcr_sticky_length * 2);
 			}			
 			
-			# unmask start
-			my $lcr_start_missing = $lcr_min_length - $hcrs[0][0];
-			# unmask start if its long enough to be worth it and short thnen lcr_min_length 
-			if( $lcr_start_missing > 0.2 * $lcr_min_length ){ 
-				#$v->hline;
-				#$v->verbose('first hcr to close to start '.$lcr_start_missing);
-				if( ($hcrs[0][1] -= $lcr_start_missing) < $opt_hcr_mask_length){
-					#$v->verbose('first hcr to short: '.$hcrs[0][1]);
-					shift @hcrs; # remove first hcr if it becomes to short after trimming
-				}else{
-					#$v->verbose('first hcr trimmed');
-					$hcrs[0][0] += $lcr_start_missing;
+			# mask/unmask start
+			my $lcr_start_missing = $lcr_min_length - $hcrs[0][OFFSET];
+			# Consider starts shorter then lcr_min_length
+			if($lcr_start_missing > 0){
+				# unmask start if its long enough to be worth it: missing < 50% lcr_min_length
+				if( $lcr_start_missing < 0.5 * $lcr_min_length ){ 
+					#$v->hline;
+					#$v->verbose('first hcr to close to start '.$lcr_start_missing);
+					# if OFFSET is adjusted, LENGTH always needs to be adjusted
+					#  as well or the HCR is just shifted
+					# adjust length, check for hcr_min_length
+					if( ($hcrs[0][LENGTH] -= $lcr_start_missing) < $opt_hcr_mask_length){
+						#$v->verbose('first hcr to short: '.$hcrs[0][LENGTH]);
+						shift @hcrs; # remove first hcr if it becomes to short after trimming
+					}else{
+						#$v->verbose('first hcr trimmed');
+						$hcrs[0][OFFSET] += $lcr_start_missing;
+					}
+				}else{# mask start completely
+					$hcrs[0][LENGTH] += $hcrs[0][OFFSET];
+					$hcrs[0][OFFSET] = 0;
 				}
 			} 
 			
-			# unmask end
-			if( scalar @hcrs  && (my $lcr_end_missing = $lcr_min_length - (length($con_mask->seq) - ($hcrs[$#hcrs][0] + $hcrs[$#hcrs][1]))) > 0.2 * $lcr_min_length ){
-				#$v->verbose('last hcr to close to end '.$lcr_end_missing);
-				if( ($hcrs[$#hcrs][1] -= $lcr_end_missing) < $opt_hcr_mask_length){
-					#$v->verbose('last hcr to short');
-					pop @hcrs; # remove first hcr if it becomes to short after trimming
-				}else{
-					#$v->verbose('last hcr trimmed');
+			# mask/unmask end
+			if( scalar @hcrs){ # check if there are HCRs, might be trimmed by first
+				my $lcr_end_missing = $lcr_min_length - (length($con_mask->seq) - ($hcrs[$#hcrs][OFFSET] + $hcrs[$#hcrs][LENGTH]));
+				# check if it is to close to the end
+				if($lcr_end_missing  > 0){
+					if($lcr_end_missing < 0.5 * $lcr_min_length ){
+						#$v->verbose('last hcr to close to end '.$lcr_end_missing);
+						# shorten last hcr and check its length
+						if( ($hcrs[$#hcrs][LENGTH] -= $lcr_end_missing) < $opt_hcr_mask_length){
+							#$v->verbose('last hcr to short');
+							pop @hcrs; # remove first hcr if it becomes to short after trimming
+						}
+					}else{# extend hcr to end of seq
+						$hcrs[$#hcrs][LENGTH] += $lcr_min_length - $lcr_end_missing
+					}
 				}
 			} 
 			
@@ -557,14 +613,14 @@ foreach my $pb_id(@PB_IDS){
 			my @remove_hcrs;
 			if(@hcrs > 2){
 				for($i=2; $i < @hcrs-1; $i++){
-					my $start_b = $hcrs[$i][0];
-					my $end_a = $hcrs[$i-1][0] + $hcrs[$i-1][1];
+					my $start_b = $hcrs[$i][OFFSET];
+					my $end_a = $hcrs[$i-1][OFFSET] + $hcrs[$i-1][LENGTH];
 					# lcr to short
 					if( (my $lcr_min_missing = $lcr_min_length - ($start_b - $end_a)) > 0 ){
 						#$v->verbose('lcr missing '.$lcr_min_missing.' between h'.($i-1).' and h'.($i));
 						
 						#  what if: move forward start_b by half the missing nts	
-						my $el = $hcrs[$i][1] - $lcr_min_missing/2;
+						my $el = $hcrs[$i][LENGTH] - $lcr_min_missing/2;
 						if($el < $opt_hcr_mask_length){
 							#$v->verbose('h'.($i).' to short: '."$el < $opt_hcr_mask_length");	
 							push @remove_hcrs, $i;
@@ -573,7 +629,7 @@ foreach my $pb_id(@PB_IDS){
 						}
 						
 						# what if: move back end_e by half the missing nts
-						my $sl = $hcrs[$i-1][1] - $lcr_min_missing/2;
+						my $sl = $hcrs[$i-1][LENGTH] - $lcr_min_missing/2;
 						if($sl < $opt_hcr_mask_length){
 							#$v->verbose('h'.($i-1).' to short: '."$sl < $opt_hcr_mask_length");	
 							push @remove_hcrs, $i-1;
@@ -581,11 +637,11 @@ foreach my $pb_id(@PB_IDS){
 						}
 
 						# move forward start_b by half the missing nts
-						$hcrs[$i][0] += $lcr_min_missing/2;
-						$hcrs[$i][1] -= $lcr_min_missing/2;
+						$hcrs[$i][OFFSET] += $lcr_min_missing/2;
+						$hcrs[$i][LENGTH] -= $lcr_min_missing/2;
 						
 						# move back end_e by half the missing nts
-						$hcrs[$i-1][1] -= $lcr_min_missing/2;
+						$hcrs[$i-1][LENGTH] -= $lcr_min_missing/2;
 						#$v->verbose('hcrs trimmed');	
 					}
 				}
@@ -608,14 +664,9 @@ foreach my $pb_id(@PB_IDS){
 		printf $fmh (">%s\n%s\n", substr($con->seq_head, 1), $con_mask->seq);
 	}
 
-
 	
 	# write current fastq
 	print $fqh $con->string;
-	
-	# write current fasta
-	printf $fah (">%s\n%s\n", substr($con->seq_head, 1), $con->seq);
-	
 	
 }
 
