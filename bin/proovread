@@ -63,6 +63,8 @@ Correct single molecule sequencing reads by iterative mapping of high
 
 =over
 
+=item [Feature] Improved masking in sam2cns.
+
 =item [Feature] Ignore long reads shorter than 200% of mean short read length
 
 =item [Feature] Bowtie2.
@@ -1631,7 +1633,7 @@ sub create_sorted_sam{
 
 		foreach my $aln($LR->{$pb_id}->alns($opt_sort_sam_by_coords)){
 			# write to sam
-			print OUT $aln->raw;
+			print OUT "$aln";
 			# write to LR wise FASTQ
 		}
 		$pgb->update($pb_c);
@@ -1741,7 +1743,7 @@ sub read_long{
 		}
 	}
 
-	# write sorted/indexed fq/fa lr file for pbc
+	# write sorted/indexed fq/fa lr file for mapping/sam2cns
 	my @lr_idxs;
 	my $lr_c = 0;
 	@LR_IDS = sort byfile keys %lr;
@@ -1786,6 +1788,7 @@ sub correct_sr_mt{
 			? (
 				'--ignore-hcr' => 1,
 				'--mask-weak-reads' => 0, 
+				'--ignore-weak-reads' => 20, 
 				'--max-ins-length' => 0,
 				$cfg{'detect-chimera'} ? ('--detect-chimera' => 1) : ()
 			  ) # params from config
