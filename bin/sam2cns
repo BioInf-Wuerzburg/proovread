@@ -64,6 +64,8 @@ Compute consensus sequences based on SAM file.
 
 =over
 
+=item [Feature] C<< lcr-end-ratio >> to control end mask/unmask behaviour.
+
 =item [Feature] Improved masking, ends are either unmasked or masked to the
  last nucleotide if they are too short.
 
@@ -279,6 +281,16 @@ Minimum length of unmasked nts between hcrs
 =cut
 
 $opt{'--min-lcr-length=i'} = \(my $lcr_min_length = 120);
+
+=item [--min-lcr-end-ratio=<FLOAT>] [0.5]
+
+End mask/unmasked threshold. Read ends are either masked completely or 
+ unmasked to --min-lcr-length to allow new mappings. The value specifies the
+ proportions of --min-lcr-length required to unmask the end.
+
+=cut
+
+$opt{'--lcr-end-ratio=s'} = \(my $lcr_end_ratio = 0.5);
 
 =item [--min-hcr-length=<INT>] [0]
 
@@ -605,7 +617,7 @@ foreach my $pb_id(@LR_IDS){
 			# Consider starts shorter then lcr_min_length
 			if($lcr_start_missing > 0){
 				# unmask start if its long enough to be worth it: missing < 50% lcr_min_length
-				if( $lcr_start_missing < 0.5 * $lcr_min_length ){ 
+				if( $lcr_start_missing < $lcr_end_ratio * $lcr_min_length ){ 
 					#$v->hline;
 					#$v->verbose('first hcr to close to start '.$lcr_start_missing);
 					# if OFFSET is adjusted, LENGTH always needs to be adjusted
@@ -629,7 +641,7 @@ foreach my $pb_id(@LR_IDS){
 				my $lcr_end_missing = $lcr_min_length - (length($con_mask->seq) - ($hcrs[$#hcrs][OFFSET] + $hcrs[$#hcrs][LENGTH]));
 				# check if it is to close to the end
 				if($lcr_end_missing  > 0){
-					if($lcr_end_missing < 0.5 * $lcr_min_length ){
+					if($lcr_end_missing < $lcr_end_ratio * $lcr_min_length ){
 						#$v->verbose('last hcr to close to end '.$lcr_end_missing);
 						# shorten last hcr and check its length
 						if( ($hcrs[$#hcrs][LENGTH] -= $lcr_end_missing) < $opt_hcr_mask_length){

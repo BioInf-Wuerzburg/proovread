@@ -63,6 +63,8 @@ Correct single molecule sequencing reads by iterative mapping of high
 
 =over
 
+=item [Feature] sam2cns: C<< lcr-end-ratio >> to control end mask/unmask behaviour.
+
 =item [BugFix] ProgressBar in "pre" mode now has correct length.
 
 =item [Change] Removed C<< --finish-aligned-only >>.
@@ -1741,6 +1743,7 @@ sub correct_sr_mt{
 		$TASKS[$TC] =~ m/iter-1|pre-1|pre-2|pre-3/ # calculate hcrs on first iter for second iter
 			? ('--min-lcr-length' => $min_lcr_length) # params from config
 			: ('--min-hcr-length' => 0),
+			'--lcr-end-ratio' => $cfg{'lcr-end-ratio'}{$TASKS[$TC]},
 		
 		($TASKS[$TC] =~ /-finish/) # calculate hcrs on first iter for second iter
 			? (
