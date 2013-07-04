@@ -1646,7 +1646,7 @@ sub read_long{
 			);
 			
 			while(my $lr = $lrpr->next_seq){
-				if(($lr->seq) < 2*$mean_sr_length){
+				if(length($lr->seq) < 2*$mean_sr_length){
 					$V->verbose("Ignoring stubby (".length($lr->seq)."bp) read: ".$lr->id);
 					next;
 				}
