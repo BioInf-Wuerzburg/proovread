@@ -1341,6 +1341,7 @@ sub run_shrimp{
 				? ('--al' => task_file_name(suffix => "_sr".$sr_file_c.".fq"))
 				: (),
 		);
+
 	
 		$VB->hline();
 		$VB->verbose($shrimp->command());
@@ -1684,7 +1685,7 @@ sub read_long{
 			);
 			
 			while(my $lr = $lrpr->next_seq){
-				if(($lr->seq) < 2*$mean_sr_length){
+				if(length($lr->seq) < 2*$mean_sr_length){
 					$V->verbose("Ignoring stubby (".length($lr->seq)."bp) read: ".$lr->id);
 					next;
 				}
@@ -1974,12 +1975,38 @@ sub chim_filter{
 	
 }
 
+=head seq_chunker
+
+Run SeqChunker. Specify NO_EXEC as first parameter to only get the command
+ but do not actually run it.
+
+=cut
+
+sub seq_chunker{
+	my $no_exec;
+	if ($_[0] =~ /NO_EXEC/){
+		$no_exec++;
+		shift;
+	}
+	
+	my %params = @_;
+	my $params = param_join(\%params);
+
+	my $cmd = "$RealBin/SeqChunker $params";
+
+	return $cmd if $no_exec;
+	
+	$VB->hline;
+	$VB->verbose($cmd);
+	qx($cmd);
+	$VB->hline;
+}
+
 =head2 seq_filter
 
 Run SeqFilter on raw output
 
 =cut
-
 
 sub seq_filter{
 	my %params = @_;
