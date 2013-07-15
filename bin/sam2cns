@@ -37,7 +37,7 @@ use constant {
 	LENGTH => 1,
 };
 
-our $VERSION  = '0.05';
+our $VERSION  = '0.06';
 
 
 
@@ -59,6 +59,20 @@ Compute consensus sequences based on SAM file.
 =cut
 
 =head1 CHANGELOG
+
+=head2 0.06
+
+=over
+
+=item [Feature] C<< lcr-end-ratio >> to control end mask/unmask behaviour.
+
+=item [Feature] Improved masking, ends are either unmasked or masked to the
+ last nucleotide if they are too short.
+
+=item [Feature] C<< --mask-weak-reads/--ignore-weak-reads >> to handle 
+ bad reads and contaminations more efficiently
+
+=back
 
 =head2 0.05
 
@@ -268,6 +282,16 @@ Minimum length of unmasked nts between hcrs
 
 $opt{'--min-lcr-length=i'} = \(my $lcr_min_length = 120);
 
+=item [--min-lcr-end-ratio=<FLOAT>] [0.5]
+
+End mask/unmasked threshold. Read ends are either masked completely or 
+ unmasked to --min-lcr-length to allow new mappings. The value specifies the
+ proportions of --min-lcr-length required to unmask the end.
+
+=cut
+
+$opt{'--lcr-end-ratio=s'} = \(my $lcr_end_ratio = 0.5);
+
 =item [--min-hcr-length=<INT>] [0]
 
 Minimum length of masked nts in hcrs
@@ -284,11 +308,21 @@ Maximum allowed length for inserts.
 
 $opt{'--max-ins-length=i'} = \(my $opt_max_ins_length = 4);
 
-=item [--mask-weak-reads=<INT>] [5]
+=item [--mask-weak-reads=<INT>] [20]
 
 =cut
 
-$opt{'--mask-weak-reads=i'} = \(my $opt_mask_weak_reads = 10);
+$opt{'--mask-weak-reads=i'} = \(my $opt_mask_weak_reads = 20);
+
+=item [--ignore-weak-reads=<INT>] [20]
+
+Simple do not generate consensus for weakly supported reads, output them 
+ unprocessed.
+
+=cut
+
+$opt{'--ignore-weak-reads=i'} = \(my $opt_ignore_weak_reads = 20);
+
 
 $opt{'--chimera-min-score'} = \(my $opt_chimera_min_score = 0);
 
@@ -385,7 +419,7 @@ open($fch, $mode, $fc_out) || $v->exit("Can't open output read file: '$fc_out'")
 #print $fch (join("\t", '#id', qw(from to score)),"\n") if ! -s $fch;
 
 
-my %PB;
+my %LR;
 
 
 # ref
@@ -393,7 +427,7 @@ if($rpr){ # read fasta to get ref id, length and seq
 	$rpr->seek($opt_ref_offset) if $opt_ref_offset;
 	my $ref_c = 0;
 	while(my $ref = $rpr->next_seq()){
-		$PB{$ref->id} = Sam::Seq->new(
+		$LR{$ref->id} = Sam::Seq->new(
 			ref => $ref,
 			len => length($ref->seq),
 			id => $ref->id
@@ -402,7 +436,7 @@ if($rpr){ # read fasta to get ref id, length and seq
 	}
 }else{# read the sam header to get ref ids and length
 	while(my %h = $sp->next_header_line('SQ')){
-		$PB{$h{'SN'}} = Sam::Seq->new(
+		$LR{$h{'SN'}} = Sam::Seq->new(
 			id => $h{SN}, 
 			len => $h{LN},
 		);
@@ -412,55 +446,58 @@ if($rpr){ # read fasta to get ref id, length and seq
 
 
 # read sam
-my @PB_IDS;
+my @LR_IDS;
 
 $sp->seek($opt_sam_offset) if $opt_sam_offset;
 # w/ reference
 if($rpr){
 	while(my $aln = $sp->next_aln()){
 		# try to add aln, if sufficient score, add to temporary sam file
-		last unless exists $PB{$aln->rname};
+		last unless exists $LR{$aln->rname};
 		$opt_detect_chimera		# binning required for chimera detection
-			? $PB{$aln->rname}->add_aln_by_score($aln)
-			: $PB{$aln->rname}->add_aln($aln);
+			? $LR{$aln->rname}->add_aln_by_score($aln)
+			: $LR{$aln->rname}->add_aln($aln);
 	}
 # w/o reference
 }else{
-	my $ref_seen = 0; # since we read the entire header to %PB, we need to count ref seqs
+	my $ref_seen = 0; # since we read the entire header to %LR, we need to count ref seqs
 	my $ref_id = '';
 	while(my $aln = $sp->next_aln()){
 		# try to add aln, if sufficient score, add to temporary sam file
 		unless ($ref_id eq $aln->rname){
 			$ref_id = $aln->rname;
-			push @PB_IDS, $ref_id;
+			push @LR_IDS, $ref_id;
 			$ref_seen++;
 			last if $opt_max_reads && $ref_seen > $opt_max_reads;
 		}
 		$opt_detect_chimera		# binning required for chimera detection
-			? $PB{$aln->rname}->add_aln_by_score($aln)
-			: $PB{$aln->rname}->add_aln($aln);
+			? $LR{$aln->rname}->add_aln_by_score($aln)
+			: $LR{$aln->rname}->add_aln($aln);
 	}
 }
 
 # calculate consensus
-unless(@PB_IDS){
-	@PB_IDS = sort byfile keys %PB 
+unless(@LR_IDS){
+	@LR_IDS = sort byfile keys %LR 
 }
 
-foreach my $pb_id(@PB_IDS){
+foreach my $pb_id(@LR_IDS){
 	my @hcrs = ();
 	
 	if($rpr && ! $opt_ignore_hcr){
-		if(my $hcrs = $PB{$pb_id}{ref}->desc){
+		if(my $hcrs = $LR{$pb_id}{ref}->desc){
 			while($hcrs =~ /HCR\d+:(\d+),(\d+)/g){
 				push @hcrs, [$1, $2];
 			}
 		};
 	}
 	
-	if($opt_mask_weak_reads && ! @hcrs){
-		if($PB{$pb_id}->{_aln_idc} < $opt_mask_weak_reads){
-			my $seq = $PB{$pb_id}->{ref};
+	if(! @hcrs){
+		if(
+			($opt_mask_weak_reads && $LR{$pb_id}->{_aln_idc} < $opt_mask_weak_reads)
+			|| ($opt_ignore_weak_reads && $LR{$pb_id}->{_aln_idc} < $opt_ignore_weak_reads)
+		){
+			my $seq = $LR{$pb_id}->{ref};
 			unless (ref $seq eq "Fastq::Seq"){
 				$seq = Fastq::Seq->new(
 					substr($seq->seq_head, 1),
@@ -473,20 +510,29 @@ foreach my $pb_id(@PB_IDS){
 				$seq->qual('!' x length ($seq->seq)),
 			}
 			
+			
 			unless ($seq->desc() =~ /IGNORED:low_support/){
 				$seq->desc_append("IGNORED:low support"); 
 				# write to ignored fastq
 				print $fih $seq->id,"\n";
 			}
+			
+			# write unprocessed fastq
+			print $fqh "$seq";
+			
+			# write masked/unprocessed fasta
+			printf $fmh (">%s\n%s\n", substr($seq->seq_head, 1), 
+				$opt_mask_weak_reads ? "N" x length($seq->seq) : $seq->seq);
+
 			next;
 		}
 	}
 	
-	my $con = $PB{$pb_id}->consensus(@hcrs);
+	my $con = $LR{$pb_id}->consensus(@hcrs);
 	
 	# chimera
 	if($opt_detect_chimera){
-		my @coords = $PB{$pb_id}->chimera(); 
+		my @coords = $LR{$pb_id}->chimera(); 
 		
 		#-----------------------------------------------------------------#
 		#my %cigar = (M=>0, I=>0, D=>0);
@@ -494,7 +540,7 @@ foreach my $pb_id(@PB_IDS){
 		#	$cigar{$2}+=$1;
 		#}
 		#my $pred_len = $cigar{M}+$cigar{D};
-		#my $corr_len = length($PB{$pb_id}{ref}->seq)+$cigar{D}-$cigar{I};
+		#my $corr_len = length($LR{$pb_id}{ref}->seq)+$cigar{D}-$cigar{I};
 		#printf("%s\t%s\t%s\n", length($con->seq), $pred_len, $corr_len) if $pred_len !=  $corr_len or length($con->seq) != $corr_len;
 		#
 		#-----------------------------------------------------------------#
@@ -530,7 +576,7 @@ foreach my $pb_id(@PB_IDS){
 						poscorr => $pos_corr,
 						conlen => length ($con->seq),
 						concigar => $con->{cigar},
-						reflen => length ($PB{$pb_id}{ref}->seq),
+						reflen => length ($LR{$pb_id}{ref}->seq),
 						coords => $coords[$i],
 					});
 				};
@@ -541,7 +587,7 @@ foreach my $pb_id(@PB_IDS){
 	}
 	
 	# undef state matrix to make memory availabe again
-	$PB{$pb_id}{_state_matrix} = {}; 
+	$LR{$pb_id}{_state_matrix} = {}; 
 
 	if($opt_hcr_mask_length){
 		# $hcrs[$i][0] == $hcrs[$i][OFFSET] := offset
@@ -571,7 +617,7 @@ foreach my $pb_id(@PB_IDS){
 			# Consider starts shorter then lcr_min_length
 			if($lcr_start_missing > 0){
 				# unmask start if its long enough to be worth it: missing < 50% lcr_min_length
-				if( $lcr_start_missing < 0.5 * $lcr_min_length ){ 
+				if( $lcr_start_missing < $lcr_end_ratio * $lcr_min_length ){ 
 					#$v->hline;
 					#$v->verbose('first hcr to close to start '.$lcr_start_missing);
 					# if OFFSET is adjusted, LENGTH always needs to be adjusted
@@ -595,7 +641,7 @@ foreach my $pb_id(@PB_IDS){
 				my $lcr_end_missing = $lcr_min_length - (length($con_mask->seq) - ($hcrs[$#hcrs][OFFSET] + $hcrs[$#hcrs][LENGTH]));
 				# check if it is to close to the end
 				if($lcr_end_missing  > 0){
-					if($lcr_end_missing < 0.5 * $lcr_min_length ){
+					if($lcr_end_missing < $lcr_end_ratio * $lcr_min_length ){
 						#$v->verbose('last hcr to close to end '.$lcr_end_missing);
 						# shorten last hcr and check its length
 						if( ($hcrs[$#hcrs][LENGTH] -= $lcr_end_missing) < $opt_hcr_mask_length){
@@ -663,10 +709,9 @@ foreach my $pb_id(@PB_IDS){
 		# write (masked) FASTA for next pass
 		printf $fmh (">%s\n%s\n", substr($con->seq_head, 1), $con_mask->seq);
 	}
-
 	
 	# write current fastq
-	print $fqh $con->string;
+	print $fqh "$con";
 	
 }
 
