@@ -1,0 +1,326 @@
+#!/bin/bash
+
+# Author: Thomas Hackl, thomas.hackl@uni-wuerzburg.de
+# Last Modified: Thomas Hackl, 15.06.2013
+# Version 0.10
+
+## TODO
+## FASTQ
+## TEST
+## split prefix multiple files
+
+# Variable defaults
+DEBUG=1;
+CHUNK_NUM=100;
+CHUNK_SIZE_BRUTTO=0;
+CHUNK_SKIP=0;
+CHUNK_COUNT=0;
+CHUNK_RATIO=1;
+SKIP=0;
+OUT="";
+SPLIT=0;
+MAX_BLOCK_SIZE=1000000;
+
+SED_FIRST_FASTA='/^>/q';
+SED_LAST_FASTA='/^>/q'; # last line needs to go to cache
+
+SED_FIRST_FASTQ='/^@/ { # if ^@
+                N # read a second line
+                /\n@/ { s/^@.*\n// ; N} # remove first line and read another
+                N;N;p;q; # read two more lines, print and quit
+        }'
+        
+SED_LAST_FASTQ='/^@/ { # if ^@
+                N # read a second line
+                /\n@/ { N } # read additonal line if second is head
+                N;N;q; # read two more lines, print and quit
+        }'
+
+show_usage()
+{
+  echo "Usage: SeqChunker [OPTIONS ...] FILE1 FILE2 ..."
+}
+
+show_help()
+{
+  show_usage
+  cat <<EOF
+
+SeqChunker efficiently samples and outputs chunks from FASTA and FASTQ files, 
+ e.g. to serve as on-the-fly input for other tools. 
+
+  -n/--chunk-number       Number of chunks to be sampled [$CHUNK_NUM]
+  -s/--chunk-size         Size of chunks to be sampled. 0 means auto-compute for 
+                          each FILE 'FILESIZE/--chunk-number' [$CHUNK_SIZE_BRUTTO]
+  -k/--chunk-skip         Skip this many chunks in output [$CHUNK_SKIP]
+  -c/--chunk-count        Stop outputting after this many outputted chunks. 0 means all [$CHUNK_COUNT] 
+  -r/--chunk-ratio        Fraction of each chunk to  actually be outputted [$CHUNK_RATIO]
+  -o/--out                Output filename. To split chunks into single files provide a
+                          "printf" pattern, e.g. "chunk%02d.fa", with a substitution for 
+                          the chunk counter.
+  -m/--max-block-size     Maximum size of blocks in output stream [$MAX_BLOCK_SIZE]
+  -q/--quiet              Suppress non-critical messages
+  -d/--debug              Output more verbose messages
+  -h/--help               Show this help screen
+
+NOTE: Chunk related computations are run each input file individually.
+
+NOTE: Do not use chunk sizes similar to or smaller than the expected record 
+ sizes. Heuristics get messed up and cause unpredictable behaviour.
+
+EOF
+}
+
+# Execute getopt
+ARGS=`getopt --name "SeqChunker" \
+    --options "n:s:k:c:r:b:m:o:qdh" \
+    --longoptions "chunk-number:,chunk-size:,chunk-count:,chunk-skip:,chunk-ratio:,byte-skip:,out:,quiet,debug,help" \
+    -- "$@"`
+
+#Bad arguments
+[ $? -ne 0 ] && exit 1;
+
+# A little magic
+eval set -- "$ARGS"
+
+# Now go through all the options
+while true; do
+    case "$1" in
+        -n|--chunk-number)
+            [ ! -n "$2" ] && (echo "$1: value required" 1>&2 && exit 1);
+            if [[ "$2" =~ [^0-9] ]]; then
+                echo "$1: '$2' not an INT" 1>&2;
+                exit 1;
+            fi;
+            CHUNK_NUM=$2;
+            shift 2;;
+
+        -s|--chunk-size)
+            [ ! -n "$2" ] && (echo "$1: value required" 1>&2 && exit 1);
+            if [[ "$2" =~ [^0-9] ]]; then
+                echo "$1: '$2' not an INT" 1>&2;
+                exit 1;
+            fi;
+            CHUNK_SIZE_BRUTTO=$2
+            shift 2;;
+
+        -k|--chunk-skip)
+            [ ! -n "$2" ] && (echo "$1: value required" 1>&2 && exit 1);
+            if [[ "$2" =~ [^0-9] ]]; then
+                echo "$1: '$2' not an INT" 1>&2;
+                exit 1;
+            fi;
+            CHUNK_SKIP=$2;
+            shift 2;;
+
+        -c|--chunk-count)
+            [ ! -n "$2" ] && (echo "$1: value required" 1>&2 && exit 1);
+            if [[ "$2" =~ [^0-9] ]]; then
+                echo "$1: '$2' not an INT" 1>&2;
+                exit 1;
+            fi;
+            CHUNK_COUNT=$2
+            shift 2;;
+
+        -r|--chunk-ratio)
+            [ ! -n "$2" ] && (echo "$1: value required" 1>&2 && exit 1);
+            if [[ "$2" =~ [^0-9.] ]]; then
+                echo "$1: '$2' not a FLOAT" 1>&2;
+                exit 1;
+            fi;
+	        CHUNK_RATIO=$2
+	        shift 2;;
+
+        -o|--out)
+            [ ! -n "$2" ] && (echo "$1: value required" 1>&2 && exit 1);
+            OUT=$2
+            shift 2;;
+            	     
+        -m|--max-block-size)
+            [ ! -n "$2" ] && (echo "$1: value required" 1>&2 && exit 1);
+            if [[ "$2" =~ [^0-9] ]]; then
+                echo "$1: '$2' not an INT" 1>&2;
+                exit 1;
+            fi;
+            MAX_BLOCK_SIZE=$2
+            shift 2;;
+
+        -q|--quiet)
+           DEBUG=0
+           shift;;
+
+        -d|--debug)
+           DEBUG=2
+           shift;;
+           	    	        	        
+	    -h|--help)
+	       show_help && exit 0;;
+	       
+        --)
+            shift
+            break;;
+        *)
+            echo "$1: Unknown option" 1>&2 && exit 1;;
+  esac
+done
+
+        # -b|--byte-skip)
+            #    [ ! -n "$2" ] && (echo "$1: value required" 1>&2 && exit 1);
+            #if [[ "$2" =~ [^0-9] ]]; then
+                #    echo "$1: '$2' not an INT" 1>&2;
+                #exit 1;
+            #fi;
+            #SKIP=$2
+            #shift 2;;
+
+[ $DEBUG -gt 1 ] && echo "ARGS=$ARGS" 1>&2;
+
+[ $# -eq 0 ] && (echo "FILE required" 1>&2 && show_usage && exit 1)
+
+# process some vars
+[ $CHUNK_COUNT -eq 0 ] && CHUNK_COUNT=$(( $CHUNK_NUM-$CHUNK_SKIP ))
+
+# process files
+for FILE in $@; do
+    
+    FILE_SIZE=$( stat -L -c %s $FILE)
+    [ $? -ne 0 ] && exit 1;
+    [ $DEBUG -gt 1 ] && echo "FILE_SIZE=$FILE_SIZE" 1>&2;
+
+    # FASTA/FASTQ
+    IS_FASTQ=$(head -c 1 "$FILE" | sed 's/[^>@]/\!/;s/>/0/;s/@/1/;s/\n//'); 
+    if [ "$IS_FASTQ" = "!" ]; then
+        echo "FILE neither FASTA nor FASTQ" 1>&2 
+        exit 1
+    fi;
+
+        # auto compute chunk size
+	if [ $CHUNK_SIZE_BRUTTO -eq 0 ]; then
+		CHUNK_SIZE_BRUTTO=$(LC_NUMERIC="en_US.UTF-8" printf "%.0f" `bc <<< "scale=3; $FILE_SIZE/$CHUNK_NUM"` );
+		CHUNK_SIZE_NETTO=$(LC_NUMERIC="en_US.UTF-8" printf "%.0f" `bc<<< "scale=3; ($FILE_SIZE/$CHUNK_NUM)*$CHUNK_RATIO"` );
+		CHUNK_SIZE_DELTA=$(LC_NUMERIC="en_US.UTF-8" printf "%.0f" `bc<<< "scale=3; $CHUNK_SIZE_BRUTTO-$CHUNK_SIZE_NETTO"` );
+	else
+	    CHUNK_SIZE_NETTO=$(LC_NUMERIC="en_US.UTF-8" printf "%.0f" `bc <<< "scale=3; $CHUNK_SIZE_BRUTTO*$CHUNK_RATIO"` )
+	fi;
+    
+	[ $DEBUG -gt 1 ] && (
+		echo CHUNK_SIZE_BRUTTO=$CHUNK_SIZE_BRUTTO 1>&2;
+		echo CHUNK_SIZE_NETTO=$CHUNK_SIZE_NETTO 1>&2;
+		echo CHUNK_SIZE_DELTA=$CHUNK_SIZE_DELTA 1>&2;
+    )
+	
+	REC_CACHE="";
+	CHUNK_SIZE_ADJUST=0;
+	
+	(
+       	
+        # CHUNK OUTPUT
+        for I in $(seq $(( -$CHUNK_SKIP )) $(( $CHUNK_COUNT - 1 )) ); do
+			if [ $DEBUG -gt 1 ]; then
+			    [ $I -ge 0 ] && echo "CHUNK="$I 1>&2;
+			    [ $I -lt 0 ] && echo "SKIPPED_CHUNK="$I 1>&2;
+			fi;
+			
+			if [ $I -ge 0 ] && [ ! -z "$OUT" ]; then
+                if [[ $OUT =~ % ]]; then
+                    OUT_CHUNK=$(printf $OUT $I);
+			        eval "exec 3>$OUT_CHUNK";
+			    else
+			        eval "exec 3>$OUT";
+			    fi;
+			else
+			    exec 3>&1;
+			fi;
+			
+            # check cache
+			if [ ! -z "$REC_CACHE" ]; then
+            [ $DEBUG -gt 1 ] && echo "  cache:" ${#REC_CACHE} byte 1>&2;
+			[ $I -ge 0 ] && echo "$REC_CACHE" 1>&3;
+  
+            else
+				# first record
+                if [ $IS_FASTQ  -eq 0 ]; then
+			   	    PRE_REC_TAIL_AND_FIRST_REC_HEAD=$(sed --unbuffered -n -e "$SED_FIRST_FASTA");
+	                PRE_REC_TAIL=$(echo "$PRE_REC_TAIL_AND_FIRST_REC_HEAD" | head -n -1);
+	                FIRST_REC_HEAD=$(echo "$PRE_REC_TAIL_AND_FIRST_REC_HEAD" | tail -n 1);
+	            else
+                    PRE_REC_TAIL_AND_FIRST_REC_HEAD=$(sed --unbuffered -n -e "$SED_FIRST_FASTQ");
+                    PRE_REC_TAIL=$(echo "$PRE_REC_TAIL_AND_FIRST_REC_HEAD" | head -n -4);
+                    FIRST_REC_HEAD=$(echo "$PRE_REC_TAIL_AND_FIRST_REC_HEAD" | tail -n 4);
+                fi;
+                # might be eof ??
+                [ -z "$FIRST_REC_HEAD" ] || ( [ $I -ge 0 ] && echo "$FIRST_REC_HEAD" 1>&3 );
+                CHUNK_SIZE_ADJUST=$(( $CHUNK_SIZE_ADJUST + ${#PRE_REC_TAIL} ));
+                if [ $DEBUG -gt 1 ]; then
+                    echo "  pre record tail:" ${#PRE_REC_TAIL} byte 1>&2;
+                    echo "  first record start:" ${#FIRST_REC_HEAD} byte 1>&2;
+                fi;
+			fi;
+			
+			# chunk core
+            # adjust $CHUNK_SIZE_NETTO for $CHUNK_SIZE_ADJUST
+		    CHUNK_SIZE=$(( $CHUNK_SIZE_NETTO - $CHUNK_SIZE_ADJUST ))
+			[ $DEBUG -gt 1 ] && echo "  chunk content:" $CHUNK_SIZE byte 1>&2;
+		    
+			if [ $CHUNK_SIZE -gt $MAX_BLOCK_SIZE ]; then
+		        BLOCK_COUNT=$(( $CHUNK_SIZE / $MAX_BLOCK_SIZE ))
+		        BLOCK_REST=$(( $CHUNK_SIZE % $MAX_BLOCK_SIZE ))
+			    [ $DEBUG -gt 1 ] && (
+			        echo BLOCK_COUNT=$BLOCK_COUNT 1>&2;
+			        echo BLOCK_REST=$BLOCK_REST 1>&2;
+			    )
+			    if [ $I -lt 0 ]; then
+                    dd bs=$MAX_BLOCK_SIZE skip=$BLOCK_COUNT count=0 2>/dev/null;
+                    dd bs=$BLOCK_REST skip=1 count=0 2>/dev/null;
+			    else
+					dd bs=$MAX_BLOCK_SIZE count=$BLOCK_COUNT 1>&3 2>/dev/null;
+					dd bs=$BLOCK_REST count=1 1>&3 2>/dev/null;
+                fi;
+			elif [ $CHUNK_SIZE -gt 0 ]; then
+				if [ $I -lt 0 ]; then
+				    dd bs=$CHUNK_SIZE skip=1 count=0 2>/dev/null;
+			    else
+				    dd bs=$CHUNK_SIZE count=1 1>&3 2>/dev/null;
+                fi;
+			fi;
+			
+			if [ $IS_FASTQ -eq 0 ]; then
+				# last record
+				LAST_REC_TAIL_AND_POST_REC_HEAD=$(sed --unbuffered -e "$SED_LAST_FASTA");
+				LAST_REC_TAIL=$(echo "$LAST_REC_TAIL_AND_POST_REC_HEAD" | head -n -1);
+	            [ $DEBUG -gt 1 ] && echo "  last record end:" ${#LAST_REC_TAIL} byte 1>&2;
+				[ -z "$LAST_REC_TAIL" ] || ( [ $I -ge 0 ] && echo "$LAST_REC_TAIL" ) 1>&3;
+			    if [ $CHUNK_RATIO = "1" ]; then
+	    			REC_CACHE=$(echo "$LAST_REC_TAIL_AND_POST_REC_HEAD" | tail -n 1);
+					CHUNK_SIZE_ADJUST=${#LAST_REC_TAIL_AND_POST_REC_HEAD}
+	            else
+	                CHUNK_SIZE_ADJUST=0
+	    			CHUNK_SIZE_SKIP=$(( $CHUNK_SIZE_DELTA - ${#LAST_REC_TAIL} ))
+					[ $DEBUG -gt 1 ] && echo "  inter-chunk skipping:" $CHUNK_SIZE_SKIP byte 1>&2;
+					dd bs=1 skip=$CHUNK_SIZE_SKIP count=0 status=noxfer 2>/dev/null; 
+				fi;
+			    
+			else
+                # last record
+                LAST_REC_TAIL_AND_POST_REC_HEAD=$(sed --unbuffered -e "$SED_LAST_FASTQ");
+                LAST_REC_TAIL=$(echo "$LAST_REC_TAIL_AND_POST_REC_HEAD" | head -n -4);
+                [ $DEBUG -gt 1 ] && echo "  last record end:" ${#LAST_REC_TAIL} byte 1>&2;
+                [ -z "$LAST_REC_TAIL" ] || ( [ $I -ge 0 ] && echo "$LAST_REC_TAIL" ) 1>&3;
+                if [ $CHUNK_RATIO = "1" ]; then
+                    REC_CACHE=$(echo "$LAST_REC_TAIL_AND_POST_REC_HEAD" | tail -n 4);
+                    CHUNK_SIZE_ADJUST=${#LAST_REC_TAIL_AND_POST_REC_HEAD}
+                else
+                    CHUNK_SIZE_ADJUST=0
+                    CHUNK_SIZE_SKIP=$(( $CHUNK_SIZE_DELTA - ${#LAST_REC_TAIL} ))
+                    [ $DEBUG -gt 1 ] && echo "  inter-chunk skipping:" $CHUNK_SIZE_SKIP byte 1>&2;
+                    dd bs=1 skip=$CHUNK_SIZE_SKIP count=0 status=noxfer 2>/dev/null; 
+                fi;
+			    			    
+			fi;
+		done;
+	
+	) < "$FILE";
+
+done;
+
+

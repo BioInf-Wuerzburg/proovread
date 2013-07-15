@@ -59,6 +59,25 @@ Correct single molecule sequencing reads by iterative mapping of high
 
 =cut
 
+
+
+=head2 1.01
+
+=over
+
+=item [Feature/Change] dynamic --min-lcr-ratio w/r/t short read length 
+ replaces fixed --min-lcr-length.
+
+=item [BugFix] --min-lcr-length not correctly respected.
+
+=item [Feature] Less biased on the fly sampling of short reads by feeding 
+ SeqChunker output to shrimp STDIN.
+
+=back
+
+=cut
+
+
 =head2 1.00
 
 =over
@@ -944,10 +963,11 @@ foreach my $task(@TASKS){
 
 		run_shrimp(
 			sr_files => $opt_sr_file,
-			($sr_count_total > 1_000_000
-				? (stop_after => $sr_count_total * $cfg{'sr-pre-fraction'}{$task})
-				: ()
-			),
+			sr_fraction => $cfg{'sr-pre-fraction'}{$task},
+#			($sr_count_total > 1_000_000
+#				? (stop_after => $sr_count_total * $cfg{'sr-pre-fraction'}{$task})
+#				: ()
+#			),
 			shrimp => {
 				%{$cfg{$task}}, # basic shrimp params from cfg
 				'verbose' => 1,
@@ -973,10 +993,11 @@ foreach my $task(@TASKS){
 
 		run_shrimp(
 			sr_files => $opt_sr_file,
-			($sr_count_total > 1_000_000
-				? (stop_after => $sr_count_total * $cfg{'sr-pre-fraction'}{$task})
-				: ()
-			),
+			sr_fraction => $cfg{'sr-pre-fraction'}{$task},
+#			($sr_count_total > 1_000_000
+#				? (stop_after => $sr_count_total * $cfg{'sr-pre-fraction'}{$task})
+#				: ()
+#			),
 			shrimp => {
 				%{$cfg{$task}}, # basic shrimp params from cfg
 				'verbose' => 1,
@@ -1257,10 +1278,12 @@ Run and process shrimp
 sub run_shrimp{
 	my $p = {
 		sr_files => [],
+		sr_fraction => 1,
 		shrimp => {},
 		tmp_sam => task_file_name("_tmp.sam"),
 		ram_sam => $opt_ram_sam,
-		stop_after => 0,
+# DEPRECATED: pre-SeqChunker
+		#stop_after => 0,
 		@_
 	};
 	
@@ -1298,10 +1321,10 @@ sub run_shrimp{
 	
 	### foreach sr file read mappings	
 	foreach my $sr_file (@{$p->{sr_files}}){
-
+		my $sr_count_netto = int(($sr_count[$sr_file_c] * $p->{sr_fraction})+0.5);
 		# init input stream parser progess bar	
-		$pg_rsp = Verbose::ProgressBar->new(size => $p->{stop_after} ? $p->{stop_after} : $sr_count[$sr_file_c]);
-		$pg_step = int(($sr_count[$sr_file_c]/10000)+0.5) || 1; # never be zero
+		$pg_rsp = Verbose::ProgressBar->new(size => $sr_count_netto);
+		$pg_step = int(($sr_count_netto/10000)+0.5) || 1; # never be zero
 		
 		$VS->verbose("Mapping short reads `$sr_file`");
 
@@ -1309,7 +1332,22 @@ sub run_shrimp{
 		my $shrimp = Shrimp->new( 
 			%{$p->{shrimp}},
 			'ref' => undef,
-			'reads' => $sr_file,
+			($p->{sr_fraction} < 1
+				? (
+					'reads' => '/dev/fd/0',
+					'pre_command' => seq_chunker(
+						'NO_EXEC',
+						$sr_file,
+						'--chunk-ratio' => $p->{sr_fraction},
+						'--chunk-number' => ($sr_count_netto / $cfg{'seq-chunker'}{'--chunk-number'} < 100
+							? int($sr_count_netto / 100) || 1
+							: $cfg{'seq-chunker'}{'--chunk-number'}
+						),
+					) . ' | ',
+				)
+				: ('reads' => $sr_file)
+			),
+				
 			'log' => task_file_name("_shrimp_sr".$sr_file_c.".log"),
 			'--progress' => $pg_step,
 			'--load' => task_file_name("_shrimp_idx"),
@@ -1390,15 +1428,15 @@ sub run_shrimp{
 					($src) = $tail =~ /(\d+)\s+\S+\s+\S+\s*$/;
 					$pg_rsp->update($src) if defined $src; 
 				}
-				
-				# shrimp pre, cancel after first fraction of reads
-				# TODO: adjust length of ProgressBar
-				if($src && $p->{stop_after} && $src > $p->{stop_after}){
-					#$V->verbose('$src: '.$src);
-					$VB->nline();
-					$shrimp->cancel(); # cancel shrimp
-					last;
-				}
+
+# DEPRECATED: pre-SeqChunker				
+#				# shrimp pre, cancel after first fraction of reads
+#				if($src && $p->{stop_after} && $src > $p->{stop_after}){
+#					#$V->verbose('$src: '.$src);
+#					$VB->nline();
+#					$shrimp->cancel(); # cancel shrimp
+#					last;
+#				}
 				
 				$rsp_c++;
 			}
@@ -1414,7 +1452,7 @@ sub run_shrimp{
 
 
 		# get final short read count of this file
-		$pg_rsp->finish($p->{stop_after} ? $p->{stop_after} : $sr_count[$sr_file_c]);
+		$pg_rsp->finish($sr_count_netto);
 
 		# finish shrimp run
 		$shrimp->finish;
@@ -1936,6 +1974,38 @@ sub chim_filter{
 	qx($cmd_chim_fil);
 	$VB->hline;
 	
+}
+
+
+=head2 seq_chunker
+
+Run SeqChunker. NO_EXEC as first param to only get command.
+
+=cut
+
+
+sub seq_chunker{
+	my $no_exec;
+	if($_[0] eq 'NO_EXEC'){
+		shift @_;
+		$no_exec++;
+	}
+	my @files;
+	while($_[0] && $_[0] !~ /^-/){
+		push @files, shift @_;
+	}
+	
+	my %params = @_;
+	my $params = param_join(\%params);
+	my $files = join(" ", @files);
+	my $cmd = "$RealBin/SeqChunker $params $files";
+	
+	return $cmd if $no_exec;
+	
+	$VB->hline;
+	$VB->verbose($cmd);
+	qx($cmd);
+	$VB->hline;
 }
 
 =head2 seq_filter
