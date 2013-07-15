@@ -68,7 +68,7 @@ Correct single molecule sequencing reads by iterative mapping of high
 =item [Feature/Change] dynamic --min-lcr-ratio w/r/t short read length 
  replaces fixed --min-lcr-length.
 
-=item [BugFix] --min-lcr-length not correctly respected.
+=item [BugFix] --min-lcr-length not correctly respected in sam2cns.
 
 =item [Feature] Less biased on the fly sampling of short reads by feeding 
  SeqChunker output to shrimp STDIN.
@@ -641,7 +641,8 @@ $opt_sam_file && ! -f $opt_sam_file && pod2usage("Cannot find sam file `$opt_sam
 
 =cut
 
-$opt_prefix = 'proovread' unless defined $opt_prefix;
+$opt_prefix = 'proovread' unless $opt_prefix;
+$VS->exit("Bad chars in prefix: $opt_prefix") if $opt_prefix =~ '^-';
 
 # DEPRECATED
 #unless ($opt_prefix){
@@ -704,8 +705,8 @@ my $sr_qv_offset_total;
 my @sr_matched;
 my @sr_bps;
 
-my $mean_sr_length;
-my $mean_sr_dev;
+my $min_sr_length;
+my $max_sr_dev;
 my $min_lcr_length;
 
 if(@$opt_sr_file){
@@ -805,15 +806,12 @@ if(@$opt_sr_file){
 	$sr_qv_offset_total = $opt_sr_qv_offset unless defined $sr_qv_offset_total;
 	
 	if(@$opt_sr_file){
-		$mean_sr_length += $_ for @sr_length;
-		$mean_sr_length /= @sr_length;
+		$min_sr_length = (sort{$a<=>$b}@sr_length)[0];
+		$max_sr_dev = (sort{$b<=>$a}@sr_length_dev)[0];
 	
-		$mean_sr_dev += $_ for @sr_length_dev;
-		$mean_sr_dev /= @sr_length_dev;
-	
-		$min_lcr_length = $mean_sr_length + $mean_sr_dev;
-		$min_lcr_length += $min_lcr_length * 0.15; # add another 15 percent
-		$min_lcr_length = int($min_lcr_length + 0.5);
+		$min_lcr_length = $min_sr_length + $max_sr_dev;
+		$min_lcr_length *= $cfg{'min-lcr-ratio'}; # add another 15 percent
+		$min_lcr_length = int($min_lcr_length + 0.5); # round
 	}
 }
 
@@ -835,7 +833,7 @@ if($opt_sam_file){
 	@TASKS = @{$cfg{'mode-tasks'}{$opt_mode}};
 }else{
 	unless($opt_mode){
-		if($mean_sr_length > 260){
+		if($min_sr_length > 260){
 			$opt_mode = 'pacbio-ccs';
 			@TASKS = @{$cfg{'mode-tasks'}{$opt_mode}};
 		}else{
@@ -1684,7 +1682,7 @@ sub read_long{
 			);
 			
 			while(my $lr = $lrpr->next_seq){
-				if(length($lr->seq) < 2*$mean_sr_length){
+				if(length($lr->seq) < 2*$min_sr_length){
 					$V->verbose("Ignoring stubby (".length($lr->seq)."bp) read: ".$lr->id);
 					next;
 				}

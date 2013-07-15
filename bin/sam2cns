@@ -64,6 +64,9 @@ Compute consensus sequences based on SAM file.
 
 =over
 
+=item [BugFix] C<< --min-lcr-length >> between hcrs was messed up. Refactored
+ entire block.
+
 =item [Feature] C<< lcr-end-ratio >> to control end mask/unmask behaviour.
 
 =item [Feature] Improved masking, ends are either unmasked or masked to the
@@ -637,7 +640,7 @@ foreach my $pb_id(@LR_IDS){
 			} 
 			
 			# mask/unmask end
-			if( scalar @hcrs){ # check if there are HCRs, might be trimmed by first
+			if( scalar @hcrs ){ # check if there are HCRs, might be trimmed by first
 				my $lcr_end_missing = $lcr_min_length - (length($con_mask->seq) - ($hcrs[$#hcrs][OFFSET] + $hcrs[$#hcrs][LENGTH]));
 				# check if it is to close to the end
 				if($lcr_end_missing  > 0){
@@ -646,64 +649,55 @@ foreach my $pb_id(@LR_IDS){
 						# shorten last hcr and check its length
 						if( ($hcrs[$#hcrs][LENGTH] -= $lcr_end_missing) < $opt_hcr_mask_length){
 							#$v->verbose('last hcr to short');
-							pop @hcrs; # remove first hcr if it becomes to short after trimming
+							pop @hcrs; # remove last hcr if it becomes to short after trimming
 						}
 					}else{# extend hcr to end of seq
-						$hcrs[$#hcrs][LENGTH] += $lcr_min_length - $lcr_end_missing
+						$hcrs[$#hcrs][LENGTH] += $lcr_min_length - $lcr_end_missing +1
 					}
 				}
 			} 
 			
 			# make sure unmask regions are large enough to map more reads
-			# do not process first/last
-			my @remove_hcrs;
-			if(@hcrs > 2){
-				for($i=2; $i < @hcrs-1; $i++){
-					my $start_b = $hcrs[$i][OFFSET];
-					my $end_a = $hcrs[$i-1][OFFSET] + $hcrs[$i-1][LENGTH];
-					# lcr to short
-					if( (my $lcr_min_missing = $lcr_min_length - ($start_b - $end_a)) > 0 ){
-						#$v->verbose('lcr missing '.$lcr_min_missing.' between h'.($i-1).' and h'.($i));
-						
-						#  what if: move forward start_b by half the missing nts	
-						my $el = $hcrs[$i][LENGTH] - $lcr_min_missing/2;
-						if($el < $opt_hcr_mask_length){
-							#$v->verbose('h'.($i).' to short: '."$el < $opt_hcr_mask_length");	
-							push @remove_hcrs, $i;
-							$i++; # skip one
-							next; # dont change previous hcr
-						}
-						
-						# what if: move back end_e by half the missing nts
-						my $sl = $hcrs[$i-1][LENGTH] - $lcr_min_missing/2;
-						if($sl < $opt_hcr_mask_length){
-							#$v->verbose('h'.($i-1).' to short: '."$sl < $opt_hcr_mask_length");	
-							push @remove_hcrs, $i-1;
-							next; # dont change next hcr
-						}
+			my @keep_hcrs;
 
-						# move forward start_b by half the missing nts
-						$hcrs[$i][OFFSET] += $lcr_min_missing/2;
-						$hcrs[$i][LENGTH] -= $lcr_min_missing/2;
-						
-						# move back end_e by half the missing nts
-						$hcrs[$i-1][LENGTH] -= $lcr_min_missing/2;
-						#$v->verbose('hcrs trimmed');	
+			if( scalar @hcrs){ # check if there are HCRs, might be trimmed by first
+				my ($ha, $hb) = shift @hcrs;
+				while($hb = shift @hcrs){
+					next unless $ha;
+					my $hbs = $hb->[OFFSET]; # start
+					my $hae = $ha->[OFFSET] + $ha->[LENGTH]; # end
+					# lcr to short
+					
+					if( (my $lcr_min_missing = $lcr_min_length - ($hbs - $hae)) > 0 ){
+						# what if adjusted both length
+						my $hal = $ha->[LENGTH] - $lcr_min_missing/2;
+						my $hbl = $hb->[LENGTH] - $lcr_min_missing/2;
+						if($hbl < $opt_hcr_mask_length){ # hb short
+							# ha stays ha unchanged, hb isnt kept, but overwritten
+							next;
+						}elsif($hal < $opt_hcr_mask_length){ # ha short
+							$ha=$hb; # set hb to new ha, unchanged, dont keep ha
+							next; # restart cycle
+						}else{ # both long enough
+							# make the changes
+							$ha->[LENGTH] -= $lcr_min_missing/2;
+							
+							$hb->[OFFSET] += $lcr_min_missing/2;
+							$hb->[LENGTH] -= $lcr_min_missing/2;
+							
+							push @keep_hcrs, $ha; # store ha
+							$ha=$hb; # set hb to new ha
+							next; # restart cycle
+						}
 					}
+				}	
+				# process last hcr, now ha
+				if( $ha->[LENGTH] >= $opt_hcr_mask_length ){
+					push @keep_hcrs, $ha;
 				}
 			}
 			
-			# remove hcrs which became to small after masking
-			# reverse or else we mess up 
-			# incex if stuff at the beginning gets removed
-			foreach (reverse @remove_hcrs){ 
-				#$v->verbose('removing h'.$_);	
-				splice @hcrs, $_, 1;
-			}
-
-			#$v->hline;
-
-			$con_mask->mask_seq(@hcrs) if @hcrs;
+			$con_mask->mask_seq(@keep_hcrs) if @keep_hcrs;
 		}
 	
 		# write (masked) FASTA for next pass
