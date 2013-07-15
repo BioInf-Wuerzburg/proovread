@@ -12,7 +12,7 @@ use lib './';
 
 use Verbose;
 
-our $VERSION = '0.06';
+our $VERSION = '0.07';
 
 
 
@@ -58,6 +58,17 @@ SHRiMP (2.2.0) gmapper interface.
 =cut
 
 =head1 CHANGELOG
+
+=head2 0.07
+
+=over
+
+=item [Feature] pre_command: prepend a command before shrimp call, e.g. to
+ read its STDOUT.
+
+=back
+
+=cut
 
 =head2 0.06
 
@@ -247,6 +258,7 @@ sub new {
 		'ref' => undef,
 		reads => undef,
 		mates => undef,
+		pre_command => undef,
 		# overwrites
 		@_,
 		
@@ -533,7 +545,13 @@ sub _build_command{
 		$V->exit("Reference missing (ref)") 
 	};
 	
-	$self->{command} = join(" ", @command);	
+	$self->{command} = join(" ", @command);
+	
+	if($self->{pre_command}){
+		$self->{command} = $self->{pre_command}.$self->{command};
+	}
+	
+	return $self->{command}
 }
 
 
