@@ -627,9 +627,13 @@ foreach my $pb_id(@LR_IDS){
 		# compute high coverage regions 
 		my @hcrs = ($con_mask->qual_lcs());
 		if(@hcrs){
-			my $seq_length = length($con_mask->seq);
+			my $hcr_c = 0;
+			# create a description string of hcrs in seq
+			my @hcrs_string = map{"HCR".++$hcr_c.":".$_->[OFFSET].','.$_->[LENGTH]}@hcrs;
+			# add desc to header
+			$con->{seq_head}.= ' '.join(" ", @hcrs_string);
+
 			#hcr sticky
-			# add sticky ends
 			foreach(@hcrs){
 				$_->[OFFSET]+=$hcr_sticky_length; 
 				$_->[LENGTH]-=($hcr_sticky_length * 2);
@@ -637,6 +641,7 @@ foreach my $pb_id(@LR_IDS){
 			
 			#head
 			# mask/unmask start
+			my $seq_length = length($con_mask->seq);
 			my $lcr_start_short = $lcr_min_length - $hcrs[0][OFFSET];
 			# Consider starts shorter then lcr_min_length
 			if($lcr_start_short > 0){
