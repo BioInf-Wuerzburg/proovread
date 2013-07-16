@@ -64,8 +64,8 @@ Compute consensus sequences based on SAM file.
 
 =over
 
-=item [BugFix] C<< --min-lcr-length >> between hcrs was messed up. Refactored
- entire block.
+=item [BugFix/Refac] C<< --min-lcr-length >> between hcrs was messed up. Refactored
+ entire block, twice :).
 
 =item [Feature] C<< lcr-end-ratio >> to control end mask/unmask behaviour.
 
@@ -515,9 +515,9 @@ foreach my $pb_id(@LR_IDS){
 			
 			
 			unless ($seq->desc() =~ /IGNORED:low_support/){
-				$seq->desc_append("IGNORED:low support"); 
+				$seq->desc_append("IGNORED:low_support"); 
 				# write to ignored fastq
-				print $fih $seq->id,"\n";
+				print $fih "%s\t%s\n", $seq->id, "low_support";
 			}
 			
 			# write unprocessed fastq
@@ -601,6 +601,118 @@ foreach my $pb_id(@LR_IDS){
 		# compute high coverage regions 
 		my @hcrs = ($con_mask->qual_lcs());
 		if(@hcrs){
+			my $seq_length = length($con_mask->seq);
+			#hcr sticky
+			# add sticky ends
+			foreach(@hcrs){
+				$_->[OFFSET]+=$opt_hcr_sticky_length; 
+				$_->[LENGTH]-=($opt_hcr_sticky_length * 2);
+			}	
+			
+			#head
+			# mask/unmask start
+			my $lcr_start_short = $lcr_min_length - $hcrs[0][OFFSET];
+			# Consider starts shorter then lcr_min_length
+			if($lcr_start_short > 0){
+				# unmask start if its long enough to be worth it: short < 50% lcr_min_length
+				if( $lcr_start_short < $lcr_end_ratio * $lcr_min_length ){ 
+					#$v->hline;
+					#$v->verbose('first hcr to close to start '.$lcr_start_short);
+					# if OFFSET is adjusted, LENGTH always needs to be adjusted
+					#  as well or the HCR is just shifted
+					# adjust length, check for hcr_min_length
+					if( ($hcrs[0][LENGTH] -= $lcr_start_short) < $opt_hcr_mask_length){
+						#$v->verbose('first hcr to short: '.$hcrs[0][LENGTH]);
+						shift @hcrs; # remove first hcr if it becomes to short after trimming
+					}else{
+						#$v->verbose('first hcr trimmed');
+						$hcrs[0][OFFSET] += $lcr_start_short;
+					}
+				}else{# mask start completely
+					$hcrs[0][LENGTH] += $hcrs[0][OFFSET];
+					$hcrs[0][OFFSET] = 0;
+				}
+			} 
+			
+			# mask/unmask end
+			if( scalar @hcrs ){ # check if there are HCRs, might be trimmed by first
+				my $lcr_end_short = $lcr_min_length - ($seq_length - ($hcrs[$#hcrs][OFFSET] + $hcrs[$#hcrs][LENGTH]));
+				# check if it is to close to the end
+				if($lcr_end_short  > 0){
+					if($lcr_end_short < $lcr_end_ratio * $lcr_min_length ){
+						#$v->verbose('last hcr to close to end '.$lcr_end_short);
+						# shorten last hcr and check its length
+						if( ($hcrs[$#hcrs][LENGTH] -= $lcr_end_short) < $opt_hcr_mask_length){
+							#$v->verbose('last hcr to short');
+							pop @hcrs; # remove last hcr if it becomes to short after trimming
+						}
+					}else{# extend hcr to end of seq
+						$hcrs[$#hcrs][LENGTH] += $lcr_min_length - $lcr_end_short
+					}
+				}
+			} 
+			
+			# precompute changes
+			my $cc=0;
+			while( @hcrs ){
+				#print "#- hcr trimming cycle ", ++$cc, " --#\n";
+				# create temporary hash structure with indexes as keys
+				my %hcrs;
+				my @hcrs_short_idx;
+				@hcrs{0..$#hcrs} = @hcrs;
+				# find + extend short hcrs
+				# + cache short hcr idxs
+				my $i=0;
+				for(;$i<$#hcrs;$i++){
+					# compute gap to next
+					my ($ha, $hb) = ($hcrs{$i}, $hcrs{$i+1});
+					my $hae = $ha->[OFFSET]+$ha->[LENGTH];
+					my $hbs = $hb->[OFFSET];
+					if((my $lcr_short = $lcr_min_length - ($hbs - $hae)) > 0){
+						my $lcr_short_a = int($lcr_short/2);
+						my $lcr_short_b = $lcr_short_a + $lcr_short%2; 
+						$ha->[LENGTH] -= $lcr_short_a;
+						if( $ha->[LENGTH] < $opt_hcr_mask_length ){ # $ha is completely processed
+							push @hcrs_short_idx, $i 
+						}
+						$hb->[OFFSET] += $lcr_short_b;
+						$hb->[LENGTH] -= $lcr_short_b;
+					}
+				}
+				# and dont forget the last hcr length
+				if( $hcrs{$i}[LENGTH] < $opt_hcr_mask_length ){ # $ha is completely processed
+					push @hcrs_short_idx, $i 
+				}
+				
+				# skip longer adjacent
+				my @hcrs_short_idx_clean;
+				foreach (@hcrs_short_idx){
+					unless(@hcrs_short_idx_clean){
+						push @hcrs_short_idx_clean, $_
+					}elsif( $_ -1 == $hcrs_short_idx_clean[-1] ){ # adjacent
+						# compare lengths
+						if($hcrs{$_}[LENGTH] < $hcrs{$hcrs_short_idx_clean[-1]} ){
+							# prev was longer, remove from clean, push new
+							pop @hcrs_short_idx_clean;
+							push @hcrs_short_idx_clean, $_;
+						}
+						# else do nothing -> skip
+					}else{ # non adjacent
+						push @hcrs_short_idx_clean, $_
+					}
+				}
+				
+				# all conflicting hcrs/lcrs trimmed
+				last unless @hcrs_short_idx_clean;
+				
+				# prepare hcrs for next cycle
+				foreach (@hcrs_short_idx_clean){
+					splice(@hcrs, $_, 1);
+				}
+			}
+
+	
+=pod DEPRECATED			
 			my $i = 0;
 			# create a description string of hcrs in seq
 			my @hcrs_string = map{"HCR".++$i.":".$_->[OFFSET].','.$_->[LENGTH]}@hcrs;
@@ -663,11 +775,10 @@ foreach my $pb_id(@LR_IDS){
 			if( scalar @hcrs){ # check if there are HCRs, might be trimmed by first
 				my ($ha, $hb) = shift @hcrs;
 				while($hb = shift @hcrs){
-					next unless $ha;
 					my $hbs = $hb->[OFFSET]; # start
 					my $hae = $ha->[OFFSET] + $ha->[LENGTH]; # end
-					# lcr to short
 					
+					# lcr to short
 					if( (my $lcr_min_missing = $lcr_min_length - ($hbs - $hae)) > 0 ){
 						# what if adjusted both length
 						my $hal = $ha->[LENGTH] - $lcr_min_missing/2;
@@ -689,15 +800,23 @@ foreach my $pb_id(@LR_IDS){
 							$ha=$hb; # set hb to new ha
 							next; # restart cycle
 						}
+					}else{
+						# nothing missing
+						push @keep_hcrs, $ha;
+						$ha=$hb;
 					}
 				}	
+
 				# process last hcr, now ha
 				if( $ha->[LENGTH] >= $opt_hcr_mask_length ){
 					push @keep_hcrs, $ha;
 				}
 			}
-			
-			$con_mask->mask_seq(@keep_hcrs) if @keep_hcrs;
+=cut
+
+
+
+			$con_mask->mask_seq(@hcrs) if @hcrs;
 		}
 	
 		# write (masked) FASTA for next pass

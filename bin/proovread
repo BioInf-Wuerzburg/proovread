@@ -1681,9 +1681,13 @@ sub read_long{
 				mode => '+>'
 			);
 			
+			my $fi_file = task_file_name(suffix => ".ignored.tsv", task => '');
+			my $stubby_count = 0;
+			open(IGNORE, '>>', $fi_file) or $VS->exit($!." $fi_file");
 			while(my $lr = $lrpr->next_seq){
 				if(length($lr->seq) < 2*$min_sr_length){
-					$V->verbose("Ignoring stubby (".length($lr->seq)."bp) read: ".$lr->id);
+					$stubby_count++;
+					printf IGNORE "%s\t%s\n", $lr->id, "stubby";
 					next;
 				}
 				if(exists $lr{$lr->id}){
@@ -1693,6 +1697,9 @@ sub read_long{
 				$lr->seq(lc($lr->seq())); 
 				$lr{$lr->id} = $lr;
 			}
+			close IGNORE;
+			$V->verbose("Skipped $stubby_count stubby reads with length <".2*$min_sr_length) if $stubby_count;
+			
 		}else{ # FASTQ ref
 			if($opt_mode eq 'external-sam'){
 				my $po = $lrpr->guess_phred_offset || $opt_lr_qv_offset;
@@ -1723,7 +1730,16 @@ sub read_long{
 					file => task_file_name(".masked.fa", task => $TASKS[$TC] ), 
 					mode => '+>'
 				);
+				
+				my $fi_file = task_file_name(suffix => ".ignored.tsv", task => '');
+				my $stubby_count = 0;
+				open(IGNORE, '>>', $fi_file) or $VS->exit($!." $fi_file");
 				while(my $lr = $lrpr->next_seq){
+					if(length($lr->seq) < 2*$min_sr_length){
+						$stubby_count++;
+						printf IGNORE "%s\t%s\n", $lr->id, "stubby";
+						next;
+					}
 					if(exists $lr{$lr->id}){
 						$VS->exit('Non-unique long read id ('. $lr->id .') in '. $_);
 					}
@@ -1735,6 +1751,9 @@ sub read_long{
 						seq => $opt_mode ne 'external-sam' ? lc($lr->seq) : $lr->seq,
 					)
 				}
+				close IGNORE;
+				$V->verbose("Skipped $stubby_count stubby reads with length <".2*$min_sr_length) if $stubby_count;
+				
 			}
 		}
 	}

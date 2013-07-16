@@ -288,8 +288,9 @@ for FILE in $@; do
 				# last record
 				LAST_REC_TAIL_AND_POST_REC_HEAD=$(sed --unbuffered -e "$SED_LAST_FASTA");
 				LAST_REC_TAIL=$(echo "$LAST_REC_TAIL_AND_POST_REC_HEAD" | head -n -1);
+				LAST_REC_TAIL=${LAST_REC_TAIL%\\n} # chomp
 	            [ $DEBUG -gt 1 ] && echo "  last record end:" ${#LAST_REC_TAIL} byte 1>&2;
-				[ -z "$LAST_REC_TAIL" ] || ( [ $I -ge 0 ] && echo "$LAST_REC_TAIL" ) 1>&3;
+				[ $I -ge 0 ] && echo "$LAST_REC_TAIL" 1>&3;
 			    if [ $CHUNK_RATIO = "1" ]; then
 	    			REC_CACHE=$(echo "$LAST_REC_TAIL_AND_POST_REC_HEAD" | tail -n 1);
 					CHUNK_SIZE_ADJUST=${#LAST_REC_TAIL_AND_POST_REC_HEAD}
@@ -304,8 +305,9 @@ for FILE in $@; do
                 # last record
                 LAST_REC_TAIL_AND_POST_REC_HEAD=$(sed --unbuffered -e "$SED_LAST_FASTQ");
                 LAST_REC_TAIL=$(echo "$LAST_REC_TAIL_AND_POST_REC_HEAD" | head -n -4);
+                LAST_REC_TAIL=${LAST_REC_TAIL%\\n} # chomp
                 [ $DEBUG -gt 1 ] && echo "  last record end:" ${#LAST_REC_TAIL} byte 1>&2;
-                [ -z "$LAST_REC_TAIL" ] || ( [ $I -ge 0 ] && echo "$LAST_REC_TAIL" ) 1>&3;
+                [ $I -ge 0 ] && echo "$LAST_REC_TAIL" 1>&3;
                 if [ $CHUNK_RATIO = "1" ]; then
                     REC_CACHE=$(echo "$LAST_REC_TAIL_AND_POST_REC_HEAD" | tail -n 4);
                     CHUNK_SIZE_ADJUST=${#LAST_REC_TAIL_AND_POST_REC_HEAD}
