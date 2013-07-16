@@ -65,7 +65,7 @@ Correct single molecule sequencing reads by iterative mapping of high
 
 =over
 
-=item [Feature/Change] dynamic --min-lcr-ratio w/r/t short read length 
+=item [Feature/Change] dynamic --lcr-min-ratio w/r/t short read length 
  replaces fixed --min-lcr-length.
 
 =item [BugFix] --min-lcr-length not correctly respected in sam2cns.
@@ -707,7 +707,6 @@ my @sr_bps;
 
 my $min_sr_length;
 my $max_sr_dev;
-my $min_lcr_length;
 
 if(@$opt_sr_file){
 	$VS->verbose("Checking short read files");
@@ -808,10 +807,7 @@ if(@$opt_sr_file){
 	if(@$opt_sr_file){
 		$min_sr_length = (sort{$a<=>$b}@sr_length)[0];
 		$max_sr_dev = (sort{$b<=>$a}@sr_length_dev)[0];
-	
-		$min_lcr_length = $min_sr_length + $max_sr_dev;
-		$min_lcr_length *= $cfg{'min-lcr-ratio'}; # add another 15 percent
-		$min_lcr_length = int($min_lcr_length + 0.5); # round
+		$min_sr_length+=$max_sr_dev; 
 	}
 }
 
@@ -1796,8 +1792,8 @@ sub correct_sr_mt{
 			: (),
 			
 		$TASKS[$TC] =~ m/iter-1|pre-1|pre-2|pre-3/ # calculate hcrs on first iter for second iter
-			? ('--min-lcr-length' => $min_lcr_length) # params from config
-			: ('--min-hcr-length' => 0),
+			? ('--sr-min-length' => $min_sr_length) # params from config
+			: ('--hcr-min-ratio' => 0), # deactivate on finish/sam
 			'--lcr-end-ratio' => $cfg{'lcr-end-ratio'}{$TASKS[$TC]},
 		
 		($TASKS[$TC] =~ /-finish/) # calculate hcrs on first iter for second iter

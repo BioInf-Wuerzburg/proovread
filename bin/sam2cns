@@ -277,31 +277,49 @@ Append output if output file already exists
 
 $opt{'append!'} = \(my $opt_append);
 
-=item [--min-lcr-length=<INT>] [120]
+=item [--sr-min-length=<INT>] [100]
 
-Minimum length of unmasked nts between hcrs
+Minimal expected short read length.
 
 =cut
 
-$opt{'--min-lcr-length=i'} = \(my $lcr_min_length = 120);
+$opt{'--sr-min-length=s'} = \(my $opt_sr_min_length = 100);
 
-=item [--min-lcr-end-ratio=<FLOAT>] [0.5]
+=item [--lcr-min-ratio=<FLOAT>] [.cfg]
+
+Minimum length of unmasked nts between hcrs w/r/t --sr-min-length
+
+=cut
+
+$opt{'--lcr-min-ratio=s'} = \(my $opt_lcr_min_ratio = $cfg{'lcr-min-ratio'});
+
+=item [--lcr-end-ratio=<FLOAT>] [.cfg]
 
 End mask/unmasked threshold. Read ends are either masked completely or 
- unmasked to --min-lcr-length to allow new mappings. The value specifies the
+ unmasked to --min-sr-length to allow new mappings. The value specifies the
  proportions of --min-lcr-length required to unmask the end.
 
 =cut
 
-$opt{'--lcr-end-ratio=s'} = \(my $lcr_end_ratio = 0.5);
+$opt{'--lcr-end-ratio=s'} = \(my $opt_lcr_end_ratio = $cfg{'lcr-end-ratio'});
 
-=item [--min-hcr-length=<INT>] [0]
+=item [--hcr-min-ratio=<FLOAT>] [.9]
 
 Minimum length of masked nts in hcrs
 
 =cut
 
-$opt{'--min-hcr-length=i'} = \(my $opt_hcr_mask_length = $cfg{'hcr-mask-length'});
+$opt{'--hcr-min-ratio=s'} = \(my $opt_hcr_min_ratio = $cfg{'hcr-min-ratio'});
+
+=item [--hcr-sticky-ratio=<FLOAT>] [.4]
+
+Unmask this much at the ends of every hcr. Cannot be bigger then 
+ --hcr-min-ratio/2.
+ 
+=cut
+
+$opt{'--hcr-sticky-ratio=s'} = \(my $opt_hcr_sticky_ratio = $cfg{'hcr-sticky-ratio'});
+
 
 =item [--max-ins-length=<INT>] [4]
 
@@ -356,11 +374,17 @@ my $sp = Sam::Parser->new(
 	file => $opt_sam_file,
 );
 
-my $opt_hcr_sticky_length = 0;
-if($opt_hcr_mask_length){
-	$opt_hcr_sticky_length = $cfg{'hcr-sticky-length'};
-	$v->exit('--hcr-mask-length needs to be at least twice as great as hcr-sticky-length') if ($opt_hcr_sticky_length*2 >= $opt_hcr_mask_length);
+# process ratios to abs
+
+my $hcr_sticky_length = 0;
+if($opt_hcr_min_ratio){
+	$v->exit('--hcr-min-ratio needs to be at least twice as big as hcr-sticky-ratio') if ($opt_hcr_sticky_ratio*2 >= $opt_hcr_min_ratio);
+	$hcr_sticky_length = int($opt_hcr_sticky_ratio * $opt_sr_min_length +0.5);
 }
+my $hcr_min_length = int($opt_hcr_min_ratio * $opt_sr_min_length +0.5) || 0;
+
+my $lcr_min_length = int($opt_lcr_min_ratio * $opt_sr_min_length +0.5) || 0;
+
 
 Sam::Seq->Trim($cfg{'sr-trim'});
 Sam::Seq->InDelTaboo($cfg{'sr-indel-taboo'});
@@ -368,9 +392,9 @@ Sam::Seq->MaxCoverage($opt_cov);
 Sam::Seq->BinSize($cfg{'bin-size'});
 Sam::Seq->MaxInsLength($opt_max_ins_length);
 
-Fastq::Seq->Qual_lcs_range(5, 40, $opt_qv_offset);  
+Fastq::Seq->Qual_lcs_range(5, 41, $opt_qv_offset);  
 ## 80 chars are cutoff at each side to keep overlaps => min length 160, better 200
-Fastq::Seq->Qual_lcs_min_length($opt_hcr_mask_length + (2 * $opt_hcr_sticky_length)); 
+Fastq::Seq->Qual_lcs_min_length($hcr_min_length + (2 * $hcr_sticky_length)); 
 
 # qual window
 Fastq::Seq->Qual_window_min(3);  
@@ -592,7 +616,7 @@ foreach my $pb_id(@LR_IDS){
 	# undef state matrix to make memory availabe again
 	$LR{$pb_id}{_state_matrix} = {}; 
 
-	if($opt_hcr_mask_length){
+	if($hcr_min_length){
 		# $hcrs[$i][0] == $hcrs[$i][OFFSET] := offset
 		# $hcrs[$i][1] == $hcrs[$i][LENGTH] := length
 		
@@ -605,8 +629,8 @@ foreach my $pb_id(@LR_IDS){
 			#hcr sticky
 			# add sticky ends
 			foreach(@hcrs){
-				$_->[OFFSET]+=$opt_hcr_sticky_length; 
-				$_->[LENGTH]-=($opt_hcr_sticky_length * 2);
+				$_->[OFFSET]+=$hcr_sticky_length; 
+				$_->[LENGTH]-=($hcr_sticky_length * 2);
 			}	
 			
 			#head
@@ -615,13 +639,13 @@ foreach my $pb_id(@LR_IDS){
 			# Consider starts shorter then lcr_min_length
 			if($lcr_start_short > 0){
 				# unmask start if its long enough to be worth it: short < 50% lcr_min_length
-				if( $lcr_start_short < $lcr_end_ratio * $lcr_min_length ){ 
+				if( $lcr_start_short < $opt_lcr_end_ratio * $lcr_min_length ){ 
 					#$v->hline;
 					#$v->verbose('first hcr to close to start '.$lcr_start_short);
 					# if OFFSET is adjusted, LENGTH always needs to be adjusted
 					#  as well or the HCR is just shifted
 					# adjust length, check for hcr_min_length
-					if( ($hcrs[0][LENGTH] -= $lcr_start_short) < $opt_hcr_mask_length){
+					if( ($hcrs[0][LENGTH] -= $lcr_start_short) < $hcr_min_length){
 						#$v->verbose('first hcr to short: '.$hcrs[0][LENGTH]);
 						shift @hcrs; # remove first hcr if it becomes to short after trimming
 					}else{
@@ -639,10 +663,10 @@ foreach my $pb_id(@LR_IDS){
 				my $lcr_end_short = $lcr_min_length - ($seq_length - ($hcrs[$#hcrs][OFFSET] + $hcrs[$#hcrs][LENGTH]));
 				# check if it is to close to the end
 				if($lcr_end_short  > 0){
-					if($lcr_end_short < $lcr_end_ratio * $lcr_min_length ){
+					if($lcr_end_short < $opt_lcr_end_ratio * $lcr_min_length ){
 						#$v->verbose('last hcr to close to end '.$lcr_end_short);
 						# shorten last hcr and check its length
-						if( ($hcrs[$#hcrs][LENGTH] -= $lcr_end_short) < $opt_hcr_mask_length){
+						if( ($hcrs[$#hcrs][LENGTH] -= $lcr_end_short) < $hcr_min_length){
 							#$v->verbose('last hcr to short');
 							pop @hcrs; # remove last hcr if it becomes to short after trimming
 						}
@@ -672,7 +696,7 @@ foreach my $pb_id(@LR_IDS){
 						my $lcr_short_a = int($lcr_short/2);
 						my $lcr_short_b = $lcr_short_a + $lcr_short%2; 
 						$ha->[LENGTH] -= $lcr_short_a;
-						if( $ha->[LENGTH] < $opt_hcr_mask_length ){ # $ha is completely processed
+						if( $ha->[LENGTH] < $hcr_min_length ){ # $ha is completely processed
 							push @hcrs_short_idx, $i 
 						}
 						$hb->[OFFSET] += $lcr_short_b;
@@ -680,7 +704,7 @@ foreach my $pb_id(@LR_IDS){
 					}
 				}
 				# and dont forget the last hcr length
-				if( $hcrs{$i}[LENGTH] < $opt_hcr_mask_length ){ # $ha is completely processed
+				if( $hcrs{$i}[LENGTH] < $hcr_min_length ){ # $ha is completely processed
 					push @hcrs_short_idx, $i 
 				}
 				
@@ -723,8 +747,8 @@ foreach my $pb_id(@LR_IDS){
 			
 			# add sticky ends
 			foreach(@hcrs){
-				$_->[OFFSET]+=$opt_hcr_sticky_length; 
-				$_->[LENGTH]-=($opt_hcr_sticky_length * 2);
+				$_->[OFFSET]+=$hcr_sticky_length; 
+				$_->[LENGTH]-=($hcr_sticky_length * 2);
 			}			
 			
 			# mask/unmask start
@@ -738,7 +762,7 @@ foreach my $pb_id(@LR_IDS){
 					# if OFFSET is adjusted, LENGTH always needs to be adjusted
 					#  as well or the HCR is just shifted
 					# adjust length, check for hcr_min_length
-					if( ($hcrs[0][LENGTH] -= $lcr_start_missing) < $opt_hcr_mask_length){
+					if( ($hcrs[0][LENGTH] -= $lcr_start_missing) < $hcr_min_length){
 						#$v->verbose('first hcr to short: '.$hcrs[0][LENGTH]);
 						shift @hcrs; # remove first hcr if it becomes to short after trimming
 					}else{
@@ -759,7 +783,7 @@ foreach my $pb_id(@LR_IDS){
 					if($lcr_end_missing < $lcr_end_ratio * $lcr_min_length ){
 						#$v->verbose('last hcr to close to end '.$lcr_end_missing);
 						# shorten last hcr and check its length
-						if( ($hcrs[$#hcrs][LENGTH] -= $lcr_end_missing) < $opt_hcr_mask_length){
+						if( ($hcrs[$#hcrs][LENGTH] -= $lcr_end_missing) < $hcr_min_length){
 							#$v->verbose('last hcr to short');
 							pop @hcrs; # remove last hcr if it becomes to short after trimming
 						}
@@ -783,10 +807,10 @@ foreach my $pb_id(@LR_IDS){
 						# what if adjusted both length
 						my $hal = $ha->[LENGTH] - $lcr_min_missing/2;
 						my $hbl = $hb->[LENGTH] - $lcr_min_missing/2;
-						if($hbl < $opt_hcr_mask_length){ # hb short
+						if($hbl < $hcr_min_length){ # hb short
 							# ha stays ha unchanged, hb isnt kept, but overwritten
 							next;
-						}elsif($hal < $opt_hcr_mask_length){ # ha short
+						}elsif($hal < $hcr_min_length){ # ha short
 							$ha=$hb; # set hb to new ha, unchanged, dont keep ha
 							next; # restart cycle
 						}else{ # both long enough
@@ -808,7 +832,7 @@ foreach my $pb_id(@LR_IDS){
 				}	
 
 				# process last hcr, now ha
-				if( $ha->[LENGTH] >= $opt_hcr_mask_length ){
+				if( $ha->[LENGTH] >= $hcr_min_length ){
 					push @keep_hcrs, $ha;
 				}
 			}
