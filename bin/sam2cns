@@ -37,6 +37,8 @@ use constant {
 	LENGTH => 1,
 };
 
+use Storable qw(dclone);
+
 our $VERSION  = '0.06';
 
 
@@ -541,7 +543,7 @@ foreach my $pb_id(@LR_IDS){
 			unless ($seq->desc() =~ /IGNORED:low_support/){
 				$seq->desc_append("IGNORED:low_support"); 
 				# write to ignored fastq
-				print $fih "%s\t%s\n", $seq->id, "low_support";
+				printf $fih "%s\t%s\n", $seq->id, "low_support";
 			}
 			
 			# write unprocessed fastq
@@ -683,7 +685,9 @@ foreach my $pb_id(@LR_IDS){
 				# create temporary hash structure with indexes as keys
 				my %hcrs;
 				my @hcrs_short_idx;
-				@hcrs{0..$#hcrs} = @hcrs;
+				# DEEEEP COPY REQUIRED !!!!!!!!!!
+				my @tmp_hcrs = @{dclone(\@hcrs)};
+				@hcrs{0..$#hcrs} = @tmp_hcrs;
 				# find + extend short hcrs
 				# + cache short hcr idxs
 				my $i=0;
@@ -727,9 +731,12 @@ foreach my $pb_id(@LR_IDS){
 				}
 				
 				# all conflicting hcrs/lcrs trimmed
-				last unless @hcrs_short_idx_clean;
+				unless(@hcrs_short_idx_clean){
+					@hcrs = @tmp_hcrs;
+					last;
+				};
 				
-				# prepare hcrs for next cycle
+				# remove unmodified hcrs before next cycle
 				foreach (@hcrs_short_idx_clean){
 					splice(@hcrs, $_, 1);
 				}
