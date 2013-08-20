@@ -5,6 +5,8 @@
 # Version 0.10
 
 ## TODO
+## auto detect chunk number if size
+## k, M, G for sizes	
 ## FASTQ
 ## TEST
 ## split prefix multiple files

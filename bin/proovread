@@ -59,7 +59,15 @@ Correct single molecule sequencing reads by iterative mapping of high
 
 =cut
 
+=head2 1.02
 
+=over
+
+=item [Change] Do not --mask-weak-reads in pre-1.
+
+=back
+
+=cut
 
 =head2 1.01
 
@@ -822,7 +830,7 @@ my $PG_line = '@PG ID:unknown';
 
 # mode
 my @TASKS;
-my $TC = -1;
+my $TC = 0;
 
 if($opt_sam_file){
 	$opt_mode = 'external-sam';
@@ -841,6 +849,8 @@ if($opt_sam_file){
 		@TASKS = @{$cfg{'mode-tasks'}{$opt_mode}};
 	}
 }
+
+unshift @TASKS, 0; # tasks are counted from 1, 0 just fills the array index :)
 
 $VS->verbose('Running mode: '.$opt_mode);
 
@@ -1784,7 +1794,7 @@ sub correct_sr_mt{
 		'--max-reads'	=> $cfg{'chunk-size'},
 		'--coverage'	=> $opt_cov,
 		'--append'		=> 1,
-		
+		'--cfg'	=> $cfg || undef,		
 		@$opt_lr_file
 			? ('--ref' 		=> $TC == 1
 				? task_file_name(".masked.f[aq]", task => $TASKS[$TC-1] )
@@ -1795,6 +1805,10 @@ sub correct_sr_mt{
 			? ('--sr-min-length' => $min_sr_length) # params from config
 			: ('--hcr-min-ratio' => 0), # deactivate on finish/sam
 			'--lcr-end-ratio' => $cfg{'lcr-end-ratio'}{$TASKS[$TC]},
+
+		($TASKS[$TC] =~ /pre-1/)
+			? ( '--mask-weak-reads' => 0 )
+			: (),
 		
 		($TASKS[$TC] =~ /-finish/) # calculate hcrs on first iter for second iter
 			? (
@@ -1813,9 +1827,6 @@ sub correct_sr_mt{
 			  ) # params from config
 			: (),
 		
-		$cfg
-		 	? ('--cfg'	=> $cfg) 
-		 	: (),
 	);
 	
 	my $pbc_cmds = '';
@@ -2108,6 +2119,48 @@ sub param_join{
 	return $params;
 }
 
+
+=head2 cfg
+
+Return parameter settings from %cfg w/r/t given task and global options
+
+  $cfg{<PARAM>} = {
+	0 => 12, # global default
+	<TASK1> => 8, # task specific settings, overuling global
+	<TASK2> => 9, # task specific settings, overuling global
+	<TASK2> => 0, # task specific settings, overuling global
+  }
+  
+  $param = cfg(PARAM);        # 12
+  $param = cfg(UNKNOWN_PARAM) # undef
+  # by TASK_ID
+  $param = cfg(PARAM,TASK1);  # 8
+  $param = cfg(PARAM,TASK3)   # 12 (fall back to global)
+  # by TASK_COUNT
+  $param = cfg(PARAM, 1)      # 8 (first task)
+  $param = cfg(PARAM, -1)     # 0 (last task)
+
+=cut
+
+sub cfg{
+	my ($k, $t) = @_;
+	return undef unless exists $cfg{$k};
+	return $cfg{$k} if ref $cfg{$k} eq "SCALAR";
+	
+	my %p = @{$cfg{$k}};
+	return undef unless %p;
+	
+	my $v = exists $p{0} ? $p{0} : undef;
+	
+	if(defined $t){
+		if($t =~ /[^-0-9]/){
+			$v = $p{$TASKS[$t]} if exists $p{$TASKS[$t]};
+		}else{
+			$v = $p{$t} if exists $p{$TASKS[$t]};
+		}
+	}
+	return $v;
+}
 
 ################
 ## DEPRECATED ##
