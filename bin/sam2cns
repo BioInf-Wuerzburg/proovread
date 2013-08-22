@@ -4,7 +4,7 @@
 # LICENCE
 #
 #
-# $Id: sam2cns 134 2013-05-21 14:24:48Z s187512 $
+# 
 #
 ##------------------------------------------------------------------------##
 
@@ -39,7 +39,7 @@ use constant {
 
 use Storable qw(dclone);
 
-our $VERSION  = '0.06';
+our $VERSION  = '0.07';
 
 
 
@@ -62,6 +62,20 @@ Compute consensus sequences based on SAM file.
 
 =head1 CHANGELOG
 
+=cut
+
+=head2 0.07
+
+=over
+
+=item [Refacture] Instead of reading the entire SAM chunk into memory, only
+ read entries for read block, create consensus and reuse memory with next
+ read block.
+
+=back
+
+=cut
+
 =head2 0.06
 
 =over
@@ -78,6 +92,8 @@ Compute consensus sequences based on SAM file.
  bad reads and contaminations more efficiently
 
 =back
+
+=cut
 
 =head2 0.05
 
@@ -96,6 +112,8 @@ Compute consensus sequences based on SAM file.
 
 =back
 
+=cut
+
 =head2 0.04
 
 =over
@@ -109,6 +127,8 @@ Compute consensus sequences based on SAM file.
  unmasked nts between hcrs. 
 
 =back
+
+=cut
 
 =head2 0.03
 
@@ -132,6 +152,8 @@ Compute consensus sequences based on SAM file.
 
 =back
 
+=cut
+
 =head2 0.02
 
 =over
@@ -145,6 +167,8 @@ Compute consensus sequences based on SAM file.
 =item [Feature] Added C<--sticky-end-length> parameter.
 
 =back
+
+=cut
 
 =head2 0.01
 
@@ -285,7 +309,7 @@ Minimal expected short read length.
 
 =cut
 
-$opt{'--sr-min-length=s'} = \(my $opt_sr_min_length = 100);
+$opt{'sr-min-length=s'} = \(my $opt_sr_min_length = 100);
 
 =item [--lcr-min-ratio=<FLOAT>] [.cfg]
 
@@ -293,7 +317,7 @@ Minimum length of unmasked nts between hcrs w/r/t --sr-min-length
 
 =cut
 
-$opt{'--lcr-min-ratio=s'} = \(my $opt_lcr_min_ratio = $cfg{'lcr-min-ratio'});
+$opt{'lcr-min-ratio=s'} = \(my $opt_lcr_min_ratio = $cfg{'lcr-min-ratio'});
 
 =item [--lcr-end-ratio=<FLOAT>] [.cfg]
 
@@ -303,7 +327,7 @@ End mask/unmasked threshold. Read ends are either masked completely or
 
 =cut
 
-$opt{'--lcr-end-ratio=s'} = \(my $opt_lcr_end_ratio = $cfg{'lcr-end-ratio'});
+$opt{'lcr-end-ratio=s'} = \(my $opt_lcr_end_ratio = $cfg{'lcr-end-ratio'});
 
 =item [--hcr-min-ratio=<FLOAT>] [.9]
 
@@ -311,7 +335,7 @@ Minimum length of masked nts in hcrs
 
 =cut
 
-$opt{'--hcr-min-ratio=s'} = \(my $opt_hcr_min_ratio = $cfg{'hcr-min-ratio'});
+$opt{'hcr-min-ratio=s'} = \(my $opt_hcr_min_ratio = $cfg{'hcr-min-ratio'});
 
 =item [--hcr-sticky-ratio=<FLOAT>] [.4]
 
@@ -320,7 +344,7 @@ Unmask this much at the ends of every hcr. Cannot be bigger then
  
 =cut
 
-$opt{'--hcr-sticky-ratio=s'} = \(my $opt_hcr_sticky_ratio = $cfg{'hcr-sticky-ratio'});
+$opt{'hcr-sticky-ratio=s'} = \(my $opt_hcr_sticky_ratio = $cfg{'hcr-sticky-ratio'});
 
 
 =item [--max-ins-length=<INT>] [4]
@@ -329,13 +353,13 @@ Maximum allowed length for inserts.
 
 =cut
 
-$opt{'--max-ins-length=i'} = \(my $opt_max_ins_length = 4);
+$opt{'max-ins-length=i'} = \(my $opt_max_ins_length = 4);
 
 =item [--mask-weak-reads=<INT>] [20]
 
 =cut
 
-$opt{'--mask-weak-reads=i'} = \(my $opt_mask_weak_reads = 20);
+$opt{'mask-weak-reads=i'} = \(my $opt_mask_weak_reads = 20);
 
 =item [--ignore-weak-reads=<INT>] [20]
 
@@ -344,10 +368,10 @@ Simple do not generate consensus for weakly supported reads, output them
 
 =cut
 
-$opt{'--ignore-weak-reads=i'} = \(my $opt_ignore_weak_reads = 20);
+$opt{'ignore-weak-reads=i'} = \(my $opt_ignore_weak_reads = 20);
 
 
-$opt{'--chimera-min-score'} = \(my $opt_chimera_min_score = 0);
+$opt{'chimera-min-score'} = \(my $opt_chimera_min_score = 0);
 
 =back
 
@@ -448,73 +472,127 @@ open($fch, $mode, $fc_out) || $v->exit("Can't open output read file: '$fc_out'")
 #print $fch (join("\t", '#id', qw(from to score)),"\n") if ! -s $fch;
 
 
-my %LR;
 
 
+# DEPRECATED
 # ref
+#my %LR;
+#if($rpr){ # read fasta to get ref id, length and seq
+#	$rpr->seek($opt_ref_offset) if $opt_ref_offset;
+#	my $ref_c = 0;
+#	while(my $ref = $rpr->next_seq()){
+#		$LR{$ref->id} = Sam::Seq->new(
+#			ref => $ref,
+#			len => length($ref->seq),
+#			id => $ref->id
+#		);
+#		last if ++$ref_c >= $opt_max_reads;
+#	}
+#}else{# read the sam header to get ref ids and length
+#	while(my %h = $sp->next_header_line('SQ')){
+#		$LR{$h{'SN'}} = Sam::Seq->new(
+#			id => $h{SN}, 
+#			len => $h{LN},
+#		);
+#	}
+#}
+#####
+
+# get a list of ref (seqs) ids and len
+my %LR;
+my @LR_IDS;
+
 if($rpr){ # read fasta to get ref id, length and seq
 	$rpr->seek($opt_ref_offset) if $opt_ref_offset;
 	my $ref_c = 0;
 	while(my $ref = $rpr->next_seq()){
-		$LR{$ref->id} = Sam::Seq->new(
+		$LR{$ref->id} = {
 			ref => $ref,
 			len => length($ref->seq),
 			id => $ref->id
-		);
+		};
+		push @LR_IDS, $ref->id;
 		last if ++$ref_c >= $opt_max_reads;
 	}
 }else{# read the sam header to get ref ids and length
 	while(my %h = $sp->next_header_line('SQ')){
-		$LR{$h{'SN'}} = Sam::Seq->new(
+		$LR{$h{'SN'}} = {
 			id => $h{SN}, 
 			len => $h{LN},
-		);
+		};
 	}
 }
 
+#### PROBLEM ####
+# how to track that there are reads, that do not show in SAM file if ref
+# is provided
+# sort @LR_IDS, expect each to be in SAM
 
-
-# read sam
-my @LR_IDS;
+@LR_IDS = sort byfile @LR_IDS;
 
 $sp->seek($opt_sam_offset) if $opt_sam_offset;
-# w/ reference
-if($rpr){
-	while(my $aln = $sp->next_aln()){
-		# try to add aln, if sufficient score, add to temporary sam file
-		last unless exists $LR{$aln->rname};
-		$opt_detect_chimera		# binning required for chimera detection
-			? $LR{$aln->rname}->add_aln_by_score($aln)
-			: $LR{$aln->rname}->add_aln($aln);
-	}
-# w/o reference
-}else{
-	my $ref_seen = 0; # since we read the entire header to %LR, we need to count ref seqs
-	my $ref_id = '';
-	while(my $aln = $sp->next_aln()){
-		# try to add aln, if sufficient score, add to temporary sam file
-		unless ($ref_id eq $aln->rname){
-			$ref_id = $aln->rname;
-			push @LR_IDS, $ref_id;
+
+my $ref_seen = 0; # since we read the entire header to %LR, we need to count ref seqs
+my $ref_id = '';
+my $sso;
+
+while(my $aln = $sp->next_aln()){
+	unless ($ref_id eq $aln->rname){
+		if ($sso){
+			# process previous block
+			generate_consensus($sso);
+			
+			# account for ref seqs w/o SAM mappings
+			if($rpr){
+				#TODO, not necessarily here
+			}
+			
 			$ref_seen++;
-			last if $opt_max_reads && $ref_seen > $opt_max_reads;
-		}
-		$opt_detect_chimera		# binning required for chimera detection
-			? $LR{$aln->rname}->add_aln_by_score($aln)
-			: $LR{$aln->rname}->add_aln($aln);
+			print Dumper($ref_id, $ref_seen);
+		};
+		
+		if($opt_max_reads && $ref_seen > $opt_max_reads-3){
+			last;
+		};
+		
+		$ref_id = $aln->rname;
+		# create new block with $aln = first entry
+		$sso = Sam::Seq->new(
+			id => $LR{$ref_id}{id},
+			len => $LR{$ref_id}{len},
+			ref => $rpr ? $LR{$ref_id}{ref} : undef,
+		);
 	}
+	$opt_detect_chimera		# binning required for chimera detection
+		? $sso->add_aln_by_score($aln)
+		: $sso->add_aln($aln);
 }
 
-# calculate consensus
-unless(@LR_IDS){
-	@LR_IDS = sort byfile keys %LR 
-}
+# process eof block if existing
+generate_consensus($sso, "wtf") if $sso;
 
-foreach my $pb_id(@LR_IDS){
+
+
+
+
+
+
+
+
+
+=head2 generate_consensus
+
+Takes a Sam::Seq object, creates, processes and outputs consensus
+
+=cut
+
+sub generate_consensus{
+	my $sso = shift; # Sam::Seq object
+	die if shift;
 	my @hcrs = ();
 	
 	if($rpr && ! $opt_ignore_hcr){
-		if(my $hcrs = $LR{$pb_id}{ref}->desc){
+		if(my $hcrs = $sso->ref->desc){
 			while($hcrs =~ /HCR\d+:(\d+),(\d+)/g){
 				push @hcrs, [$1, $2];
 			}
@@ -523,10 +601,10 @@ foreach my $pb_id(@LR_IDS){
 	
 	if(! @hcrs){
 		if(
-			($opt_mask_weak_reads && $LR{$pb_id}->{_aln_idc} < $opt_mask_weak_reads)
-			|| ($opt_ignore_weak_reads && $LR{$pb_id}->{_aln_idc} < $opt_ignore_weak_reads)
+			($opt_mask_weak_reads && $sso->{_aln_idc} < $opt_mask_weak_reads)
+			|| ($opt_ignore_weak_reads && $sso->{_aln_idc} < $opt_ignore_weak_reads)
 		){
-			my $seq = $LR{$pb_id}->{ref};
+			my $seq = $sso->ref;
 			unless (ref $seq eq "Fastq::Seq"){
 				$seq = Fastq::Seq->new(
 					substr($seq->seq_head, 1),
@@ -557,11 +635,11 @@ foreach my $pb_id(@LR_IDS){
 		}
 	}
 	
-	my $con = $LR{$pb_id}->consensus(@hcrs);
+	my $con = $sso->consensus(@hcrs);
 	
 	# chimera
 	if($opt_detect_chimera){
-		my @coords = $LR{$pb_id}->chimera(); 
+		my @coords = $sso->chimera(); 
 		
 		#-----------------------------------------------------------------#
 		#my %cigar = (M=>0, I=>0, D=>0);
@@ -605,18 +683,18 @@ foreach my $pb_id(@LR_IDS){
 						poscorr => $pos_corr,
 						conlen => length ($con->seq),
 						concigar => $con->{cigar},
-						reflen => length ($LR{$pb_id}{ref}->seq),
+						reflen => length ($sso->ref->seq),
 						coords => $coords[$i],
 					});
 				};
 
-				printf $fch("%s\t%d\t%d\t%s\n", $pb_id, $fr, $to, $sc);
+				printf $fch("%s\t%d\t%d\t%s\n", $sso->id, $fr, $to, $sc);
 			}
 		}
 	}
 	
 	# undef state matrix to make memory availabe again
-	$LR{$pb_id}{_state_matrix} = {}; 
+	$sso->{_state_matrix} = {}; 
 
 	if($hcr_min_length){
 		# $hcrs[$i][0] == $hcrs[$i][OFFSET] := offset
@@ -865,14 +943,13 @@ foreach my $pb_id(@LR_IDS){
 }
 
 
-
 =head2 byfile
 
 Sort function for "natural" filesorting, descending.
 
 =cut
 
-sub byfile {
+sub byfile{
   my @a = split /(\d+)/, $a;
   my @b = split /(\d+)/, $b;
   my $M = @a > @b ? @a : @b;

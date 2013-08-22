@@ -37,7 +37,7 @@ use Time::HiRes qw(usleep);
 use Data::Dumper;
 $Data::Dumper::Sortkeys = 1;
 
-our $VERSION = '1.00';
+our $VERSION = '1.02';
 
 
 
@@ -62,6 +62,10 @@ Correct single molecule sequencing reads by iterative mapping of high
 =head2 1.02
 
 =over
+
+=item [Feature] cfg() to retrieve task specific entries from config. 
+
+=item [Change] Removed --ram-sam feature.
 
 =item [Change] Do not --mask-weak-reads in pre-1.
 
@@ -367,7 +371,7 @@ Correct single molecule sequencing reads by iterative mapping of high
 
 =item test multi-file support for non-standard modes
 
-=item masking stats -> SeqFilter
+=item masking stats between runs -> SeqFilter
 
 =back
 
@@ -469,7 +473,7 @@ Pacbio reads file to correct. FASTA or FASTQ format. To correct
 
 =cut
 
-$opt{'l|long-reads=s@'} = \(my $opt_lr_file = $cfg{'long-reads'});
+$opt{'l|long-reads=s@'} = \(my $opt_lr_file = cfg('long-reads'));
 
 =item -s, --short-reads=<PATHNAME>
 
@@ -486,7 +490,7 @@ NOTE: If multiple libraries are provided, they need to be of the
 
 =cut
 
-$opt{'s|short-reads=s@'} = \(my $opt_sr_file = $cfg{'short-reads'});
+$opt{'s|short-reads=s@'} = \(my $opt_sr_file = cfg('short-reads'));
 
 =item [-p, --prefix=<STRING>]
 
@@ -494,7 +498,7 @@ Prefix to output files. Defaults to 'proovread'.
 
 =cut
 
-$opt{'p|prefix=s'} = \(my $opt_prefix = $cfg{'prefix'});
+$opt{'p|prefix=s'} = \(my $opt_prefix = cfg('prefix'));
 
 =item [--coverage=<INT>] [50]
 
@@ -502,7 +506,7 @@ Coverage cutoff for highest scoring mappings at each location.
 
 =cut
 
-$opt{'coverage=s'} = \(my $opt_cov = $cfg{'coverage'});
+$opt{'coverage=s'} = \(my $opt_cov = cfg('coverage'));
 
 =item [-t, --threads] [8]
 
@@ -511,7 +515,7 @@ Number of threads to use for mapping. Defaults to 8 (or maximum available
 
 =cut
 
-$opt{'t|threads=i'} = \(my $opt_threads = $cfg{'threads'});
+$opt{'t|threads=i'} = \(my $opt_threads = cfg('threads'));
 
 =item [-m, --mode] [auto]
 
@@ -532,7 +536,7 @@ External SAM file to compute corrected consensus sequences from.
  
 =cut
 
-$opt{'sam=s'} = \(my $opt_sam_file = $cfg{'sam'});
+$opt{'sam=s'} = \(my $opt_sam_file = cfg('sam'));
 
 =item [--lr-qv-offset=<INT>]
 
@@ -541,7 +545,7 @@ Required if you use --sam and --long together and the phred offset cannot be
  
 =cut
 
-$opt{'lr-qv-offset=i'} = \(my $opt_lr_qv_offset = $cfg{'lr-qv-offset'});
+$opt{'lr-qv-offset=i'} = \(my $opt_lr_qv_offset = cfg('lr-qv-offset'));
 
 =item [--sr-qv-offset=<INT>]
 
@@ -549,20 +553,8 @@ Required if phred offset cannot be determined automatically from --short read fi
  
 =cut
 
-$opt{'sr-qv-offset=i'} = \(my $opt_sr_qv_offset = $cfg{'sr-qv-offset'});
+$opt{'sr-qv-offset=i'} = \(my $opt_sr_qv_offset = cfg('sr-qv-offset'));
 
-=item [--ram-sam] [OFF]
-
-By default, while mapping, a temporary SAM file is created and an index to
- this file is kept in store. This limits the memory requirement for one SMRT
- cell (>100Mbp, 50X coverage) to less than 10Gb. 
-
-Specify '--ram-sam' to hold the SAM presentation entirely in memory. This is
- faster and saves disk space, but might require up to 100GB per SMRT cell. 
-
-=cut
-
-$opt{'ram-sam'} = \(my $opt_ram_sam = $cfg{'ram-sam'});
 
 =item [--sort-sam-by-coordinates] [OFF]
 
@@ -572,7 +564,7 @@ Sort the filtered SAM files by coordinates in addition to the
 
 =cut
 
-$opt{'sort-sam-by-coordinates'} = \(my $opt_sort_sam_by_coords = $cfg{'sort-sam-by-coordinates'});
+$opt{'sort-sam-by-coordinates'} = \(my $opt_sort_sam_by_coords = cfg('sort-sam-by-coordinates'));
 
 =item [--keep-temporary-files] [OFF]
 
@@ -581,7 +573,7 @@ Specify once, to keep temporary file of each task, twice to also keep the
 
 =cut
 
-$opt{'keep-temporary-files+'} = \(my $opt_keep = $cfg{'keep-temporary-files'});
+$opt{'keep-temporary-files+'} = \(my $opt_keep = cfg('keep-temporary-files'));
 
 =item [--ignore-sr-length]
 
@@ -591,7 +583,7 @@ Since the pipeline is designed to use short reads for correction, it stops
 
 =cut
 
-$opt{'ignore-sr-length'} = \(my $opt_ignore_sr_length = $cfg{'ignore-sr-length'});
+$opt{'ignore-sr-length'} = \(my $opt_ignore_sr_length = cfg('ignore-sr-length'));
 
 =item [--overwrite]
 
@@ -599,7 +591,7 @@ Overwrite output folder if it already exists.
 
 =cut
 
-$opt{'overwrite'} = \(my $opt_overwrite = $cfg{'overwrite'});
+$opt{'overwrite'} = \(my $opt_overwrite = cfg('overwrite'));
 
 =item [--sample]
 
@@ -621,6 +613,8 @@ $opt{'h|help'} = \(my $opt_help);
 
 =cut
 
+## DEPRECATED
+##$opt{'ram-sam'} = \(my $opt_ram_sam = cfg('ram-sam'));
 
 ##------------------------------------------------------------------------##
 
@@ -830,7 +824,8 @@ my $PG_line = '@PG ID:unknown';
 
 # mode
 my @TASKS;
-my $TC = 0;
+my $TC = -1;
+my $TASK; # current task
 
 if($opt_sam_file){
 	$opt_mode = 'external-sam';
@@ -850,7 +845,7 @@ if($opt_sam_file){
 	}
 }
 
-unshift @TASKS, 0; # tasks are counted from 1, 0 just fills the array index :)
+#unshift @TASKS, 0; # tasks are counted from 1, 0 just fills the array index :)
 
 $VS->verbose('Running mode: '.$opt_mode);
 
@@ -885,20 +880,21 @@ my $lr_bps_total;
 my $sam_chunk_offsets;
 my $estimated_coverage;
 
-foreach my $task(@TASKS){
+foreach my $task (@TASKS){
+	$TASK = $task;
 	$TC++;
-	if($task eq 'read-sam'){
+	if($TASK eq 'read-sam'){
 		# $VS->exit("task not yet implemented")
 		# TODO: sam2cns w/o reference
 		# configure Sam::Seq
 		Sam::Seq->MaxCoverage($opt_cov);
-		Sam::Seq->BinSize($cfg{'bin-size'});
+		Sam::Seq->BinSize(cfg('bin-size'));
 
 		$LR = read_sam();
 		$sam_chunk_offsets = create_sorted_sam();
 		$lr_chunk_offsets = correct_sr_mt($sam_chunk_offsets, $lr_chunk_offsets);
 		
-	}elsif($task eq 'read-long'){
+	}elsif($TASK eq 'read-long'){
 		
 		# long read files
 		foreach(@$opt_lr_file){
@@ -907,16 +903,16 @@ foreach my $task(@TASKS){
 		
 		$lr_chunk_offsets = read_long() if @$opt_lr_file; # 'external-sam does not require LR
 		
-	}elsif($task eq 'shrimp-iter-1'){
+	}elsif($TASK eq 'shrimp-iter-1'){
 
 		# configure Sam::Seq
 		Sam::Seq->MaxCoverage($opt_cov);
-		Sam::Seq->BinSize($cfg{'bin-size'});
+		Sam::Seq->BinSize(cfg('bin-size'));
 
 		run_shrimp(
 			sr_files => $opt_sr_file,
 			shrimp => {
-				%{$cfg{$task}}, # basic shrimp params from cfg
+				cfg($TASK), # basic shrimp params from cfg
 				'verbose' => 1,
 				'log' => task_file_name(suffix => "_shrimp.log"),
 				'ref' => task_file_name('.masked.fa', task => $TASKS[$TC-1] ),
@@ -932,16 +928,16 @@ foreach my $task(@TASKS){
 
 		$LR = undef;
 
-	}elsif($task eq 'shrimp-iter-2'){
+	}elsif($TASK eq 'shrimp-iter-2'){
 
 		# configure Sam::Seq
 		Sam::Seq->MaxCoverage($opt_cov);
-		Sam::Seq->BinSize($cfg{'bin-size'});
+		Sam::Seq->BinSize(cfg('bin-size'));
 
 		run_shrimp(
 			sr_files => $opt_sr_file,
 			shrimp => {
-				%{$cfg{$task}}, # basic shrimp params from cfg
+				cfg($TASK), # basic shrimp params from cfg
 				'verbose' => 1,
 				'log' => task_file_name(suffix => "_shrimp.log"),
 				'ref' => task_file_name(".masked.fa", task => $TASKS[$TC-1] ),
@@ -959,21 +955,21 @@ foreach my $task(@TASKS){
 
 ############################################################################
 
-	}elsif($task eq 'shrimp-pre-1'){
+	}elsif($TASK eq 'shrimp-pre-1'){
 
 		# configure Sam::Seq
-		Sam::Seq->MaxCoverage($opt_cov * $cfg{'sr-pre-fraction'}{$task});
-		Sam::Seq->BinSize($cfg{'bin-size'});
+		Sam::Seq->MaxCoverage($opt_cov * cfg('sr-pre-fraction',$TASK));
+		Sam::Seq->BinSize(cfg('bin-size'));
 
 		run_shrimp(
 			sr_files => $opt_sr_file,
-			sr_fraction => $cfg{'sr-pre-fraction'}{$task},
+			sr_fraction => cfg('sr-pre-fraction', $TASK),
 #			($sr_count_total > 1_000_000
-#				? (stop_after => $sr_count_total * $cfg{'sr-pre-fraction'}{$task})
+#				? (stop_after => $sr_count_total * cfg('sr-pre-fraction', $TASK))
 #				: ()
 #			),
 			shrimp => {
-				%{$cfg{$task}}, # basic shrimp params from cfg
+				cfg($TASK), # basic shrimp params from cfg
 				'verbose' => 1,
 				'log' => task_file_name(suffix => "_shrimp.log"),
 				'ref' => task_file_name('.masked.fa', task => $TASKS[$TC-1] ),
@@ -989,21 +985,21 @@ foreach my $task(@TASKS){
 
 		$LR = undef;
 
-	}elsif($task =~ m/shrimp-pre-[2-5]/){
+	}elsif($TASK =~ m/shrimp-pre-[2-5]/){
 
 		# configure Sam::Seq
-		Sam::Seq->MaxCoverage($opt_cov * $cfg{'sr-pre-fraction'}{$task});
-		Sam::Seq->BinSize($cfg{'bin-size'});
+		Sam::Seq->MaxCoverage($opt_cov * cfg('sr-pre-fraction', $TASK));
+		Sam::Seq->BinSize(cfg('bin-size'));
 
 		run_shrimp(
 			sr_files => $opt_sr_file,
-			sr_fraction => $cfg{'sr-pre-fraction'}{$task},
+			sr_fraction => cfg('sr-pre-fraction', $TASK),
 #			($sr_count_total > 1_000_000
-#				? (stop_after => $sr_count_total * $cfg{'sr-pre-fraction'}{$task})
+#				? (stop_after => $sr_count_total * cfg('sr-pre-fraction', $TASK))
 #				: ()
 #			),
 			shrimp => {
-				%{$cfg{$task}}, # basic shrimp params from cfg
+				cfg($TASK), # basic shrimp params from cfg
 				'verbose' => 1,
 				'log' => task_file_name(suffix => "_shrimp.log"),
 				'ref' => task_file_name(".masked.fa", task => $TASKS[$TC-1] ),
@@ -1022,16 +1018,16 @@ foreach my $task(@TASKS){
 ############################################################################		
 		
 		
-	}elsif($task eq 'shrimp-ccs'){
+	}elsif($TASK eq 'shrimp-ccs'){
 
 		# configure Sam::Seq
 		Sam::Seq->MaxCoverage($opt_cov);
-		Sam::Seq->BinSize($cfg{'bin-size'});
+		Sam::Seq->BinSize(cfg('bin-size'));
 
 		run_shrimp(			
 			sr_files => $opt_sr_file,
 			shrimp => {
-				%{$cfg{$task}}, # basic shrimp params from cfg
+				cfg($TASK), # basic shrimp params from cfg
 				'verbose' => 1,
 				'log' => task_file_name(suffix => "_shrimp.log"),
 				'ref' => task_file_name('.fa', task => $TASKS[$TC-1] ),
@@ -1046,11 +1042,11 @@ foreach my $task(@TASKS){
 		
 		$LR = undef;
 		
-	}elsif($task eq 'shrimp-finish'){
+	}elsif($TASK eq 'shrimp-finish'){
 
 		# configure Sam::Seq
 		Sam::Seq->MaxCoverage($opt_cov);
-		Sam::Seq->BinSize($cfg{'bin-size'});
+		Sam::Seq->BinSize(cfg('bin-size'));
 
 		my $sr_finish_files;
 
@@ -1067,7 +1063,7 @@ foreach my $task(@TASKS){
 		run_shrimp(
 			sr_files => $sr_finish_files,
 			shrimp => {
-				%{$cfg{$task}}, # basic shrimp params from cfg
+				cfg($TASK), # basic shrimp params from cfg
 				'verbose' => 1,
 				'ref' => task_file_name('.unmasked.fa', task => $TASKS[$TC-1] ),
 				'--threads' => $opt_threads,
@@ -1081,14 +1077,14 @@ foreach my $task(@TASKS){
 		
 		$LR = undef;
 		
-	}elsif($task =~ m/bowtie2-/){
+	}elsif($TASK =~ m/bowtie2-/){
 		# configure Sam::Seq
 		Sam::Seq->MaxCoverage($opt_cov);
-		Sam::Seq->BinSize($cfg{'bin-size'});
+		Sam::Seq->BinSize(cfg('bin-size'));
 
 		# cerate a unmasked reference for finish run
 		my $ref_file;
-		if($task =~ m/-finish/){
+		if($TASK =~ m/-finish/){
 			$ref_file = task_file_name('.unmasked.fa', task => $TASKS[$TC-1] );
 
 			seq_filter(
@@ -1103,7 +1099,7 @@ foreach my $task(@TASKS){
 		run_bowtie2(
 			sr_files => $opt_sr_file,
 			bowtie2 => {
-				%{$cfg{$task}}, # basic task params from cfg
+				cfg($TASK), # basic task params from cfg
 				'ref' => $ref_file,
 				'--threads' => $opt_threads,
 				$sr_qv_offset_total == 64 
@@ -1119,7 +1115,7 @@ foreach my $task(@TASKS){
 		$LR = undef;
 
 	}else{
-		$VB->exit("unknown task: ".$task);
+		$VB->exit("unknown task: ".$TASK);
 	}
 }
 
@@ -1141,11 +1137,11 @@ chim_filter('--in' => $opt_chim_raw, '--out' => $opt_chim_fil);
 
 
 
-if($cfg{'seq-filter'}){
+if(cfg('seq-filter')){
 	$V->nline;
 	$VS->verbose("Quality trimming raw output");
 	seq_filter(
-		%{$cfg{'seq-filter'}},
+		cfg('seq-filter'),
 		'--substr' => $opt_chim_fil,
 		'--in' => $opt_fq_raw,
 		'--out' => $opt_fq_fil
@@ -1153,7 +1149,7 @@ if($cfg{'seq-filter'}){
 }
 
 
-if($cfg{'seq-filter'} && -s $opt_fq_fil){ # no need to create FASTA from empty FASTQ
+if(cfg('seq-filter') && -s $opt_fq_fil){ # no need to create FASTA from empty FASTQ
 	$V->nline;
 	$VS->verbose("Converting to FASTA file");
 	seq_filter(
@@ -1212,7 +1208,7 @@ sub read_sam{
 		size => $rsp->fh
 	);
 	
-	my $tsp = $opt_ram_sam ? undef : Sam::Parser->new(
+	my $tsp = Sam::Parser->new(
 		file => task_file_name(suffix => '_tmp.sam'),
 		mode => '+>',
 	);
@@ -1241,27 +1237,16 @@ sub read_sam{
 	
 	# read sam file
 	my $rsp_c = 0;
-	if($opt_ram_sam){
-		while(my $aln = $rsp->next_aln()){
-			# make sure Ref Seq entry exists
-			$VS->exit('The SAM file needs to have a header with an reference sequence entry @SQ foreach reference sequence')
-				unless exists $LR{$aln->rname};
-			# try to add aln, if sufficient score, add to temporary sam file
-			$rsp_c++ if($LR{$aln->rname}->add_aln_by_score($aln));
-			$pg_rsp->update() unless $rsp_c%10000;
-		}
-	}else{
-		while(my $aln = $rsp->next_aln()){
-			# make sure Ref Seq entry exists
-			$VS->exit('The SAM file needs to have a header with an reference sequence entry @SQ foreach reference sequence')
-				unless exists $LR{$aln->rname};
-			# try to add aln, if sufficient score, add to temporary sam file
-			if($LR{$aln->rname}->add_aln_by_score($aln)){
-				$rsp_c++;
-				$tsp->append_aln($aln);
-			};
-			$pg_rsp->update() unless $rsp_c%10000;
-		}
+	while(my $aln = $rsp->next_aln()){
+		# make sure Ref Seq entry exists
+		$VS->exit('The SAM file needs to have a header with an reference sequence entry @SQ foreach reference sequence')
+			unless exists $LR{$aln->rname};
+		# try to add aln, if sufficient score, add to temporary sam file
+		if($LR{$aln->rname}->add_aln_by_score($aln)){
+			$rsp_c++;
+			$tsp->append_aln($aln);
+		};
+		$pg_rsp->update() unless $rsp_c%10000;
 	}
 	$pg_rsp->finish();
 	
@@ -1285,14 +1270,13 @@ sub run_shrimp{
 		sr_fraction => 1,
 		shrimp => {},
 		tmp_sam => task_file_name("_tmp.sam"),
-		ram_sam => $opt_ram_sam,
-# DEPRECATED: pre-SeqChunker
+		# DEPRECATED: pre-SeqChunker
 		#stop_after => 0,
 		@_
 	};
 	
 	$V->nline;
-	$VS->verbose("Running task ".$TASKS[$TC]);
+	$VS->verbose("Running task ".$TASK);
 	
 	# Index genome file first and save projection for multiple short read
 	#  files
@@ -1343,9 +1327,9 @@ sub run_shrimp{
 						'NO_EXEC',
 						$sr_file,
 						'--chunk-ratio' => $p->{sr_fraction},
-						'--chunk-number' => ($sr_count_netto / $cfg{'seq-chunker'}{'--chunk-number'} < 100
+						'--chunk-number' => ($sr_count_netto / cfg('seq-chunker', '--chunk-number') < 100
 							? int($sr_count_netto / 100) || 1
-							: $cfg{'seq-chunker'}{'--chunk-number'}
+							: cfg('seq-chunker', '--chunk-number')
 						),
 					) . ' | ',
 				)
@@ -1478,7 +1462,6 @@ sub run_bowtie2{
 		sr_files => [],
 		bowtie2 => {},
 		tmp_sam => task_file_name("_tmp.sam"),
-		ram_sam => $opt_ram_sam,
 		stop_after => 0,
 		@_
 	};
@@ -1631,7 +1614,7 @@ sub create_sorted_sam{
 	# alignment section
 	my $pb_c = 0;
 	foreach my $pb_id (@LR_IDS){
-		push @chunk_idxs, tell(OUT) unless $pb_c % $cfg{'chunk-size'};
+		push @chunk_idxs, tell(OUT) unless $pb_c % cfg('chunk-size');
 
 		foreach my $aln($LR->{$pb_id}->alns($opt_sort_sam_by_coords)){
 			# write to sam
@@ -1770,7 +1753,7 @@ sub read_long{
 	@LR_IDS = sort byfile keys %lr;
 	foreach(@LR_IDS){
 		my $pos = $lrpw->append_seq($lr{$_});
-		push @lr_idxs, $pos unless $lr_c % $cfg{'chunk-size'};
+		push @lr_idxs, $pos unless $lr_c % cfg('chunk-size');
 		$lr_c++;
 	}
 	return \@lr_idxs;
@@ -1785,45 +1768,48 @@ sub read_long{
 sub correct_sr_mt{
 	my ($sam_chunk_offsets, $lr_chunk_offsets) = @_;
 	
+	print $TASK,"\n";
+	
 	$V->nline;
 	$VS->verbose("Correcting Sequences (".@$sam_chunk_offsets." batches)");
 	
 	# pbc_correct.pl 
 	my %pbc_default = (
 		'--sam' 		=> task_file_name(".sam"),
-		'--max-reads'	=> $cfg{'chunk-size'},
+		'--max-reads'	=> cfg('chunk-size'),
 		'--coverage'	=> $opt_cov,
 		'--append'		=> 1,
 		'--cfg'	=> $cfg || undef,		
+
+		cfg('detect-chimera', $TASK) ? ('--detect-chimera' => '') : (), 
+		cfg('hcr-ignore', $TASK) ? ('--ignore-hcr' => '') : (),
+		 
 		@$opt_lr_file
 			? ('--ref' 		=> $TC == 1
 				? task_file_name(".masked.f[aq]", task => $TASKS[$TC-1] )
 				: task_file_name(".fq", task => $TASKS[$TC-1] ))
 			: (),
 			
-		$TASKS[$TC] =~ m/iter-1|pre-1|pre-2|pre-3/ # calculate hcrs on first iter for second iter
+		$TASK =~ m/iter-1|pre-1|pre-2|pre-3/ # calculate hcrs on first iter for second iter
 			? ('--sr-min-length' => $min_sr_length) # params from config
 			: ('--hcr-min-ratio' => 0), # deactivate on finish/sam
-			'--lcr-end-ratio' => $cfg{'lcr-end-ratio'}{$TASKS[$TC]},
+			'--lcr-end-ratio' => cfg('lcr-end-ratio', $TASKS[$TC]),
 
-		($TASKS[$TC] =~ /pre-1/)
+		($TASK =~ /pre-1/)
 			? ( '--mask-weak-reads' => 0 )
 			: (),
 		
-		($TASKS[$TC] =~ /-finish/) # calculate hcrs on first iter for second iter
+		($TASK =~ /-finish/) # calculate hcrs on first iter for second iter
 			? (
-				'--ignore-hcr' => 1,
 				'--mask-weak-reads' => 0, 
 				'--ignore-weak-reads' => 20, 
 				'--max-ins-length' => 0,
-				$cfg{'detect-chimera'} ? ('--detect-chimera' => 1) : ()
 			  ) # params from config
 			: (),
 
-		($TASKS[$TC] eq 'read-sam') # calculate hcrs on first iter for second iter
+		($TASK eq 'read-sam') # calculate hcrs on first iter for second iter
 			? (@$opt_lr_file ? ()	: ('--ignore-hcr' => 1),
 				'--max-ins-length' => 0,
-				$cfg{'detect-chimera'} ? ('--detect-chimera' => 1) : ()
 			  ) # params from config
 			: (),
 		
@@ -1986,7 +1972,7 @@ Run ChimeraToSeqFilter on raw chimera output
 
 sub chim_filter{
 
-	my %params = (%{$cfg{'chimera-filter'}}, @_);
+	my %params = (cfg('chimera-filter'), @_);
 	my $params = param_join(\%params);
 
 	my $cmd_chim_fil = "perl $RealBin/ChimeraToSeqFilter.pl $params";
@@ -2125,7 +2111,7 @@ sub param_join{
 Return parameter settings from %cfg w/r/t given task and global options
 
   $cfg{<PARAM>} = {
-	0 => 12, # global default
+	DEF => 12, # global default
 	<TASK1> => 8, # task specific settings, overuling global
 	<TASK2> => 9, # task specific settings, overuling global
 	<TASK2> => 0, # task specific settings, overuling global
@@ -2137,26 +2123,35 @@ Return parameter settings from %cfg w/r/t given task and global options
   $param = cfg(PARAM,TASK1);  # 8
   $param = cfg(PARAM,TASK3)   # 12 (fall back to global)
   # by TASK_COUNT
-  $param = cfg(PARAM, 1)      # 8 (first task)
-  $param = cfg(PARAM, -1)     # 0 (last task)
+  $param = cfg(PARAM, 1)      # 8 (first task in @TASK)
+  $param = cfg(PARAM, -1)     # 0 (last task in @TASK)
 
 =cut
+
 
 sub cfg{
 	my ($k, $t) = @_;
 	return undef unless exists $cfg{$k};
-	return $cfg{$k} if ref $cfg{$k} eq "SCALAR";
+	return $cfg{$k} unless ref $cfg{$k};
 	
-	my %p = @{$cfg{$k}};
+	if(ref $cfg{$k} eq "ARRAY"){
+		return wantarray ?	@{$cfg{$k}} : $cfg{$k};
+	}
+	
+	if(! exists $cfg{$k}{DEF}){
+		return wantarray ?	%{$cfg{$k}} : $cfg{$k};
+	}
+	
+	my %p = %{$cfg{$k}};
 	return undef unless %p;
 	
-	my $v = exists $p{0} ? $p{0} : undef;
+	my $v = exists $p{DEF} ? $p{DEF} : undef;
 	
 	if(defined $t){
 		if($t =~ /[^-0-9]/){
-			$v = $p{$TASKS[$t]} if exists $p{$TASKS[$t]};
+			$v = $p{$t} if exists $p{$t};
 		}else{
-			$v = $p{$t} if exists $p{$TASKS[$t]};
+			$v = $p{$TASKS[$t]} if exists $p{$TASKS[$t]};
 		}
 	}
 	return $v;
