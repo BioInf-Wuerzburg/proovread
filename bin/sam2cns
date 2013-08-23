@@ -498,7 +498,12 @@ open($fch, $mode, $fc_out) || $v->exit("Can't open output read file: '$fc_out'")
 #}
 #####
 
+#### PROBLEM ####
+# how to track that there are reads, that do not show in SAM file if ref
+# is provided
+# sort @LR_IDS, expect each to be in SAM
 # get a list of ref (seqs) ids and len
+
 my %LR;
 my @LR_IDS;
 
@@ -523,13 +528,9 @@ if($rpr){ # read fasta to get ref id, length and seq
 	}
 }
 
-#### PROBLEM ####
-# how to track that there are reads, that do not show in SAM file if ref
-# is provided
-# sort @LR_IDS, expect each to be in SAM
-
 @LR_IDS = sort byfile @LR_IDS;
 
+#  jump to sam ref pos
 $sp->seek($opt_sam_offset) if $opt_sam_offset;
 
 my $ref_seen = 0; # since we read the entire header to %LR, we need to count ref seqs
@@ -537,25 +538,32 @@ my $ref_id = '';
 my $sso;
 
 while(my $aln = $sp->next_aln()){
+	# new block
 	unless ($ref_id eq $aln->rname){
+		# process previous block
 		if ($sso){
-			# process previous block
 			generate_consensus($sso);
-			
-			# account for ref seqs w/o SAM mappings
-			if($rpr){
-				#TODO, not necessarily here
-			}
-			
 			$ref_seen++;
-			print Dumper($ref_id, $ref_seen);
-		};
-		
-		if($opt_max_reads && $ref_seen > $opt_max_reads-3){
-			last;
 		};
 		
 		$ref_id = $aln->rname;
+	
+		# test whether new read_id is also next in @LR_IDS
+		while($ref_seen < @LR_IDS && $LR_IDS[$ref_seen] ne $ref_id){
+			# unmapped seq needs to be outputted as well
+			generate_consensus(
+				Sam::Seq->new(
+					id => $LR{$ref_id}{id},
+					len => $LR{$ref_id}{len},
+					ref => $rpr ? $LR{$ref_id}{ref} : undef,
+				)
+			);
+			$ref_seen++;
+		};
+
+		# max read condition
+		last if ($opt_max_reads && $ref_seen >= $opt_max_reads);
+
 		# create new block with $aln = first entry
 		$sso = Sam::Seq->new(
 			id => $LR{$ref_id}{id},
@@ -563,13 +571,15 @@ while(my $aln = $sp->next_aln()){
 			ref => $rpr ? $LR{$ref_id}{ref} : undef,
 		);
 	}
+	
+	# process aln
 	$opt_detect_chimera		# binning required for chimera detection
 		? $sso->add_aln_by_score($aln)
 		: $sso->add_aln($aln);
 }
 
 # process eof block if existing
-generate_consensus($sso, "wtf") if $sso;
+# generate_consensus($sso) if $sso;
 
 
 
@@ -588,7 +598,7 @@ Takes a Sam::Seq object, creates, processes and outputs consensus
 
 sub generate_consensus{
 	my $sso = shift; # Sam::Seq object
-	die if shift;
+	print shift if @_;
 	my @hcrs = ();
 	
 	if($rpr && ! $opt_ignore_hcr){
@@ -631,7 +641,7 @@ sub generate_consensus{
 			printf $fmh (">%s\n%s\n", substr($seq->seq_head, 1), 
 				$opt_mask_weak_reads ? "N" x length($seq->seq) : $seq->seq);
 
-			next;
+			return;
 		}
 	}
 	
