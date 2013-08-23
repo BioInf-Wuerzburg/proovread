@@ -516,7 +516,7 @@ if($rpr){ # read fasta to get ref id, length and seq
 			len => length($ref->seq),
 			id => $ref->id
 		};
-		push @LR_IDS, $ref->id;
+		push @LR_IDS, $ref->id;	
 		last if ++$ref_c >= $opt_max_reads;
 	}
 }else{# read the sam header to get ref ids and length
@@ -541,28 +541,31 @@ while(my $aln = $sp->next_aln()){
 	# new block
 	unless ($ref_id eq $aln->rname){
 		# process previous block
-		if ($sso){
+		if ($ref_id){
 			generate_consensus($sso);
 			$ref_seen++;
 		};
 		
 		$ref_id = $aln->rname;
-	
+		
 		# test whether new read_id is also next in @LR_IDS
 		while($ref_seen < @LR_IDS && $LR_IDS[$ref_seen] ne $ref_id){
 			# unmapped seq needs to be outputted as well
 			generate_consensus(
 				Sam::Seq->new(
-					id => $LR{$ref_id}{id},
-					len => $LR{$ref_id}{len},
-					ref => $rpr ? $LR{$ref_id}{ref} : undef,
+					id => $LR{$LR_IDS[$ref_seen]}{id},
+					len => $LR{$LR_IDS[$ref_seen]}{len},
+					ref => $rpr ? $LR{$LR_IDS[$ref_seen]}{ref} : undef,
 				)
 			);
 			$ref_seen++;
 		};
 
 		# max read condition
-		last if ($opt_max_reads && $ref_seen >= $opt_max_reads);
+		if ($opt_max_reads && $ref_seen >= $opt_max_reads){
+			$sso = undef;
+			last 
+		};
 
 		# create new block with $aln = first entry
 		$sso = Sam::Seq->new(
@@ -579,9 +582,23 @@ while(my $aln = $sp->next_aln()){
 }
 
 # process eof block if existing
-# generate_consensus($sso) if $sso;
+if($sso){
+	generate_consensus($sso);
+	$ref_seen++;
+};
 
-
+# test whether new read_id is also next in @LR_IDS
+while($ref_seen < @LR_IDS && $LR_IDS[$ref_seen] ne $ref_id){
+	# unmapped seq needs to be outputted as well
+	generate_consensus(
+		Sam::Seq->new(
+			id => $LR{$LR_IDS[$ref_seen]}{id},
+			len => $LR{$LR_IDS[$ref_seen]}{len},
+			ref => $rpr ? $LR{$LR_IDS[$ref_seen]}{ref} : undef,
+		)
+	);
+	$ref_seen++;
+};
 
 
 
