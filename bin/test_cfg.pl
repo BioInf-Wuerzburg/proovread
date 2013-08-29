@@ -10,12 +10,11 @@ my @TASKS = @{$cfg{'mode-tasks'}{'pacbio-pre'}};
 
 print Dumper(cfg('long-reads'));
 print Dumper(cfg('coverage'));
-print Dumper(cfg('sr-pre-fraction'));
-print Dumper(cfg('sr-pre-fraction', 'shrimp-pre-1') );
-print Dumper(cfg('sr-pre-fraction', 1));
-print Dumper(cfg('sr-pre-fraction', -2));
+print Dumper(cfg('sr-sampling'));
+print Dumper(scalar cfg('sr-sampling', 'shrimp-pre-1') );
+print Dumper(cfg('sr-sampling', 1));
+print Dumper(cfg('sr-sampling', -2));
 print Dumper(scalar cfg('mode-tasks', 'pacbio-pre') );
-
 
 # HASH
 # Problem: there always needs to be the default (0) or a specific task to 

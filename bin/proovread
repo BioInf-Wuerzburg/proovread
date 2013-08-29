@@ -37,7 +37,7 @@ use Time::HiRes qw(usleep);
 use Data::Dumper;
 $Data::Dumper::Sortkeys = 1;
 
-our $VERSION = '1.02';
+our $VERSION = '1.03';
 
 
 
@@ -56,6 +56,20 @@ Correct single molecule sequencing reads by iterative mapping of high
 =cut
 
 =head1 CHANGELOG
+
+=cut
+
+=head2 1.03
+
+=over
+
+=item [Change] "weak-read" can be controlled in cfg via 'mask-weak-reads'. 
+ Handling has been adjusted.
+
+=item [Feature] new SeqChunker, sampling is now controlled by sr-sampling in
+ cfg. $opt_cov is adjusted if data is sampled.
+
+=back
 
 =cut
 
@@ -884,11 +898,17 @@ foreach my $task (@TASKS){
 	$TASK = $task;
 	$TC++;
 	if($TASK eq 'read-sam'){
-		# $VS->exit("task not yet implemented")
-		# TODO: sam2cns w/o reference
 		# configure Sam::Seq
-		Sam::Seq->MaxCoverage($opt_cov);
+		my $xf=1;
+		if(my $x = cfg('sr-sampling',$TASK)){ # adjust if sampling
+			$xf = exists ${$x}{'--chunks-per-step'} 
+				? ${$x}{'--chunks-per-step'} / ${$x}{'--chunk-step'}
+				: 1 / ${$x}{'--chunk-step'};
+		}
+
+		Sam::Seq->MaxCoverage($opt_cov * $xf);
 		Sam::Seq->BinSize(cfg('bin-size'));
+
 
 		$LR = read_sam();
 		$sam_chunk_offsets = create_sorted_sam();
@@ -906,8 +926,16 @@ foreach my $task (@TASKS){
 	}elsif($TASK eq 'shrimp-iter-1'){
 
 		# configure Sam::Seq
-		Sam::Seq->MaxCoverage($opt_cov);
+		my $xf=1;
+		if(my $x = cfg('sr-sampling',$TASK)){ # adjust if sampling
+			$xf = exists ${$x}{'--chunks-per-step'} 
+				? ${$x}{'--chunks-per-step'} / ${$x}{'--chunk-step'}
+				: 1 / ${$x}{'--chunk-step'};
+		}
+
+		Sam::Seq->MaxCoverage($opt_cov * $xf);
 		Sam::Seq->BinSize(cfg('bin-size'));
+
 
 		run_shrimp(
 			sr_files => $opt_sr_file,
@@ -931,8 +959,16 @@ foreach my $task (@TASKS){
 	}elsif($TASK eq 'shrimp-iter-2'){
 
 		# configure Sam::Seq
-		Sam::Seq->MaxCoverage($opt_cov);
+		my $xf=1;
+		if(my $x = cfg('sr-sampling',$TASK)){ # adjust if sampling
+			$xf = exists ${$x}{'--chunks-per-step'} 
+				? ${$x}{'--chunks-per-step'} / ${$x}{'--chunk-step'}
+				: 1 / ${$x}{'--chunk-step'};
+		}
+
+		Sam::Seq->MaxCoverage($opt_cov * $xf);
 		Sam::Seq->BinSize(cfg('bin-size'));
+
 
 		run_shrimp(
 			sr_files => $opt_sr_file,
@@ -958,14 +994,21 @@ foreach my $task (@TASKS){
 	}elsif($TASK eq 'shrimp-pre-1'){
 
 		# configure Sam::Seq
-		Sam::Seq->MaxCoverage($opt_cov * cfg('sr-pre-fraction',$TASK));
+		my $xf=1;
+		if(my $x = cfg('sr-sampling',$TASK)){ # adjust if sampling
+			$xf = exists ${$x}{'--chunks-per-step'} 
+				? ${$x}{'--chunks-per-step'} / ${$x}{'--chunk-step'}
+				: 1 / ${$x}{'--chunk-step'};
+		}
+
+		Sam::Seq->MaxCoverage($opt_cov * $xf);
 		Sam::Seq->BinSize(cfg('bin-size'));
 
 		run_shrimp(
 			sr_files => $opt_sr_file,
-			sr_fraction => cfg('sr-pre-fraction', $TASK),
+			sr_sampling => cfg('sr-sampling', $TASK),
 #			($sr_count_total > 1_000_000
-#				? (stop_after => $sr_count_total * cfg('sr-pre-fraction', $TASK))
+#				? (stop_after => $sr_count_total * cfg('sr-sampling', $TASK))
 #				: ()
 #			),
 			shrimp => {
@@ -988,14 +1031,21 @@ foreach my $task (@TASKS){
 	}elsif($TASK =~ m/shrimp-pre-[2-5]/){
 
 		# configure Sam::Seq
-		Sam::Seq->MaxCoverage($opt_cov * cfg('sr-pre-fraction', $TASK));
+		my $xf=1;
+		if(my $x = cfg('sr-sampling',$TASK)){ # adjust if sampling
+			$xf = exists ${$x}{'--chunks-per-step'} 
+				? ${$x}{'--chunks-per-step'} / ${$x}{'--chunk-step'}
+				: 1 / ${$x}{'--chunk-step'};
+		}
+
+		Sam::Seq->MaxCoverage($opt_cov * $xf);
 		Sam::Seq->BinSize(cfg('bin-size'));
 
 		run_shrimp(
 			sr_files => $opt_sr_file,
-			sr_fraction => cfg('sr-pre-fraction', $TASK),
+			sr_sampling => cfg('sr-sampling', $TASK),
 #			($sr_count_total > 1_000_000
-#				? (stop_after => $sr_count_total * cfg('sr-pre-fraction', $TASK))
+#				? (stop_after => $sr_count_total * cfg('sr-sampling', $TASK))
 #				: ()
 #			),
 			shrimp => {
@@ -1021,7 +1071,14 @@ foreach my $task (@TASKS){
 	}elsif($TASK eq 'shrimp-ccs'){
 
 		# configure Sam::Seq
-		Sam::Seq->MaxCoverage($opt_cov);
+		my $xf=1;
+		if(my $x = cfg('sr-sampling',$TASK)){ # adjust if sampling
+			$xf = exists ${$x}{'--chunks-per-step'} 
+				? ${$x}{'--chunks-per-step'} / ${$x}{'--chunk-step'}
+				: 1 / ${$x}{'--chunk-step'};
+		}
+
+		Sam::Seq->MaxCoverage($opt_cov * $xf);
 		Sam::Seq->BinSize(cfg('bin-size'));
 
 		run_shrimp(			
@@ -1045,8 +1102,16 @@ foreach my $task (@TASKS){
 	}elsif($TASK eq 'shrimp-finish'){
 
 		# configure Sam::Seq
-		Sam::Seq->MaxCoverage($opt_cov);
+		my $xf=1;
+		if(my $x = cfg('sr-sampling',$TASK)){ # adjust if sampling
+			$xf = exists ${$x}{'--chunks-per-step'} 
+				? ${$x}{'--chunks-per-step'} / ${$x}{'--chunk-step'}
+				: 1 / ${$x}{'--chunk-step'};
+		}
+
+		Sam::Seq->MaxCoverage($opt_cov * $xf);
 		Sam::Seq->BinSize(cfg('bin-size'));
+
 
 		my $sr_finish_files;
 
@@ -1078,9 +1143,18 @@ foreach my $task (@TASKS){
 		$LR = undef;
 		
 	}elsif($TASK =~ m/bowtie2-/){
+
 		# configure Sam::Seq
-		Sam::Seq->MaxCoverage($opt_cov);
+		my $xf=1;
+		if(my $x = cfg('sr-sampling',$TASK)){ # adjust if sampling
+			$xf = exists ${$x}{'--chunks-per-step'} 
+				? ${$x}{'--chunks-per-step'} / ${$x}{'--chunk-step'}
+				: 1 / ${$x}{'--chunk-step'};
+		}
+
+		Sam::Seq->MaxCoverage($opt_cov * $xf);
 		Sam::Seq->BinSize(cfg('bin-size'));
+
 
 		# cerate a unmasked reference for finish run
 		my $ref_file;
@@ -1267,7 +1341,7 @@ Run and process shrimp
 sub run_shrimp{
 	my $p = {
 		sr_files => [],
-		sr_fraction => 1,
+		sr_sampling => 0,
 		shrimp => {},
 		tmp_sam => task_file_name("_tmp.sam"),
 		# DEPRECATED: pre-SeqChunker
@@ -1309,7 +1383,15 @@ sub run_shrimp{
 	
 	### foreach sr file read mappings	
 	foreach my $sr_file (@{$p->{sr_files}}){
-		my $sr_count_netto = int(($sr_count[$sr_file_c] * $p->{sr_fraction})+0.5);
+		
+		my $xf=1;
+		if(my $x=$p->{sr_sampling}){ # adjust if sampling
+			$xf = exists ${$x}{'--chunks-per-step'} 
+				? ${$x}{'--chunks-per-step'} / ${$x}{'--chunk-step'}
+				: 1 / ${$x}{'--chunk-step'};
+		}
+		my $sr_count_netto = int(($sr_count[$sr_file_c] * $xf)+0.5);
+		
 		# init input stream parser progess bar	
 		$pg_rsp = Verbose::ProgressBar->new(size => $sr_count_netto);
 		$pg_step = int(($sr_count_netto/10000)+0.5) || 1; # never be zero
@@ -1320,17 +1402,13 @@ sub run_shrimp{
 		my $shrimp = Shrimp->new( 
 			%{$p->{shrimp}},
 			'ref' => undef,
-			($p->{sr_fraction} < 1
+			($p->{sr_sampling}
 				? (
 					'reads' => '/dev/fd/0',
 					'pre_command' => seq_chunker(
 						'NO_EXEC',
 						$sr_file,
-						'--chunk-ratio' => $p->{sr_fraction},
-						'--chunk-number' => ($sr_count_netto / cfg('seq-chunker', '--chunk-number') < 100
-							? int($sr_count_netto / 100) || 1
-							: cfg('seq-chunker', '--chunk-number')
-						),
+						%{cfg('sr-sampling', $TASK)},
 					) . ' | ',
 				)
 				: ('reads' => $sr_file)
@@ -1780,6 +1858,8 @@ sub correct_sr_mt{
 		'--coverage'	=> $opt_cov,
 		'--append'		=> 1,
 		'--cfg'	=> $cfg || undef,		
+		'--mask-weak-reads' => cfg('mask-weak-reads', $TASK),
+		'--ignore-weak-reads' => cfg('ignore-weak-reads', $TASK), 
 
 		cfg('detect-chimera', $TASK) ? ('--detect-chimera' => '') : (), 
 		cfg('hcr-ignore', $TASK) ? ('--ignore-hcr' => '') : (),
@@ -1795,14 +1875,8 @@ sub correct_sr_mt{
 			: ('--hcr-min-ratio' => 0), # deactivate on finish/sam
 			'--lcr-end-ratio' => cfg('lcr-end-ratio', $TASKS[$TC]),
 
-		($TASK =~ /pre-1/)
-			? ( '--mask-weak-reads' => 0 )
-			: (),
-		
 		($TASK =~ /-finish/) # calculate hcrs on first iter for second iter
 			? (
-				'--mask-weak-reads' => 0, 
-				'--ignore-weak-reads' => 20, 
 				'--max-ins-length' => 0,
 			  ) # params from config
 			: (),
