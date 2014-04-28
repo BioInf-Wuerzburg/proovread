@@ -1003,7 +1003,9 @@ $xf=1;
 		}
 
 		Sam::Seq->MaxCoverage($opt_cov * $xf);
-		Sam::Seq->BinSize(cfg('bin-size'));
+ 		Sam::Seq->BinSize(cfg('bin-size'));
+##                my $maco = $opt_cov * $xf;                           # for compare parameters with old versions
+##                $VS->verbose( "--XF is $xf and $maco" );
 
 		run_shrimp(
 			sr_files => $opt_sr_file,
@@ -1041,6 +1043,8 @@ $xf=1;
 
 		Sam::Seq->MaxCoverage($opt_cov * $xf);
 		Sam::Seq->BinSize(cfg('bin-size'));
+                    ##my $maco = $opt_cov * $xf;                   # for compare parameters with old versions
+                    ##$VS->verbose( "--XF is $xf and $maco" ); 
 
 		run_shrimp(
 			sr_files => $opt_sr_file,
