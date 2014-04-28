@@ -1401,6 +1401,7 @@ sub run_shrimp{
 		$pg_rsp = Verbose::ProgressBar->new(size => $sr_count_netto);
 		$pg_step = int(($sr_count_netto/10000)+0.5) || 1; # never be zero
 		
+	##	$VS->verbose("##MY COUNT IS $sr_count_netto $xf"); for comparison with older Versions
 		$VS->verbose("Mapping short reads `$sr_file`");
 
 		# init shrimp handler
