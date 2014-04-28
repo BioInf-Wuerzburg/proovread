@@ -859,6 +859,7 @@ if($opt_sam_file){
 	}
 }
 
+
 #unshift @TASKS, 0; # tasks are counted from 1, 0 just fills the array index :)
 
 $VS->verbose('Running mode: '.$opt_mode);
@@ -905,10 +906,10 @@ foreach my $task (@TASKS){
 				? ${$x}{'--chunks-per-step'} / ${$x}{'--chunk-step'}
 				: 1 / ${$x}{'--chunk-step'};
 		}
-
+$xf=1;
 		Sam::Seq->MaxCoverage($opt_cov * $xf);
 		Sam::Seq->BinSize(cfg('bin-size'));
-
+                
 
 		$LR = read_sam();
 		$sam_chunk_offsets = create_sorted_sam();
@@ -932,10 +933,10 @@ foreach my $task (@TASKS){
 				? ${$x}{'--chunks-per-step'} / ${$x}{'--chunk-step'}
 				: 1 / ${$x}{'--chunk-step'};
 		}
-
+$xf=1;
 		Sam::Seq->MaxCoverage($opt_cov * $xf);
 		Sam::Seq->BinSize(cfg('bin-size'));
-
+               
 
 		run_shrimp(
 			sr_files => $opt_sr_file,
@@ -965,7 +966,7 @@ foreach my $task (@TASKS){
 				? ${$x}{'--chunks-per-step'} / ${$x}{'--chunk-step'}
 				: 1 / ${$x}{'--chunk-step'};
 		}
-
+$xf=1;
 		Sam::Seq->MaxCoverage($opt_cov * $xf);
 		Sam::Seq->BinSize(cfg('bin-size'));
 
@@ -1077,7 +1078,7 @@ foreach my $task (@TASKS){
 				? ${$x}{'--chunks-per-step'} / ${$x}{'--chunk-step'}
 				: 1 / ${$x}{'--chunk-step'};
 		}
-
+$xf=1;
 		Sam::Seq->MaxCoverage($opt_cov * $xf);
 		Sam::Seq->BinSize(cfg('bin-size'));
 
@@ -1108,7 +1109,7 @@ foreach my $task (@TASKS){
 				? ${$x}{'--chunks-per-step'} / ${$x}{'--chunk-step'}
 				: 1 / ${$x}{'--chunk-step'};
 		}
-
+$xf=1;
 		Sam::Seq->MaxCoverage($opt_cov * $xf);
 		Sam::Seq->BinSize(cfg('bin-size'));
 
@@ -1878,6 +1879,7 @@ sub correct_sr_mt{
 		($TASK =~ /-finish/) # calculate hcrs on first iter for second iter
 			? (
 				'--max-ins-length' => 0,
+		             
 			  ) # params from config
 			: (),
 
