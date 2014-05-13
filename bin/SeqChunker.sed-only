@@ -228,13 +228,15 @@ fi;
 ##SeqChunker.sed-only can not handle CHUNK_SIZE & CHUNK_NUMBER - there are no Chunks, only Records
 if [ "$CHUNK_SIZE_BRUTTO" -gt 0 ]; then
     echo "Backfall SeqChunker can not handle chunk size" 1>&2
-    exit 1
+    echo "Set chunksize to 0" 1>&2
+    CHUNK_SIZE_BRUTTO=0
 fi;
 
 
 if [ "$CHUNK_NUM" -gt 0 ]; then
     echo "Backfall SeqChunker can not handle chunk number" 1>&2
-    exit 1
+    echo "Set chunk number to 0" 1>&2
+    CHUNK_NUM=0
 fi;
 
 ## 1.03 need no chunk-ratio
