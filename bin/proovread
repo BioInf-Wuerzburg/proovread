@@ -1201,9 +1201,9 @@ $xf=1;
 
 
 # create final output
-my $opt_fq_raw = task_file_name(task => '', suffix => ".corr.raw.fq");
-my $opt_fa_fil = task_file_name(task => '', suffix => ".corr.fil.fa");
-my $opt_fq_fil = task_file_name(task => '', suffix => ".corr.fil.fq");
+my $opt_fq_raw = task_file_name(task => '', suffix => ".untrimmed.fq");
+my $opt_fa_fil = task_file_name(task => '', suffix => ".trimmed.fa");
+my $opt_fq_fil = task_file_name(task => '', suffix => ".trimmed.fq");
 
 $VS->verbose("Creating raw output sequences");
 
