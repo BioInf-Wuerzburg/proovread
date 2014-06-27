@@ -2,8 +2,8 @@
 
 # Author:
 #         Simon Pfaff, simon.pfaff@stud-mail.uni-wuerzburg.de                                                                                                                                          
-# Last Modified: Simon Pfaff, 2014-05-13                                                                                                                                                               
-# Version 0.1 
+# Last Modified: Simon Pfaff, 2014-06-27                                                                                                                                                               
+# Version 0.2 
 
 #SeqChunker.chunk need Bash Version 4 or higher
 #for Versions below 4, proovread uses Sed.only
@@ -15,9 +15,9 @@ Bin="$(cd -- "$(dirname "$0")" && pwd)"
 if [ "$VER" -ge 4 ]; then
 
     bash "$Bin/SeqChunker.chunk" $@
-
+  
 else
 
     bash "$Bin/SeqChunker.sed-only" $@
-
+    echo "#Bash Version older than 4.0, load SeqChunker.sed-only"
 fi;
