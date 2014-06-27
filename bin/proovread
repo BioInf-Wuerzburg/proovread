@@ -37,7 +37,7 @@ use Time::HiRes qw(usleep);
 use Data::Dumper;
 $Data::Dumper::Sortkeys = 1;
 
-our $VERSION = '1.03';
+our $VERSION = '1.04';
 
 
 
@@ -56,6 +56,19 @@ Correct single molecule sequencing reads by iterative mapping of high
 =cut
 
 =head1 CHANGELOG
+
+=cut
+
+=head2 1.04
+
+=over
+
+=item [Feature] NEW SeqChunker.sed-only, for bash versions older than 4.0. 
+ Automatically choosen when bash is older than V. 4.0  
+
+=item [Change] Changed standart mapping options for pre-mapping steps.
+
+=back
 
 =cut
 
