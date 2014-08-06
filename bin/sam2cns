@@ -511,13 +511,14 @@ if($rpr){ # read fasta to get ref id, length and seq
 	$rpr->seek($opt_ref_offset) if $opt_ref_offset;
 	my $ref_c = 0;
 	while(my $ref = $rpr->next_seq()){
-		$LR{$ref->id} = {
+          $LR{$ref->id} = {
 			ref => $ref,
 			len => length($ref->seq),
 			id => $ref->id
 		};
 		push @LR_IDS, $ref->id;	
-		last if ++$ref_c >= $opt_max_reads;
+          	last if $opt_max_reads && ++$ref_c >= $opt_max_reads;
+
 	}
 }else{# read the sam header to get ref ids and length
 	while(my %h = $sp->next_header_line('SQ')){
