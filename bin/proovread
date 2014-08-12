@@ -1330,6 +1330,7 @@ sub read_sam{
 	# read sam file
 	my $rsp_c = 0;
 	while(my $aln = $rsp->next_aln()){
+	    next if $aln->is_unmapped();
 		# make sure Ref Seq entry exists
 		$VS->exit('The SAM file needs to have a header with an reference sequence entry @SQ foreach reference sequence')
 			unless exists $LR{$aln->rname};
