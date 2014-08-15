@@ -1972,10 +1972,10 @@ sub correct_sr_mt{
 	my @fa_glob = sort byfile glob $fa_glob;
 	my @fi_glob = sort byfile glob $fi_glob;
 	my @fc_glob = sort byfile glob $fc_glob;
-	my $fq_glob_sorted = join(" ", @fq_glob);
-	my $fa_glob_sorted = join(" ", @fa_glob);
-	my $fi_glob_sorted = join(" ", @fi_glob);
-	my $fc_glob_sorted = join(" ", @fc_glob);
+#	my $fq_glob_sorted = join(" ", @fq_glob);
+#	my $fa_glob_sorted = join(" ", @fa_glob);
+#	my $fi_glob_sorted = join(" ", @fi_glob);
+#	my $fc_glob_sorted = join(" ", @fc_glob);
 	
 	# create offset idx for reference
 	my @ref_idxs = (0);
@@ -1989,11 +1989,20 @@ sub correct_sr_mt{
 	# remove last one, its just the eof
 	pop(@ref_idxs);
 	
-	qx(cat $fq_glob_sorted > $fq_file);
-	qx(cat $fa_glob_sorted > $fa_file);
-	qx(cat $fi_glob_sorted >> $fi_file);
-	qx(echo -e "#id\tfrom\tto\tscore" > $fc_file; cat $fc_glob_sorted >> $fc_file);
-	
+	qx(>$fq_file); # create empty file, just to be safe
+	qx(>$fa_file);
+	# $fi_file gets appended over iters
+	qx(echo -e "#id\tfrom\tto\tscore" > $fc_file); # create file with header
+	for (my $i=0;$i<@fq_glob;$i+=500){
+	    my $f = 0+$i;
+	    my $t = 499+$i > $#fq_glob ? $#fq_glob : 499+$i;
+
+	    system("cat ".join(" ", @fq_glob[$f..$t])." >>$fq_file") && die $!;
+	    system("cat ".join(" ", @fa_glob[$f..$t])." >>$fa_file") && die $!;
+	    system("cat ".join(" ", @fi_glob[$f..$t])." >>$fi_file") && die $!;
+	    system("cat ".join(" ", @fc_glob[$f..$t])." >>$fc_file") && die $!;
+	}
+
 	
 	unlink @fq_glob unless $opt_keep > 1;
 	unlink @fa_glob unless $opt_keep > 1;
