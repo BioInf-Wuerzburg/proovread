@@ -526,7 +526,18 @@ NOTE: If multiple libraries are provided, they need to be of the
 
 =cut
 
+
+
 $opt{'s|short-reads=s@'} = \(my $opt_sr_file = cfg('short-reads'));
+
+=item -u, --unitigs=<PATHNAME>
+
+High confidence unitigs to use for correction. Can be specified
+multiple times.
+
+=cut
+
+$opt{'u|unitigs=s@'} = \(my $opt_utg_file = cfg('unitigs'));
 
 =item [-p, --prefix=<STRING>]
 
@@ -665,7 +676,7 @@ if($opt_sample){
 	$opt_sr_qv_offset = 33;
 } 
 
-$opt_sam_file || (@$opt_lr_file && @$opt_sr_file) || pod2usage("Either --long-reads and --short-reads or --sam required");
+$opt_sam_file || (@$opt_lr_file && @$opt_sr_file) || (@$opt_lr_file && @$opt_utg_file) || pod2usage("Either --long-reads and --short-reads/--unitigs or --sam required");
 $opt_sam_file && ! -f $opt_sam_file && pod2usage("Cannot find sam file `$opt_sam_file`");
 
 
@@ -850,6 +861,86 @@ if(@$opt_sr_file){
 }
 
 
+my @or_length;
+my @or_length_dev;
+my @or_count;
+my $or_count_total;
+my @or_matched;
+my @or_bps;
+
+my $min_or_length;
+my $max_or_dev;
+
+if($opt_utg_file && @$opt_utg_file){
+	$VS->verbose("Checking alternative read files");
+	
+	# short read files
+	foreach(@$opt_utg_file){
+		-e $_ || $VS->exit("Cannot find alternative read file `$_`");
+	
+		$V->verbose("\n".basename($_));
+		
+		# test if short reads are FASTQ/FASTA
+		my $fp;
+		my $or_length;
+		my $or_length_dev = '0';
+		my $or_qv_offset;
+		my $or_count;
+		
+		# FASTQ
+		if($fp = Fastq::Parser->new(file => $_)->check_format){ 
+			# format
+			$V->verbose("Detected FASTQ format");
+			
+			# length
+			($or_length, $or_length_dev) = $fp->guess_seq_length;
+			$V->verbose(sprintf("Estimated short read length: %d +-%d", $or_length, $or_length_dev ));
+
+                        # dont really care about length
+			# dont care about offset
+			
+			# count
+			$or_count = $fp->guess_seq_count();
+			$V->verbose(sprintf("Estimating approximate number of alternative reads: %s", Verbose->Humanize($or_count)));
+	
+		# FASTA
+		}elsif($fp = Fasta::Parser->new(file=> $_)->check_format){
+			# format
+			$V->verbose("Detected FASTA format");
+	
+			# length		
+			($or_length, $or_length_dev) = $fp->guess_seq_length;
+			$V->verbose(sprintf("Estimating short read length: %d +-%d", $or_length, $or_length_dev));
+	
+                        # dont really care about length
+			# dont care about offset
+
+			# count
+			$or_count = $fp->guess_seq_count();
+			$V->verbose(sprintf("Estimating approximate number of short reads: %s", Verbose->Humanize($or_count)));
+	
+			
+		}else{
+			$V->exit("Alternative read file $_ neither FASTQ nor FASTA format");
+		}
+	
+		# push
+		push @or_length, $or_length;
+		push @or_length_dev, $or_length_dev;
+		push @or_count, $or_count;
+		push @or_bps, ($or_count * $or_length);
+		$or_count_total+= $or_count;
+	}
+	
+	if(@$opt_utg_file){
+		$min_or_length = (sort{$a<=>$b}@or_length)[0];
+		$max_or_dev = (sort{$b<=>$a}@or_length_dev)[0];
+		$min_or_length+=$max_or_dev; 
+	}
+}
+
+
+
 
 =head2 mode
 
@@ -881,6 +972,8 @@ if($opt_sam_file){
 	}
 }
 
+# DIRTY FIX: mode unitigs w/o sr reads
+$min_sr_length = 200 unless $min_sr_length;
 
 #unshift @TASKS, 0; # tasks are counted from 1, 0 just fills the array index :)
 
@@ -1163,6 +1256,31 @@ $xf=1;
 			}
 		);
 		
+		$sam_chunk_offsets = create_sorted_sam();
+
+		$lr_chunk_offsets = correct_sr_mt($sam_chunk_offsets, $lr_chunk_offsets);
+		
+		$LR = undef;
+		
+	}elsif($TASK eq 'blasr-unitigs'){
+
+                # unitigs means no sampling, coverage=1 and should be run on large bin size
+
+                Sam::Seq->MaxCoverage(1);
+		Sam::Seq->BinSize(cfg('unitig-bin-size'));
+
+                run_blasr(			
+			or_files => $opt_utg_file,
+                        blasr => {
+				cfg($TASK), # basic shrimp params from cfg
+				'log' => task_file_name(suffix => "_blasr.log"),
+				'ref' => $TC < 2
+                                  ? task_file_name('.masked.fa', task => $TASKS[$TC-1] )
+                                  : task_file_name('.fa', task => $TASKS[$TC-1] ),
+				'-nproc' => $opt_threads,
+			}
+		);
+                
 		$sam_chunk_offsets = create_sorted_sam();
 
 		$lr_chunk_offsets = correct_sr_mt($sam_chunk_offsets, $lr_chunk_offsets);
@@ -1571,6 +1689,93 @@ sub run_shrimp{
 	
 }
 
+=head2 run_blasr
+
+Run and process blasr
+
+=cut
+
+sub run_blasr{
+    my $p = {
+             or_files => [],
+             blasr => {},
+             tmp_sam => task_file_name("_tmp.sam"),
+             @_
+            };
+	
+    $V->nline;
+    $VS->verbose("Running task ".$TASK);
+	
+
+    # init temporary sam writer
+    my $tsp = Sam::Parser->new(
+                               file => $p->{tmp_sam},
+                               mode => '+>',
+                              );
+
+
+    my $or_file_c = 0;
+    my $pg_rsp;
+    my $pg_step;
+	
+    ### foreach sr file read mappings	
+    foreach my $or_file (@{$p->{or_files}}) {
+		
+        my $or_count_netto = $or_count[$or_file_c];
+		
+        $VS->verbose("Mapping reads `$or_file`");
+
+        my @blasr_opts;
+        while(my ($k, $v) = each %{$p->{blasr}}){
+            push @blasr_opts, $k, $v if $k =~ /^-/;
+        }
+
+        my $blasr_cmd = "blasr $or_file $p->{blasr}{ref} @blasr_opts -sam 2>$p->{blasr}{log}";
+
+        $VB->hline();
+        $VB->verbose($blasr_cmd);
+        $VB->hline();
+
+        open(my $blasr_oh, "-|", $blasr_cmd) or $VS->exit($!);                
+		
+        # init input stream parser
+        my $rsp = Sam::Parser->new(fh => $blasr_oh);
+		
+        # read the header and create $LR only on first short read file
+        if ($or_file_c == 0) {
+            # read SAM header
+            while (my %h = $rsp->next_header_line('SQ|PG')) {
+				# @PG
+                if ($h{tag} eq '@PG') {
+                    $PG_line = $h{raw};
+                    next;
+                }
+                $LR->{$h{'SN'}} = Sam::Seq->new(
+                                                id => $h{SN}, 
+                                                len => $h{LN},
+                                                sam => $tsp, # indexed sam file, containing aln data
+                                               );
+            }
+        }
+	
+        # read SAM alignment section
+        my $add_c = 0;
+        my $src_lib_sum = 0;
+        my $src = 0;
+                                                
+        # create tmp sam
+        while (my $aln = $rsp->next_aln()) {
+            # try to add aln, if sufficient score, add to temporary sam file
+            if ($LR->{$aln->rname}->add_aln_by_score($aln)) {
+                $add_c++; 
+                $tsp->append_aln($aln);
+            }
+        }
+
+        close $blasr_oh;
+        $or_file_c++;
+    }
+}
 
 
 =head2 run_bowtie2
@@ -1750,6 +1955,8 @@ sub create_sorted_sam{
 	
 	return \@chunk_idxs;
 }
+
+
 
 
 
