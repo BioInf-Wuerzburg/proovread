@@ -3,12 +3,28 @@
 ##----------------------------------------------------------------------------##
 # Author: Thomas Hackl, thomas.hackl@uni-wuerzburg.de
 # Last Modified: Thomas Hackl, 2013-08-20
-# Version 0.13
-
+# Version 0.14
 
 
 ##----------------------------------------------------------------------------##
+## TODO
+# BUGS
+#  non known
+
+# FEATURES
+#  stdin - problem: cannot autocompute...
+#  rand - if possible with seed to allow for consistent recomputation
+
+##----------------------------------------------------------------------------##
 ## CHANGELOG
+
+## 0.14
+# BugFix: stable chunk size which allow skipping by byte sizes only
+#  ADJUST_CHUNK_SIZE=${#SED} + 1 : bash variables dont store trailing newlines, 
+#  missing bytes
+# BugFix: --version now also documented feature
+# Feature: Fatal exception if CHUNK_SIZE_REAL < 0 => chunk size to small for 
+#  given records
 
 ## 0.13
 # major refactoring to better support stepwise chunk maths and FASTA/FASTQ
@@ -31,14 +47,6 @@
 
 
 
-##----------------------------------------------------------------------------##
-## TODO
-# BUGS
-#  chunks can have a trailing "\n" after the last record -> this causes
-#  empty lines when concatenating chunks !!!
-# FEATURES
-#  stdin - problem: cannot autocompute...
-#  rand - if possible with seed to allow for consistent recomputation
 
 ##----------------------------------------------------------------------------##
 # Variable defaults
@@ -93,8 +101,8 @@ Required: Either one of the following, but not both at the same time. The unset
  parameter is computed respectively.
 
   -n/--chunk-number       Total number of chunks to be sampled (including 
-                          skipped ones). Supports suffixes "k,M,G".
-  -s/--chunk-size         Size of chunks to be sampled.
+                          skipped ones).
+  -s/--chunk-size         Size of chunks to be sampled. Supports suffixes "k,M,G".
   
 Optional:
    
@@ -109,13 +117,15 @@ Optional:
                           with a substitution for the chunk counter.
   -m/--max-block-size     Maximum size of blocks in output stream [$MAX_BLOCK_SIZE]
   -q/--quiet              Suppress non-critical messages
+  -V/--version            Version of the script.
   -d/--debug              Output more verbose messages
   -h/--help               Show this help screen
 
+NOTE: Chunk sizes need to be at least twice as great as the longest record in 
+ the file. Otherwise results will be inconsistent.
+
 NOTE: Chunk related computations are run each input file individually.
 
-NOTE: Do not use chunk sizes similar to or smaller than the expected record 
- sizes. Heuristics get messed up and cause unpredictable behaviour.
   
   # output only even numbered chunks
   SeqChunker --chunk-size 5M --chunk-first 2 --chunk-step 2 my.fa
@@ -154,7 +164,15 @@ chunk_core_out()
 {
     # chunk core
     CHUNK_SIZE_REAL=$(( $CHUNK_SIZE - $CHUNK_SIZE_ADJUST ))
-    [ $DEBUG -gt 1 ] && printf "$PRINTF_DEBUG" "CHUNK" "[$CHUNK_SIZE_REAL]" "--content hidden--"  1>&2;
+    if [ $CHUNK_SIZE_REAL -lt 0 ]; then
+        echo "--chunk-size to small for records" 1>&2;
+        exit 1;
+    fi;
+    
+    if [ $DEBUG -gt 1 ]; then
+    	printf "$PRINTF_DEBUG" "CHUNK" "[$CHUNK_SIZE]" "$(($CHUNK_SIZE_REAL + $CHUNK_SIZE_ADJUST)) = $CHUNK_SIZE_REAL + $CHUNK_SIZE_ADJUST" 1>&2;
+    	printf "$PRINTF_DEBUG" "CHUNK_REAL" "[$CHUNK_SIZE_REAL]" "--content hidden--"  1>&2;
+	fi;
     
     # one ore multiple dd blocks
     if [ $CHUNK_SIZE_REAL -gt $MAX_BLOCK_SIZE ]; then
@@ -181,8 +199,15 @@ chunk_core_skip()
 {
     # chunk core
     CHUNK_SIZE_REAL=$(( $CHUNK_SIZE - $CHUNK_SIZE_ADJUST ))
-    [ $DEBUG -gt 1 ] && printf "$PRINTF_DEBUG" "CHUNK" "[$CHUNK_SIZE_REAL]" "--content hidden--"  1>&2;
+    if [ $CHUNK_SIZE_REAL -lt 0 ]; then
+        echo "--chunk-size to small for records" 1>&2;
+        exit 1;
+    fi;
     
+    if [ $DEBUG -gt 1 ]; then
+    	printf "$PRINTF_DEBUG" "CHUNK" "[$CHUNK_SIZE]" "$(($CHUNK_SIZE_REAL + $CHUNK_SIZE_ADJUST)) = $CHUNK_SIZE_REAL + $CHUNK_SIZE_ADJUST" 1>&2; 
+    	printf "$PRINTF_DEBUG" "CHUNK_REAL" "[$CHUNK_SIZE_REAL]" "--content hidden--"  1>&2;
+	fi;
     # one ore multiple dd blocks
     if [ $CHUNK_SIZE_REAL -gt $MAX_BLOCK_SIZE ]; then
         BLOCK_COUNT=$(( $CHUNK_SIZE_REAL / $MAX_BLOCK_SIZE ))
@@ -217,12 +242,17 @@ chunk_fasta()
             printf "$PRINTF_DEBUG" "HEAD (c)" "[${#HEAD}]" "$HEAD"  1>&2;
         fi;
 	    [ $SKIP -eq 0 ] && echo "$HEAD" 1>&3;    
+   
     # get first record
     else
-        SED=$(sed --unbuffered -n -e "$SED_FASTA");
+        SED=$(sed --unbuffered -e "$SED_FASTA");
 
-        # eof
-		if [ -z "$SED" ]; then
+        TAIL="${SED%>*}";
+        HEAD="${SED:${#TAIL}}";
+        CHUNK_SIZE_ADJUST=$(( ${#SED} + 1 )); # number of bytes read, but not outputted
+
+                # eof
+		if [ -z "$HEAD" ]; then
 		    # sometimes last chunk is empty -> remove
 		    if [ -n "$OUT_CHUNK" ] && [ ! -s "$OUT_CHUNK" ]; then
 		        $(rm "$OUT_CHUNK");
@@ -231,9 +261,6 @@ chunk_fasta()
 		    return 1; # return on eof
 		fi;
 		
-        TAIL="${SED%>*}";
-        HEAD="${SED:${#TAIL}}";
-        CHUNK_SIZE_ADJUST=$(( $CHUNK_SIZE_ADJUST + ${#TAIL} ));
     
         [ $SKIP -eq 0 ] && echo "$HEAD" 1>&3;    
     
@@ -256,7 +283,7 @@ chunk_fasta()
     # last record -search for start of next record
 	SED=$(sed --unbuffered -e "$SED_FASTA");
 	# this many bytes have been read, but not yet outputted
-	CHUNK_SIZE_ADJUST=${#SED}
+	CHUNK_SIZE_ADJUST=$(( ${#SED} + 1 ));
     
     # remove next FASTA record identifier, if present
     if [ -z "$SED" ]; then # eof with dd
@@ -301,8 +328,12 @@ chunk_fastq()
      else
         SED=$(sed --unbuffered -n -e "$SED_FIRST_FASTQ");
 
-        # eof
-        if [ -z "$SED" ]; then
+        TAIL="${SED%@*$'\n'*$'\n'+$'\n'*}" # remove entire record
+        HEAD="${SED:${#TAIL}}";
+        CHUNK_SIZE_ADJUST=$(( ${#SED} + 1 ));
+
+                # eof
+        if [ -z "$HEAD" ]; then
             # sometimes last chunk is empty -> remove
             if [ -n "$OUT_CHUNK" ] && [ ! -s "$OUT_CHUNK" ]; then
                 $(rm "$OUT_CHUNK");
@@ -311,9 +342,6 @@ chunk_fastq()
             return 1; # return on eof
         fi;
         
-        TAIL="${SED%@*$'\n'*$'\n'+$'\n'*}" # remove entire record
-        HEAD="${SED:${#TAIL}}";
-        CHUNK_SIZE_ADJUST=$(( $CHUNK_SIZE_ADJUST + ${#TAIL} ));
     
         [ $SKIP -eq 0 ] && echo "$HEAD" 1>&3;    
     
@@ -335,7 +363,7 @@ chunk_fastq()
     # last record -search for start of next record
     SED=$(sed --unbuffered -e "$SED_LAST_FASTQ");
     # this many bytes have been read, but not yet outputted
-    CHUNK_SIZE_ADJUST=${#SED}
+	CHUNK_SIZE_ADJUST=$(( ${#SED} + 1 ));
     
     if [ -z "$SED" ]; then # eof with dd
         HEAD=''
@@ -367,7 +395,7 @@ chunk_fastq()
 
 # Execute getopt
 ARGS=`getopt --name "SeqChunker" \
-    --options "n:s:f:l:x:y:o:m:qdhv" \
+    --options "n:s:f:l:x:y:o:m:qdhV" \
     --longoptions "chunk-number:,chunk-size:,first-chunk:,last-chunk:,chunk-step:,chunks-per-step:,out:,max-block-size:,quiet,debug,help,version" \
     -- "$@"`
 
@@ -456,7 +484,7 @@ while true; do
 	    -h|--help)
 	       show_help && exit 0;;
 
-        -v|--version)
+        -V|--version)
            grep -m1 'Version' "$0" | sed 's/.*Version\s*//';
            exit 0;;
 	       	       	       
@@ -558,7 +586,8 @@ for FILE in $@; do
             # skip until CHUNK_FIRST
 	        SKIP=1;
 			while [ $I -lt $CHUNK_FIRST ]; do
-		        chunk_fasta
+		        #chunk_fasta
+				chunk_core_skip
 		        ((I++));
 			done;
 			
