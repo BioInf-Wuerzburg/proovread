@@ -1,0 +1,573 @@
+#!/usr/bin/env perl
+use warnings;
+no warnings 'qw';
+use strict;
+
+use Fasta::Parser;
+use Fasta::Seq;
+use Fastq::Parser;
+use Fastq::Seq;
+
+use Log::Log4perl qw(:no_extra_logdie_message);
+use Log::Log4perl::Level;
+use Getopt::Long;
+use Pod::Usage;
+use FindBin qw($RealBin $Script);
+use File::Basename;
+use File::Temp;
+
+use constant {
+    qas => 0,
+    qae => 1,
+    sas => 2,
+    sae => 3,
+};
+
+use Data::Dumper;
+$Data::Dumper::Sortkeys = 1;
+
+=head1 NAME
+
+siamaera - detect and trim self-similar chimaeras.
+
+=head1q DESCRIPTION
+
+An artefact of the PacBio library constructions seems to the
+generation of reverse-complement self similar chimaeras. Read parts
+are usually separated by a short joint sequences. Trimming is
+essential prior to assembly. It is facilited using reverse complement
+self hits generated with blast. Reads are trimmed to the longest
+non-chimaeric subsequence without joint sequence.
+
+  ----R--->--J--<--R.rc--
+  ----R--->
+
+  --R->-J-<----R.rc-----
+          <----R.rc-----
+
+=head1 SYNOPSIS
+
+  siamaera [options] < in.fa/fq > out.fa/fq
+
+=head1 OPTIONS
+
+=over
+
+=item -s/--seq-min-len <INT> [150]
+
+Minimum sequence length to trigger check.
+
+=item -y/--all-min-idy <FLOAT> [97.5]
+
+Minimum sequence identity of alignment to trigger trimming.
+
+=item --[no]-filter-inconclusive [ON]
+
+On rare occacions, reads produce a multitude of contradicting self
+alignments, which cannot be resolved to a simple, trimmable
+structure. By default, these reads are removed from output.
+
+=item --term-igore-len <INT> [10]
+
+Allow valid alignments to start at maximum this far away from read start/end.
+
+=item --trim <INT> [5]
+
+Trim this many additional bps at joint to account for slight asymetrics.
+
+=item -c/--config <PATH PATH ...>
+
+Read parameter from config file
+
+=item -D/--debug
+
+Toggle verbose messages.
+
+=item -h/--help
+
+Display this help screen.
+
+=item -V/--version
+
+Display script version.
+
+=back
+
+=cut
+
+
+##----------------------------------------------------------------------------##
+# Globals
+
+our $VERSION = 0.01;
+
+Log::Log4perl->init( \q(
+	log4perl.rootLogger                     = INFO, Screen
+	log4perl.appender.Screen                = Log::Log4perl::Appender::Screen
+	log4perl.appender.Screen.stderr         = 1
+	log4perl.appender.Screen.layout         = PatternLayout
+	log4perl.appender.Screen.layout.ConversionPattern = [%d{yy-MM-dd HH:mm:ss}] [siamaera] %m%n
+));
+
+my $L = Log::Log4perl->get_logger();
+
+##----------------------------------------------------------------------------##
+# GetOptions
+
+my %def = (
+           term_ignore_len => 10, # number of basepairs at the end of the
+           # seq which do not have to align
+           seq_min_len => 150,  # minimum sequence length to initiate
+           # testing
+           aln_min_idy => 97.5,   # minimum alignment identity
+           # trim
+           trim => 5, # trim this many bp additionally at a joint
+                       # just to be safe
+           filter_inconclusive => 1
+          );
+
+my %opt = (
+           config => []
+           );
+GetOptions(                     # use %opt (Cfg) as defaults
+           \%opt, qw(
+                        seq_min_len|seq-min-len|s=i
+                        aln_min_idy|aln-min-idy|y=f
+                        filter_inconclusive|filter-inconclusive!
+                        term_ignore_len|term-ignore-len=i
+			trim=i
+                        config|c=s{,}
+                        version|V!
+                        debug|D!
+                        help|h!
+                   )
+          ) or $L->logcroak('Failed to "GetOptions"');
+
+# help
+$opt{help} && pod2usage(1);
+
+# version
+if ($opt{version}) {
+    print "$VERSION\n"; 
+    exit 0;
+}
+
+
+##----------------------------------------------------------------------------##
+# Config
+
+my %cfg;
+
+# core
+my $core_cfg = "$RealBin/../".basename($Script, qw(.pl)).".cfg";
+
+if ( -e $core_cfg) {
+    $opt{core_config} = File::Spec->rel2abs($core_cfg);
+    %cfg = (%cfg, Cfg->Read($opt{core_config}, $Script));
+}
+
+
+# read all configs
+if (@{$opt{config}}) {
+    foreach my $cfg ( @{$opt{config}} ) {
+	$cfg=File::Spec->rel2abs($cfg);
+	%cfg = (%cfg, Cfg->Read($cfg, $Script));
+    }
+}
+
+
+# create template for user cfg
+if (defined $opt{create_config}) {
+    pod2usage(-msg => 'To many arguments', -exitval=>1) if @ARGV > 1;
+    my $user_cfg = Cfg->Copy($core_cfg, $opt{create_config}) or $L->logdie("Creatring config failed: $!");
+    $L->info("Created config file: $user_cfg");
+    exit 0;
+}
+
+##----------------------------------------------------------------------------##
+# Config + Opt
+
+%opt = (%def, %cfg, %opt);
+
+
+
+# required stuff  
+for (qw()) {
+    if (ref $opt{$_} eq 'ARRAY') {
+	pod2usage("required: --$_") unless @{$opt{$_}}
+    } else {
+	pod2usage("required: --$_") unless defined ($opt{$_})
+    }
+}
+;
+
+
+# debug level
+$L->level($DEBUG) if $opt{debug};
+$L->debug('Verbose level set to DEBUG');
+
+$L->debug(Dumper(\%opt));
+
+
+
+##----------------------------------------------------------------------------##
+# Main
+##----------------------------------------------------------------------------##
+
+my $fp = Fasta::Parser->new();
+$fp = Fastq::Parser->new() unless $fp->check_format();
+
+$L->logdie("Input neither FASTA nor FASTQ") unless $fp->check_format();
+    
+# get tmp
+# my $blast_tmp = File::Temp->newdir(
+# 	"simaera-XXXXXXXXXX", 
+# 	DIR=>$opt{tmp}, 
+# 	CLEANUP=>0
+# );
+# $L->debug("tmp dir: '$td'");
+
+# use bash pipe to submit blast jobs much faster than qx
+# open(BASH, "| bash > $blast_tmp") or die $!;
+
+my $seq_c = 0;
+my $sia_c = 0;
+my $inc_c = 0;
+
+SEQ: while (my $fa=$fp->next_seq) {
+    my $seq = ">".$fa->id."\n".$fa->seq."\n";
+    my $id = $fa->id;
+    my $sl = length($fa->seq); 
+    $seq_c++;
+
+    $L->debug(">",$id);
+    
+    if ($sl < $opt{seq_min_len}) {
+	# not a possible siamaera
+	$L->debug("stubby sequence");
+	print "$fa";
+	next SEQ;
+    }
+
+    $L->debug("---- blast");
+    my @blastre = blast($seq);
+
+
+    unless(@blastre){
+	# not a possible siamaera
+	$L->debug("no hit");    
+	print "$fa";
+	next SEQ;
+    }
+
+    # remove spurious hits from J to H/T
+    if (@blastre > 2){
+        my @bs = ();
+        my $k=0; # blastre current counter
+        my $t = int(0.05 * $sl + 0.5) || 1; # tolerance shfift for sym hit       
+        $t++;
+        
+    HIT: foreach (@blastre) {
+            my @b = @$_;
+
+            # joint: qas == sae, qae == sas
+            if($b[qas] == $b[sae] && $b[qae] == $b[sas]){
+                # remove (short) joints not 
+
+                push @bs, [@b, "joined"] if ($b[qae] - $b[qas]) > 0.7*$opt{seq_min_len} ;
+
+            # split: sym <-> asym
+            } else {
+                for (my $i=0; $i<@blastre; $i++) {
+                    next if $i==$k; # dont compare to yourself
+                    my @o = @{$blastre[$i]};
+
+                    # only store symetric hits
+                    if (
+                        abs($b[qas] - $o[sae]) < $t &&
+                        abs($b[qae] - $o[sas]) < $t
+                       ) {
+                        push @bs, [@b, "split"];
+                    }
+                }
+            }
+            $k++;
+        }
+        @blastre = @bs;
+        $L->debug("---- spurious");
+        $L->debug(join("\t", @$_)) for @blastre;
+    }
+    
+    if (@blastre > 2){
+        my @re = reblast($seq) ;
+        @blastre = @re if @re;
+    }
+    
+    # remove spurious hits from J to H/T
+    if (@blastre > 2){
+        my @bs = ();
+        my $k=0; # blastre current counter
+        my $t = int(0.05 * $sl + 0.5) || 1; # tolerance shfift for sym hit       
+        $t++;
+        
+    HIT: foreach (@blastre) {
+            my @b = @$_;
+
+            # joint: qas == sae, qae == sas
+            if($b[qas] == $b[sae] && $b[qae] == $b[sas]){
+                # remove (short) joints not 
+
+                push @bs, [@b, "joined"] if ($b[qae] - $b[qas]) > 0.7*$opt{seq_min_len} ;
+
+            # split: sym <-> asym
+            } else {
+                for (my $i=0; $i<@blastre; $i++) {
+                    next if $i==$k; # dont compare to yourself
+                    my @o = @{$blastre[$i]};
+
+                    # only store symetric hits
+                    if (
+                        abs($b[qas] - $o[sae]) < $t &&
+                        abs($b[qae] - $o[sas]) < $t
+                       ) {
+                        push @bs, [@b, "split"];
+                    }
+                }
+            }
+            $k++;
+        }
+        @blastre = @bs;
+        $L->debug("---- spurious");
+        $L->debug(join("\t", @$_)) for @blastre;
+    }
+
+
+    if (@blastre == 1){ # joined, 1 HSP
+        my @b = @{$blastre[0]};
+            
+        if ($b[qas] <= ( $opt{term_ignore_len}+1 )) { 
+            # short head / long tail
+            # alignment starts within first 5bp of query
+          
+            my $j = int((($b[qae] - $b[qas] -1) / 2) + $b[qas] + $opt{trim} + 0.5);
+            
+            
+            $L->info("SIAMAERA joined tail $j $sl");
+            $L->debug( $blastre[0] );
+
+
+            $L->debug($fa->seq);
+            $fa = $fa->substr_seq($j);
+            $fa->desc_append("SIAMAERA:$j,$sl");
+            $L->debug("-"x$j.$fa->seq);
+
+            $sia_c++;
+            
+        } elsif ($b[qae] > $sl - ( $opt{term_ignore_len}+1 )) { 
+            # long head / short tail
+            # alignment ends within last 5bp of query 
+          
+            my $j = int((($b[qae] - $b[qas] -1) / 2) + $b[qas] - $opt{trim} + 0.5);
+
+            $L->info("SIAMAERA joined head 0 $j"); 
+            $L->debug( join("\t", @b) );
+
+            $L->debug($fa->seq);
+            $fa = $fa->substr_seq(0,$j);
+            $fa->desc_append("SIAMAERA:0,$j");
+            $L->debug($fa->seq."-"x($sl-$j));
+
+            $sia_c++;
+            
+        } else {
+            # not a trusted siamaera
+        }
+    } elsif(@blastre == 2) { # splitted, 2 HSPs
+
+        foreach (@blastre) {
+            my @b = @$_;
+            
+            if ($b[qas] <= ( $opt{term_ignore_len}+1 )) { 
+                # short head / long tail
+                # alignment starts within first 5bp of query
+          
+                my $j = $b[sae]-1 + $opt{trim};
+
+                $L->info("SIAMAERA splitted tail $b[sae] $sl");
+                $L->debug( join("\t", @b) );
+          
+                $L->debug($fa->seq);
+                $fa = $fa->substr_seq($j);
+                $fa->desc_append("SIAMAERA:$j,$sl");
+                $L->debug("-"x$j.$fa->seq);
+
+                $sia_c++;
+
+                last;           # we found a good siamaera alignment
+          
+            } elsif ($b[qae] > $sl - ( $opt{term_ignore_len}+1 )) { 
+                # long head / short tail
+                # alignment ends within last 5bp of query 
+          
+                my $j = $b[sas] - $opt{trim};
+
+                $L->info("SIAMAERA splitted head 0 $b[sas]"); 
+                $L->debug( join("\t", @b) );
+          
+                $L->debug($fa->seq);
+                $fa = $fa->substr_seq(0,$j);
+                $fa->desc_append("SIAMAERA:0,$j");
+                $L->debug($fa->seq."-"x($sl-$j));
+
+                $sia_c++;
+
+                last;           # we found a good siamaera alignment
+          
+            } else { # process IR hits, e.g. more complicated siamaeras
+                # DUNNO
+            }
+        }
+
+    # look for siamaera indicating symetric hits, calculate probable
+    # joint and realign H/T
+    } elsif (@blastre > 2){
+        $inc_c++;
+        next SEQ if $opt{filter_inconclusive};
+            
+        # my @jt = map{
+        #     ($_->[qas]== $_->[sae] && $_->[qae] == $_->[sas])
+        #         ? int(($_->[qae]+$_->[qas])/2 + 0.5) # joined hit
+        #         : int(($_->[qae]+$_->[sae])/2 + 0.5) # splitted hit
+        # }@blastre;
+
+        # # jt sorted by resulting sub seq length
+        # @jt = sort{($b >= $sl-$b ? $b : $sl-$b) <=> ($a >= $sl-$a ? $a : $sl-$a)}@jt;
+
+        # $L->debug(map{"$_ (".($_ >= $sl-$_ ? $_ : $sl-$_).") "}@jt);
+        
+        # foreach my $jt (@jt){
+        #     my $subseq = $jt >= $sl-$jt
+        #         ? substr($seq, $jt)
+        #         : substr($seq, 0, $jt);
+        #     $L->debug("---- reblast");
+        #     @blastre = reblast($seq, $subseq);
+
+        #}
+        
+    }else{
+        $L->warn("Unexpectedly dropped all alignments during processing: $id");
+    }
+    print "$fa";                # output possibly modified seq;
+}
+
+
+if($seq_c){    
+    $L->info("Summary:\n"
+         .$seq_c." reads scanned\n"
+         .$sia_c." siamaeras trimmed (".sprintf("%0.2f", $sia_c/$seq_c*100)."%)\n"
+         .$inc_c." potential siamaeras with multiple, unresolved HSPs ".($opt{filter_inconclusive} ? "filtered" : "ignored") ." (".sprintf("%0.2f", $inc_c/$seq_c*100)."%)");
+}else{
+    $L->info("Summary:\n0 reads scanned");
+}
+
+
+
+##----------------------------------------------------------------------------##
+
+sub blast{
+
+    my ($seq) = @_;
+
+    # very ugly way to run blast 2 seq without any tmp files...
+    # qstart means Start of alignment in query
+    # qend means End of alignment in query
+    # sstart means Start of alignment in subject
+    # send me
+    # score means Raw score
+    # length means Alignment length
+    # pident means Percentage of identical matches
+
+    my $cmd = "SEQ=\"$seq\" && ".q/
+	blastn \
+	-subject <(echo "$SEQ") \
+	-query <(echo "$SEQ") \
+	-dust no \
+	-outfmt "6 qstart qend sstart send length pident qlen" \
+	-strand 'minus' \
+        -xdrop_gap_final 25 \
+	-soft_masking false \
+	-gapopen 3 \
+	-gapextend 2 \
+	-penalty -4 \
+        -culling_limit 1/
+            ." -perc_identity $opt{aln_min_idy}";
+
+    #print BASH "$cmd >> $blast_tmp\n";    
+    
+    my @blastre = qx( bash -c '$cmd' );
+
+    ($? || $@) && $L->logdie("Blast exited with error: $? $@", join("",@blastre));
+    chomp(@blastre);
+    $L->debug($_) for @blastre;
+
+    # view blast alns for debug
+    # my $cmd2 = $cmd;
+    #$cmd2 =~ s/-outfmt [^-]*/-outfmt 5 /;
+    #$L->debug(qx( bash -c '$cmd2' ));    
+
+    @blastre = map{[split(/\t/, $_)]}@blastre;
+    
+    return @blastre;
+}
+
+
+
+sub reblast{
+
+    my ($seq) = @_;
+
+    # very ugly way to run blast 2 seq without any tmp files...
+    # qstart means Start of alignment in query
+    # qend means End of alignment in query
+    # sstart means Start of alignment in subject
+    # send me
+    # score means Raw score
+    # length means Alignment length
+    # pident means Percentage of identical matches
+
+    my $cmd = "SEQ=\"$seq\" && ".q/
+	blastn \
+	-subject <(echo "$SEQ") \
+	-query <(echo "$SEQ") \
+	-dust no \
+	-outfmt "6 qstart qend sstart send length pident qlen" \
+	-strand 'minus' \
+        -xdrop_gap_final 100 \
+	-soft_masking false \
+        -culling_limit 1/
+            ." -perc_identity ".($opt{aln_min_idy}-2);
+
+    #print BASH "$cmd >> $blast_tmp\n";    
+    
+    my @blastre = qx( bash -c '$cmd' );
+
+    ($? || $@) && $L->logdie("Blast exited with error: $? $@", join("",@blastre));
+    chomp(@blastre);
+    $L->debug($_) for @blastre;
+
+    # view blast alns for debug
+    # my $cmd2 = $cmd;
+    #$cmd2 =~ s/-outfmt [^-]*/-outfmt 5 /;
+    #$L->debug(qx( bash -c '$cmd2' ));    
+
+    @blastre = map{[split(/\t/, $_)]}@blastre;
+    
+    return @blastre;
+}
+
+
+=head1 AUTHOR
+
+Thomas Hackl S<thomas.hackl@uni-wuerzburg.de>
+
+=cut

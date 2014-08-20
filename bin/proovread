@@ -1228,16 +1228,29 @@ my $opt_chim_fil = task_file_name(task => '', suffix => ".chim.tsv");
 chim_filter('--in' => $opt_chim_raw, '--out' => $opt_chim_fil);
 
 
-
 if(cfg('seq-filter')){
 	$V->nline;
-	$VS->verbose("Quality trimming raw output");
-	seq_filter(
-		cfg('seq-filter'),
-		'--substr' => $opt_chim_fil,
-		'--in' => $opt_fq_raw,
-		'--out' => $opt_fq_fil
-	);
+
+
+	if(cfg('siamaera')){
+		$VS->verbose("Quality trimming and siamaera filtering raw output");
+		seq_and_siamaera_filter([
+			cfg('seq-filter'),
+			'--substr' => $opt_chim_fil,
+			'--in' => $opt_fq_raw,
+		],[
+			cfg('siamaera'),
+			'>' => $opt_fq_fil
+		]);
+	}else{
+		$VS->verbose("Quality trimming raw output");
+		seq_filter(
+			cfg('seq-filter'),
+			'--substr' => $opt_chim_fil,
+			'--in' => $opt_fq_raw,
+			'--out' => $opt_fq_fil
+		);
+	}
 }
 
 
@@ -2134,6 +2147,29 @@ sub seq_filter{
 	my $params = param_join(\%params);
 
 	my $cmd = "$RealBin/SeqFilter $params";
+	
+	$VB->hline;
+	$VB->verbose($cmd);
+	qx($cmd);
+	$VB->hline;
+}
+
+
+=head2 seq_and_siamaera_filter
+
+Run seqfilter and siamaera on trimmed output
+
+=cut
+
+
+sub seq_and_siamaera_filter{
+	my %seq_params = @{$_[0]};
+	my $seq_params = param_join(\%seq_params);
+
+	my %siam_params = @{$_[1]};
+	my $siam_params = param_join(\%siam_params);
+
+	my $cmd = "$RealBin/SeqFilter $seq_params --out - | $RealBin/siamaera $siam_params";
 	
 	$VB->hline;
 	$VB->verbose($cmd);
