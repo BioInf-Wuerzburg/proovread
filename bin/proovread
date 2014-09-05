@@ -73,6 +73,10 @@ This implementation is the default SeqChunker used.
 
 =item [Upgrade] Upgraded Shrimp module version to 0.08
 
+=item [Requirements] NEW Required perl modules: Log::Log4perl, Log::Log4perl::Appender::Screen
+
+=item [Requirements] NEW Required software: blastn for detection of chimera
+
 =back
 
 =cut
