@@ -63,6 +63,8 @@ Correct single molecule sequencing reads by iterative mapping of high
 
 =over
 
+=item [Feature] NEW This version of proovread should also work on MacOSX systems
+
 =item [Feature] NEW SeqChunker-perl, as a perl only implementation of
 the SeqChunker code. This should work on every operating system offering perl.
 This implementation is the default SeqChunker used.
@@ -1954,7 +1956,7 @@ sub correct_sr_mt{
 	
 	# xarg cmds, capture stderr;
 	my $xgr;
-	open($xgr, "(xargs --arg-file $cfg_file --max-procs $opt_threads -L 1 --verbose perl $RealBin/sam2cns) 2>&1 |")
+	open($xgr, "(cat $cfg_file | xargs -P $opt_threads -L 1 -t perl $RealBin/sam2cns) 2>&1 |")
 		or $VS->exit($!);
 	
 	$VB->hline();
