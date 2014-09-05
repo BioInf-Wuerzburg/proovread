@@ -39,9 +39,6 @@ $Data::Dumper::Sortkeys = 1;
 
 our $VERSION = '1.04';
 
-
-
-
 =head1 NAME
 
 proovread
