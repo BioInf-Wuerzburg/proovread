@@ -1,0 +1,562 @@
+#!/usr/bin/env perl
+
+##----------------------------------------------------------------------------##
+# Author: Frank Foerster, frank.foerster@biozentrum.uni-wuerzburg.de
+# Based on SeqChunker.chunk by Thomas Hackl, thomas.hackl@uni-wuerzburg.de
+# Last Modified: Frank Foerster, 2014-09-02
+# Version 0.1
+
+##----------------------------------------------------------------------------##
+
+use strict;
+use warnings;
+
+use Getopt::Long;
+use Pod::Usage;
+
+my $version = 0.20.2;
+
+# Variable defaults
+my $_debug=0;
+my $help=0;
+my $man=0;
+
+my $CHUNK_NUM=0;
+
+my $CHUNK_SIZE=0;
+my $CHUNK_FIRST=1;
+my $CHUNK_LAST=0;
+my $CHUNK_STEP=1;
+my $CHUNK_STEP_NUM=1;
+
+my $OUT="";
+my $OUT_SPLIT=0;
+my $MAX_BLOCK_SIZE=1000000;
+
+my $cache = "";
+
+=pod
+
+=head1 NAME
+
+B<SeqChunker.perl I<v0.20.2>> - split a fasta/fastq file into chunk of a specified size on the fly
+
+=head1 SYNOPSIS
+
+SeqChunker.perl --chunk-number|--chunk-size INT [OPTIONS...] FILE(S)";
+
+=head1 DESCRIPTION
+
+SeqChunker efficiently samples and outputs chunks from FASTA and FASTQ files,
+ e.g. to serve as on-the-fly input for other tools.
+
+=head1 ARGUMENTS
+
+Required: Either one of the following, but not both at the same time. The unset
+ parameter is computed respectively.
+
+  -n/--chunk-number       Total number of chunks to be sampled (including
+                          skipped ones).
+  -s/--chunk-size         Size of chunks to be sampled. Supports suffixes "k,M,G".
+
+=head2 NOTE
+
+Chunk sizes need to be at least twice as great as the longest record
+in the file. Otherwise results will be inconsistent.
+
+Chunk related computations are run each input file individually.
+
+=head1 OPTIONS
+
+  -f/--first-chunk        Skip chunks before this chunk
+  -l/--last-chunk         Last after this chunk (including skipped ones)
+  -x/--chunk-step         Output a chunk every -x chunks
+  -y/--chunks-per-step    Output -y chunks every -x chunks. Cannot be greater
+                          than -x
+
+  -o/--out                Output filename. To split chunks into individual files
+                          provide a "printf" style pattern, e.g. "chunk%02d.fa",
+                          with a substitution for the chunk counter.
+  -m/--max-block-size     Maximum size of blocks in output stream [default 1000000 bytes]
+  -q/--quiet              Suppress non-critical messages
+  -V/--version            Version of the script.
+  -d/--debug              Output more verbose messages
+  -h/--help               Show this help screen
+
+=head1 EXAMPLES
+
+  # output only even numbered chunks
+  SeqChunker --chunk-size 5M --chunk-first 2 --chunk-step 2 my.fa
+
+  # Split file in 100 individual files of similar size
+  SeqChunker --chunk-number 100 --out "my.%03d.fa" my.fa
+
+=head1 TODO
+
+=head2 BUGS
+
+=over 8
+
+=item B<Output differences to SeqChunker-dd>
+
+Currently it seems that in small chunk sizes sometimes result in
+different output compared to the old SeqChunker-dd
+
+It is still not clear was causes this behavior!
+
+Solved in version 0.20.1
+
+Bug was caused by the security margin. This can be removed in future versions.
+
+=item B<Missing features>
+
+=over
+
+=item * Currently the option C<< -quiet >> is not implemented
+
+=item * The usage of the parameter C<< max_blocksize >> is not implemented
+
+=item * The parameter C<< -version >> is not implemented
+
+=item * The parameter C<< -manual >> is not mentioned in the documentation
+
+=item * Reading from STDIN is currently not supported
+
+=back
+
+=back
+
+=head2 PLANNED FEATURES
+
+=over 8
+
+=item stdin
+
+problem: cannot autocompute
+
+=item rand
+
+if possible with seed to allow for consistent recomputation
+
+=back
+
+=head1 HISTORY
+
+=over 8
+
+=item version 0.20.2
+
+Fixed an issue with the evaluation of the last-chunk parameter. Tests
+are now passed also with SeqChunker-perl
+
+=item version 0.20.1
+
+Solved the differences between old SeqChunker-dd and SeqChunker-perl
+under some parameter settings. New perl implementation should now
+return exact the same chunks.
+
+=item version 0.20.0
+
+First implementation of a perl based SeqChunker to circumvent some
+bash/sed/math issues in the script version. Is mainly based on
+SeqChunker-dd version 0.14 and give same result for larger chunk sizes.
+
+=back
+
+=head1 AUTHOR
+
+Please report bugs to
+
+Frank Foerster E<lt>frank.foerster@biozentrum.uni-wuerzburg.deE<gt>
+
+Thomas Hackl E<lt>thomas.hackl@uni-wuerzburg.deE<gt>
+
+Based on code B<SeqChunker.chunk> written by Thomas Hackl
+
+=cut
+
+sub expand_byte_suffix
+{
+    my ($value) = @_;
+
+    if ($value =~ /^\d+$/)
+    {
+	return $value+0;
+    } elsif  ($value =~ /^(\d+)\s*([kmg])$/i)
+    {
+	my ($base, $suffix) = ($1, $2);
+	return $base*1024**(index("kmg", lc($suffix))+1);
+    } else {
+	die "The value '$value' does not represent a number or a suffixed number!\n";
+    }
+}
+
+sub guess_file_format
+{
+    my ($fh) = @_;
+
+    # read the first byte of the file
+    my $first_byte = "";
+    my $bytes_received=read $fh, $first_byte, 1;
+    if ($bytes_received != 1)
+    {
+	die "Error on retriving first byte from file: $!\n";
+    }
+
+    # check the first byte for indicating a fasta (>), fastq (@) or other file ([^>@])
+
+    if ($first_byte eq "@")
+    {
+	$cache = $first_byte;
+	return "fastq";
+    } elsif ($first_byte eq ">")
+    {
+	$cache = $first_byte;
+	return "fasta";
+    } else {
+	return undef;
+    }
+
+}
+
+sub strip_to_blockstart
+{
+    my (
+	$ref_string,
+	$fileformat
+	) = @_;
+
+    my $pattern = undef;
+
+    if ($fileformat eq "fasta")
+    {
+	$pattern = qr/^>|(?<=\n)>/;
+    } elsif ($fileformat eq "fastq")
+    {
+	$pattern = qr/^@.+\n.+\n\+|(?<=\n)@.+\n.+\n\+/;
+    } else {
+	die "Unable to handle the file format '$fileformat'\n";
+    }
+
+    if ($$ref_string =~ $pattern)
+    {
+	my $pos = $-[0];
+	my $old_block = "";
+	if ($pos > 0)
+	{
+	    $old_block = substr($$ref_string, 0, $pos, "");
+	}
+
+	# print STDERR Dumper({
+	#     pos => $pos,
+	#     old_block => $old_block,
+	#     buffer => $$ref_string,
+	# 	     }); use Data::Dumper;
+    }
+
+}
+
+sub get_chunk
+{
+    my (
+	$fh,
+	$output_fh,
+	$fileformat,
+	$skip
+	) = @_;
+
+    my $starting_pos = tell($fh);
+
+    # after some discussion with Thomas we changed the estimation of
+    # the chunksize2get each chunk begins at a multiple of the chunk
+    # size and the limit is therefore the next chunk start
+    my $current_chunk = int($starting_pos/$CHUNK_SIZE);
+    my $next_chunk_pos = ($current_chunk+1)*$CHUNK_SIZE;
+
+    if ($_debug)
+    {
+	printf STDERR "Starting file position: current %d (expected %d), next chunk starts at %d\n", $starting_pos, $current_chunk*$CHUNK_SIZE, $next_chunk_pos;
+    }
+
+    # we reduce the chunk size by 10 to find the right new block
+    my $security_margin = 10;
+    my $buffer = "";
+
+    my $chunksize2get = $next_chunk_pos - $starting_pos - $security_margin;
+
+    # read the number of chunksize2get bytes if skip is not set
+    if ($skip == 0)
+    {
+	my $bytesread = read($fh, $buffer, $chunksize2get);
+    } else {
+	seek($fh, $next_chunk_pos, 0);
+	$cache = "";
+	return;
+    }
+
+    # if the cache is set
+    if ($cache)
+    {
+	$buffer = $cache.$buffer;
+	$cache = "";
+    }
+
+    strip_to_blockstart(\$buffer, $fileformat);
+
+    # print the buffer to output_fh if skip is not set
+    if ($skip == 0 && $buffer)
+    {
+	print $output_fh $buffer;
+    }
+
+    # find the next block
+    # read until the next line break
+    $buffer = <$fh>;
+
+    # minimum length of buffer have to be 10
+    if ($buffer && length($buffer) < $security_margin)
+    {
+	# print the buffer to output_fh if skip is not set
+	if ($skip == 0  && $buffer)
+	{
+	    print $output_fh $buffer;
+	}
+	# and get the next line
+	$buffer = <$fh>;
+    }
+
+    # print the buffer to output_fh if skip is not set
+    if ($skip == 0 && $buffer)
+    {
+	print $output_fh $buffer;
+    }
+
+    # find next block
+    while (1)
+    {
+	$buffer = <$fh>;
+
+	# check if we reached the eof and leave the loop in this case
+	if (eof($fh))
+	{
+	    last;
+	}
+
+	# check if buffer contains a new block
+	if ($fileformat eq "fasta" && $buffer =~ /^>/)
+	{
+	    # store the new block inside the cache variable
+	    $cache = $buffer;
+	    # and leave the loop
+	    last;
+	} elsif  ($fileformat eq "fastq" && $buffer =~ /^@/)
+	{
+	    # for fastq the next line have to be the sequence and the next line have to start with a plus
+	    my $seq = <$fh>;
+	    my $header2 = <$fh>;
+
+	    if ($header2 =~ /^\+/)
+	    {
+		# okay... we reached a new block
+		$buffer .= $seq.$header2;
+	    } elsif ($seq =~ /^@/)
+	    {
+		# the block border was wrong and the start of a
+		# quality line, therefore, the next line should be the
+		# start of a new block write the buffer to the output
+		# if required and fill the buffer with the right
+		# content
+		if ($skip == 0 && $buffer)
+		{
+		    print $output_fh $buffer;
+		}
+		$buffer = $seq.$header2;
+	    } else {
+		die "Unable to find a new block in a fastq file\n";
+	    }
+	    $cache = $buffer;
+	    # and leave the loop
+	    last;
+	} else {
+	    # not a new block so print the buffer to output_fh if skip is not set
+	    if ($skip == 0  && $buffer)
+	    {
+		print $output_fh $buffer;
+	    }
+	}
+    }
+}
+
+sub main_loop
+{
+    my @files = @_;
+
+    foreach my $act_file (@files)
+    {
+	# check if the file exists
+	unless (-e $act_file)
+	{
+	    die "The file '$act_file' does not exist!\n";
+	}
+
+	# get the filesize and open the file
+	my $filesize = (stat($act_file))[7];
+
+	if ($_debug) { printf STDERR "Filesize for file '%s' is %d bytes!\n", $act_file, $filesize; }
+
+	open(my $fh, "<", $act_file) || die "Unable to open file '$act_file' for reading\n";
+
+	my $fileformat=guess_file_format($fh) || die "The file '$act_file' seems to be neigher a FASTQ nor a FASTA file\n";
+
+	# calculate the chunk size and the number of chunks expected
+	if ($CHUNK_SIZE == 0)
+	{
+	    $CHUNK_SIZE=int($filesize/$CHUNK_NUM)+1;
+	} else {
+	    $CHUNK_NUM=int($filesize/$CHUNK_SIZE)+1;
+	}
+
+	# set chunk last if not set
+	if ($CHUNK_LAST == 0)
+	{
+	    $CHUNK_LAST=$CHUNK_NUM;
+	}
+
+	# print debug information
+	if ($_debug)
+	{
+	    printf STDERR "ARGV=%s\nCHUNK_SIZE=%d\nCHUNK_NUM=%d\nCHUNK_FIRST=%d\nCHUNK_LAST=%d\nCHUNK_STEP=%d\nCHUNK_STEP_NUM=%d\n", join(",", @_), $CHUNK_SIZE, $CHUNK_NUM, $CHUNK_FIRST, $CHUNK_LAST, $CHUNK_STEP, $CHUNK_STEP_NUM;
+	}
+
+	# counter for the current chunk
+	my $current_chunk=1;
+
+	# this variable determines if a block should be skipped (=1) or kept (=0)
+	my $skip = 1;
+
+	# process all chunks until LAST_CHUNK is reached
+	while ($current_chunk<=$CHUNK_LAST)
+	{
+	    # skipped should be true, if the number of the current_chunk < $CHUNK_FIRST
+	    if ($current_chunk < $CHUNK_FIRST)
+	    {
+		$skip = 1;
+	    }
+
+	    # moreover if not every chunk should be returned, we have to determine if this chunk should be returned or not
+	    if ((($current_chunk-$CHUNK_FIRST)%$CHUNK_STEP) < $CHUNK_STEP_NUM)
+	    {
+		$skip = 0;
+	    } else {
+		$skip = 1;
+	    }
+
+	    # generate the filehandle for the output
+	    my $output_fh = undef;
+	    my $output_filename = undef;
+
+	    if ($OUT_SPLIT && $skip == 0)
+	    {
+		$output_filename = sprintf($OUT, $current_chunk);
+		if ($_debug)
+		{
+		    printf STDERR "The next filename for output is '%s'\n", $output_filename;
+		}
+		open($output_fh, ">", $output_filename) || die "Unable to open file '$output_filename' for writing! $!\n";
+	    } else {
+		$output_fh = *STDOUT;
+	    }
+
+	    get_chunk($fh, $output_fh, $fileformat, $skip);
+
+	    # close the file if a new one was created
+	    if ($OUT_SPLIT && $skip == 0)
+	    {
+		close($output_fh) || die "Unable to open file '$output_filename' after writing! $!\n";
+	    }
+
+	    $current_chunk++;
+
+	    # check if the whole file was read
+	    if (eof($fh))
+	    {
+		last;
+	    }
+	}
+
+	close($fh) || die "Unable to close file '$act_file' after reading\n";
+    }
+}
+
+GetOptions(
+    'chunk-number|n=i'    => \$CHUNK_NUM,
+    'chunk-size|s=s'      => \$CHUNK_SIZE,
+    'first-chunk|f=i'     => \$CHUNK_FIRST,
+    'last-chunk|l=i'      => \$CHUNK_LAST,
+    'chunk-step|x=i'      => \$CHUNK_STEP,
+    'chunks-per-step|y=i' => \$CHUNK_STEP_NUM,
+    'debug|d!'            => \$_debug,
+    'help|?|h!'           => \$help,
+    'out|o=s'             => \$OUT,
+    'manual|m!'           => \$man
+    ) || pod2usage(2);
+
+pod2usage(1) if $help;
+pod2usage(-exitval => 0, -verbose => 2) if $man;
+
+## check if still some arguments are left (should be filenames)
+if (@ARGV == 0)
+{
+    pod2usage(1);
+}
+
+## Expand the chunk size if required
+$CHUNK_SIZE=expand_byte_suffix($CHUNK_SIZE);
+
+## if out is set we also set out_split
+if ($OUT)
+{
+    $OUT_SPLIT=1;
+}
+
+## the user needs to specify chunk size or chunk num
+unless (($CHUNK_SIZE > 0 && $CHUNK_NUM == 0) || ($CHUNK_SIZE == 0 && $CHUNK_NUM > 0))
+{
+    pod2usage(2);
+}
+
+## if the user specified chunk last, this value has to be greater or equal to chunk first
+if ($CHUNK_LAST != 0 && $CHUNK_FIRST > $CHUNK_NUM)
+{
+    pod2usage(2);
+}
+
+## if the user specified chunk step and chunk step num than this value has to be less or equal chunk_step
+unless ($CHUNK_STEP_NUM != 0 && $CHUNK_STEP != 0 && $CHUNK_STEP >= $CHUNK_STEP_NUM)
+{
+    pod2usage(2);
+}
+
+
+main_loop(@ARGV);
+
+sub test_expand_byte_suffix
+{
+    foreach (qw(100 0001 15 10k 10K 10m 10M 10g 10G 5 9L4))
+    {
+	print STDERR expand_byte_suffix($_), "\n";
+    }
+}
+
+sub test_guess_file_format
+{
+    foreach (qw(test.fasta test.fastq test.other))
+    {
+	open(my $fh, "<", $_) || die;
+	my $fileformat=guess_file_format($fh) || die "The file seems to be neigher a FASTQ nor a FASTA file\n";
+	print STDERR "$_ was detected as $fileformat\n";
+	close($fh) || die;
+    }
+}
+
+__END__

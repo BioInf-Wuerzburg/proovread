@@ -1,23 +1,35 @@
 #!/bin/bash
 
 # Author:
-#         Simon Pfaff, simon.pfaff@stud-mail.uni-wuerzburg.de                                                                                                                                          
-# Last Modified: Simon Pfaff, 2014-06-27                                                                                                                                                               
-# Version 0.2 
+#   Frank Foerster, frank.foerster@biozentrum.uni-wuerzburg.de
+#   Simon Pfaff, simon.pfaff@stud-mail.uni-wuerzburg.de
+#   Thomas Hackl, thomas.hackl@uni-wuerzburg.de
+#
+# Last Modified: Frank Foerster, 2014-09-03
 
-#SeqChunker.chunk need Bash Version 4 or higher
-#for Versions below 4, proovread uses Sed.only
-
-VER=`bash --version | grep -Eo [0-9][.][0-9] | cut -d. -f1`
+# Version 0.3 
 
 Bin="$(cd -- "$(dirname "$0")" && pwd)"
 
-if [ "$VER" -ge 4 ]; then
+# check if perl exists, than use the perl version
+if [ ! -z $(which perl) ]; then
 
-    bash "$Bin/SeqChunker.chunk" $@
-  
-else
+    perl "$Bin/SeqChunker-perl" $@
 
-    bash "$Bin/SeqChunker.sed-only" $@
-    echo "#Bash Version older than 4.0, load SeqChunker.sed-only"
+else 
+    # use the bash only or the sed based version of SeqChunker
+
+    #SeqChunker-dd need Bash Version 4 or higher, fallback to slower sed version
+
+    VER=`bash --version | grep -Eo [0-9][.][0-9] | cut -d. -f1`
+
+    if [ "$VER" -ge 4 ]; then
+
+	bash "$Bin/SeqChunker-dd" $@
+    
+    else
+
+	bash "$Bin/SeqChunker-sed" $@
+	echo "#Bash Version older than 4.0, using SeqChunker-sed"
+    fi;
 fi;

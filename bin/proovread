@@ -63,7 +63,11 @@ Correct single molecule sequencing reads by iterative mapping of high
 
 =over
 
-=item [Feature] NEW SeqChunker.sed-only, for bash versions older than 4.0. 
+=item [Feature] NEW SeqChunker-perl, as a perl only implementation of
+the SeqChunker code. This should work on every operating system offering perl.
+This implementation is the default SeqChunker used.
+
+=item [Feature] NEW SeqChunker.sed, for bash versions older than 4.0.
  Automatically choosen when bash is older than V. 4.0  
 
 =item [Change] Changed standart mapping options for pre-mapping steps.

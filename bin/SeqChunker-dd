@@ -65,14 +65,14 @@ OUT_SPLIT=0;
 MAX_BLOCK_SIZE=1000000;
 
 SED_FASTA='/^>/{p;Q}'; # with -n, prints only matching line with, 
-                       #  else prints all previous lines + matching line
+#  else prints all previous lines + matching line
 
 SED_FIRST_FASTQ='/^@/ { # if ^@
                 N # read a second line
                 /\n@/ { s/^@.*\n// ; N} # remove first line and read another
                 N;N;p;q; # read two more lines, print and quit
         }'
-        
+
 SED_LAST_FASTQ='/^@/ { # if ^@
                 N # read a second line
                 /\n@/ { N } # read additonal line if second is head
@@ -86,13 +86,13 @@ PRINTF_DEBUG="  %-10s %10s : '%s'\n";
 
 show_usage()
 {
-  echo "Usage: SeqChunker --chunk-number/--chunk-size INT [OPTIONS ...] FILE1 FILE2 ..."
+    echo "Usage: SeqChunker --chunk-number/--chunk-size INT [OPTIONS ...] FILE1 FILE2 ..."
 }
 
 show_help()
 {
-  show_usage
-  cat <<EOF
+    show_usage
+    cat <<EOF
 
 SeqChunker efficiently samples and outputs chunks from FASTA and FASTQ files, 
  e.g. to serve as on-the-fly input for other tools. 
@@ -172,7 +172,7 @@ chunk_core_out()
     if [ $DEBUG -gt 1 ]; then
     	printf "$PRINTF_DEBUG" "CHUNK" "[$CHUNK_SIZE]" "$(($CHUNK_SIZE_REAL + $CHUNK_SIZE_ADJUST)) = $CHUNK_SIZE_REAL + $CHUNK_SIZE_ADJUST" 1>&2;
     	printf "$PRINTF_DEBUG" "CHUNK_REAL" "[$CHUNK_SIZE_REAL]" "--content hidden--"  1>&2;
-	fi;
+    fi;
     
     # one ore multiple dd blocks
     if [ $CHUNK_SIZE_REAL -gt $MAX_BLOCK_SIZE ]; then
@@ -183,13 +183,13 @@ chunk_core_out()
             echo BLOCK_REST=$BLOCK_REST 1>&2;
         )
 
-	    dd bs=$MAX_BLOCK_SIZE count=$BLOCK_COUNT 1>&3 2>/dev/null;
-	    dd bs=$BLOCK_REST count=1 1>&3 2>/dev/null;
-    
+	dd bs=$MAX_BLOCK_SIZE count=$BLOCK_COUNT 1>&3 2>/dev/null;
+	dd bs=$BLOCK_REST count=1 1>&3 2>/dev/null;
+        
     elif [ $CHUNK_SIZE_REAL -gt 0 ]; then
         
         dd bs=$CHUNK_SIZE_REAL count=1 1>&3 2>/dev/null;
-    
+        
     fi;
 }
 
@@ -207,7 +207,7 @@ chunk_core_skip()
     if [ $DEBUG -gt 1 ]; then
     	printf "$PRINTF_DEBUG" "CHUNK" "[$CHUNK_SIZE]" "$(($CHUNK_SIZE_REAL + $CHUNK_SIZE_ADJUST)) = $CHUNK_SIZE_REAL + $CHUNK_SIZE_ADJUST" 1>&2; 
     	printf "$PRINTF_DEBUG" "CHUNK_REAL" "[$CHUNK_SIZE_REAL]" "--content hidden--"  1>&2;
-	fi;
+    fi;
     # one ore multiple dd blocks
     if [ $CHUNK_SIZE_REAL -gt $MAX_BLOCK_SIZE ]; then
         BLOCK_COUNT=$(( $CHUNK_SIZE_REAL / $MAX_BLOCK_SIZE ))
@@ -219,9 +219,9 @@ chunk_core_skip()
 
         dd bs=$MAX_BLOCK_SIZE skip=$BLOCK_COUNT count=0 2>/dev/null;
         dd bs=$BLOCK_REST skip=1 count=0 2>/dev/null;
-    
+        
     elif [ $CHUNK_SIZE_REAL -gt 0 ]; then
-    
+        
         dd bs=$CHUNK_SIZE_REAL skip=1 count=0 2>/dev/null;
         
     fi;
@@ -241,9 +241,9 @@ chunk_fasta()
         if [ $DEBUG -gt 1 ]; then
             printf "$PRINTF_DEBUG" "HEAD (c)" "[${#HEAD}]" "$HEAD"  1>&2;
         fi;
-	    [ $SKIP -eq 0 ] && echo "$HEAD" 1>&3;    
-   
-    # get first record
+	[ $SKIP -eq 0 ] && echo "$HEAD" 1>&3;    
+        
+        # get first record
     else
         SED=$(sed --unbuffered -e "$SED_FASTA");
 
@@ -251,23 +251,23 @@ chunk_fasta()
         HEAD="${SED:${#TAIL}}";
         CHUNK_SIZE_ADJUST=$(( ${#SED} + 1 )); # number of bytes read, but not outputted
 
-                # eof
-		if [ -z "$HEAD" ]; then
-		    # sometimes last chunk is empty -> remove
-		    if [ -n "$OUT_CHUNK" ] && [ ! -s "$OUT_CHUNK" ]; then
-		        $(rm "$OUT_CHUNK");
-		    fi;
-		    [ $DEBUG -gt 1 ] && echo "EOF" 1>&2;
-		    return 1; # return on eof
-		fi;
-		
-    
+        # eof
+	if [ -z "$HEAD" ]; then
+	    # sometimes last chunk is empty -> remove
+	    if [ -n "$OUT_CHUNK" ] && [ ! -s "$OUT_CHUNK" ]; then
+		$(rm "$OUT_CHUNK");
+	    fi;
+	    [ $DEBUG -gt 1 ] && echo "EOF" 1>&2;
+	    return 1; # return on eof
+	fi;
+	
+        
         [ $SKIP -eq 0 ] && echo "$HEAD" 1>&3;    
-    
-	    if [ $DEBUG -gt 1 ]; then
-	        printf "$PRINTF_DEBUG" "SED (f)" "[${#SED}]" "$SED"  1>&2;
-	        printf "$PRINTF_DEBUG" "TAIL (f)" "[${#TAIL}]" "$TAIL"  1>&2;
-	        printf "$PRINTF_DEBUG" "HEAD (f)" "[${#HEAD}]" "$HEAD"  1>&2;
+        
+	if [ $DEBUG -gt 1 ]; then
+	    printf "$PRINTF_DEBUG" "SED (f)" "[${#SED}]" "$SED"  1>&2;
+	    printf "$PRINTF_DEBUG" "TAIL (f)" "[${#TAIL}]" "$TAIL"  1>&2;
+	    printf "$PRINTF_DEBUG" "HEAD (f)" "[${#HEAD}]" "$HEAD"  1>&2;
     	fi;
     fi;
     
@@ -278,12 +278,12 @@ chunk_fasta()
     else
         chunk_core_out
     fi;
-        
+    
     # handle the final record of the chunk - needs to be complete
     # last record -search for start of next record
-	SED=$(sed --unbuffered -e "$SED_FASTA");
-	# this many bytes have been read, but not yet outputted
-	CHUNK_SIZE_ADJUST=$(( ${#SED} + 1 ));
+    SED=$(sed --unbuffered -e "$SED_FASTA");
+    # this many bytes have been read, but not yet outputted
+    CHUNK_SIZE_ADJUST=$(( ${#SED} + 1 ));
     
     # remove next FASTA record identifier, if present
     if [ -z "$SED" ]; then # eof with dd
@@ -292,15 +292,15 @@ chunk_fasta()
     else
         TAIL="${SED%>*}";
         if [ ${#TAIL} -eq ${#SED} ]; then # eof in sed
-		    HEAD=''
-        	[ $SKIP -eq 0 ] && echo "$TAIL" 1>&3; # echo tail with '\n'
-	    else
-	        HEAD="${SED:${#TAIL}}";
-	        [ $SKIP -eq 0 ] && echo -n "$TAIL" 1>&3; # echo tail "as is"
-		fi;
+	    HEAD=''
+            [ $SKIP -eq 0 ] && echo "$TAIL" 1>&3; # echo tail with '\n'
+	else
+	    HEAD="${SED:${#TAIL}}";
+	    [ $SKIP -eq 0 ] && echo -n "$TAIL" 1>&3; # echo tail "as is"
+	fi;
     fi;
-	
-	if [ $DEBUG -gt 1 ]; then
+    
+    if [ $DEBUG -gt 1 ]; then
         printf "$PRINTF_DEBUG" "SED" "[${#SED}]" "$SED"  1>&2;
         printf "$PRINTF_DEBUG" "TAIL" "[${#TAIL}]" "$TAIL"  1>&2;
         printf "$PRINTF_DEBUG" "HEAD" "[${#HEAD}]" "$HEAD"  1>&2;
@@ -317,22 +317,22 @@ chunk_fastq()
     
     # relay file descriptor if necessary
     [ $SKIP -eq 0 ] && [ $OUT_SPLIT -eq 1 ] && out_split_descriptor;
-        
+    
     # check cache
     if [ ! -z "$HEAD" ]; then
         if [ $DEBUG -gt 1 ]; then
             printf "$PRINTF_DEBUG" "HEAD (c)" "[${#HEAD}]" "$HEAD"  1>&2;
         fi;
         [ $SKIP -eq 0 ] && echo "$HEAD" 1>&3;    
-    # get first record
-     else
+        # get first record
+    else
         SED=$(sed --unbuffered -n -e "$SED_FIRST_FASTQ");
 
         TAIL="${SED%@*$'\n'*$'\n'+$'\n'*}" # remove entire record
         HEAD="${SED:${#TAIL}}";
         CHUNK_SIZE_ADJUST=$(( ${#SED} + 1 ));
 
-                # eof
+        # eof
         if [ -z "$HEAD" ]; then
             # sometimes last chunk is empty -> remove
             if [ -n "$OUT_CHUNK" ] && [ ! -s "$OUT_CHUNK" ]; then
@@ -342,9 +342,9 @@ chunk_fastq()
             return 1; # return on eof
         fi;
         
-    
+        
         [ $SKIP -eq 0 ] && echo "$HEAD" 1>&3;    
-    
+        
         if [ $DEBUG -gt 1 ]; then
             printf "$PRINTF_DEBUG" "SED (f)" "[${#SED}]" "$SED"  1>&2;
             printf "$PRINTF_DEBUG" "TAIL (f)" "[${#TAIL}]" "$TAIL"  1>&2;
@@ -358,12 +358,12 @@ chunk_fastq()
     else
         chunk_core_out
     fi;    
-        
+    
     # handle the final record of the chunk - needs to be complete
     # last record -search for start of next record
     SED=$(sed --unbuffered -e "$SED_LAST_FASTQ");
     # this many bytes have been read, but not yet outputted
-	CHUNK_SIZE_ADJUST=$(( ${#SED} + 1 ));
+    CHUNK_SIZE_ADJUST=$(( ${#SED} + 1 ));
     
     if [ -z "$SED" ]; then # eof with dd
         HEAD=''
@@ -463,7 +463,7 @@ while true; do
             [ ! -n "$2" ] && (echo "$1: value required" 1>&2 && exit 1);
             OUT=$2
             shift 2;;
-            	     
+        
         -m|--max-block-size)
             [ ! -n "$2" ] && (echo "$1: value required" 1>&2 && exit 1);
             if [[ "$2" =~ [^0-9] ]]; then
@@ -474,36 +474,36 @@ while true; do
             shift 2;;
 
         -q|--quiet)
-           DEBUG=0
-           shift;;
+            DEBUG=0
+            shift;;
 
         -d|--debug)
-           DEBUG=2
-           shift;;
-           	    	        	        
-	    -h|--help)
-	       show_help && exit 0;;
+            DEBUG=2
+            shift;;
+        
+	-h|--help)
+	    show_help && exit 0;;
 
         -V|--version)
-           grep -m1 'Version' "$0" | sed 's/.*Version\s*//';
-           exit 0;;
-	       	       	       
+            grep -m1 'Version' "$0" | sed 's/.*Version\s*//';
+            exit 0;;
+	
         --)
             shift
             break;;
         *)
             echo "$1: Unknown option" 1>&2 && exit 1;;
-  esac
+    esac
 done
 
-        # -b|--byte-skip)
-            #    [ ! -n "$2" ] && (echo "$1: value required" 1>&2 && exit 1);
-            #if [[ "$2" =~ [^0-9] ]]; then
-                #    echo "$1: '$2' not an INT" 1>&2;
-                #exit 1;
-            #fi;
-            #SKIP=$2
-            #shift 2;;
+# -b|--byte-skip)
+#    [ ! -n "$2" ] && (echo "$1: value required" 1>&2 && exit 1);
+#if [[ "$2" =~ [^0-9] ]]; then
+#    echo "$1: '$2' not an INT" 1>&2;
+#exit 1;
+#fi;
+#SKIP=$2
+#shift 2;;
 
 # process some args and opts
 if [ $# -eq 0 ]; then
@@ -532,9 +532,9 @@ else
     if [[ $OUT =~ % ]]; then
         # dynamic descriptor for every chunk, no default ...
         OUT_SPLIT=1;
-	else
-	    eval "exec 3>$OUT";
-	fi;
+    else
+	eval "exec 3>$OUT";
+    fi;
 fi;
 
 ##----------------------------------------------------------------------------##
@@ -557,78 +557,78 @@ for FILE in $@; do
 
     # auto-compute chunk-size/chunk-number
     # chunk-size
-	if [ $CHUNK_SIZE -eq 0 ]; then
-		CHUNK_SIZE=$(( $FILE_SIZE/$CHUNK_NUM +1 ));
-	else
-	    CHUNK_NUM=$(( $FILE_SIZE/$CHUNK_SIZE +1 )); # better safe, lasts on eof anyway
-	fi;
+    if [ $CHUNK_SIZE -eq 0 ]; then
+	CHUNK_SIZE=$(( $FILE_SIZE/$CHUNK_NUM +1 ));
+    else
+	CHUNK_NUM=$(( $FILE_SIZE/$CHUNK_SIZE +1 )); # better safe, lasts on eof anyway
+    fi;
     
     [ $CHUNK_LAST -eq 0 ] && CHUNK_LAST=$CHUNK_NUM;
-	
-	if [ $DEBUG -gt 1 ]; then
-	    echo "ARGS=$ARGS" 1>&2;
-		echo "CHUNK_SIZE=$CHUNK_SIZE" 1>&2;
-		echo "CHUNK_NUM=$CHUNK_NUM" 1>&2;
-	    echo "CHUNK_FIRST=$CHUNK_FIRST" 1>&2;
-	    echo "CHUNK_LAST=$CHUNK_LAST" 1>&2;
-	    echo "CHUNK_STEP=$CHUNK_STEP" 1>&2;
-	    echo "CHUNK_STEP_NUM=$CHUNK_STEP_NUM" 1>&2;
+    
+    if [ $DEBUG -gt 1 ]; then
+	echo "ARGS=$ARGS" 1>&2;
+	echo "CHUNK_SIZE=$CHUNK_SIZE" 1>&2;
+	echo "CHUNK_NUM=$CHUNK_NUM" 1>&2;
+	echo "CHUNK_FIRST=$CHUNK_FIRST" 1>&2;
+	echo "CHUNK_LAST=$CHUNK_LAST" 1>&2;
+	echo "CHUNK_STEP=$CHUNK_STEP" 1>&2;
+	echo "CHUNK_STEP_NUM=$CHUNK_STEP_NUM" 1>&2;
     fi;
 
     # counter	
-	I=1; 
-	REC_CACHE="";
-	CHUNK_SIZE_ADJUST=0;
-	
-	(
+    I=1; 
+    REC_CACHE="";
+    CHUNK_SIZE_ADJUST=0;
+    
+    (
     	# FASTA
-		if [ $IS_FASTQ -eq 0 ]; then
+	if [ $IS_FASTQ -eq 0 ]; then
             # skip until CHUNK_FIRST
-	        SKIP=1;
-			while [ $I -lt $CHUNK_FIRST ]; do
-		        #chunk_fasta
-				chunk_core_skip
-		        ((I++));
-			done;
-			
+	    SKIP=1;
+	    while [ $I -lt $CHUNK_FIRST ]; do
+		#chunk_fasta
+		chunk_core_skip
+		((I++));
+	    done;
+	    
             # process until CHUNK_LAST
-			while [ $I -le $CHUNK_LAST ]; do
-			    if [ $(( ($I - $CHUNK_FIRST) % $CHUNK_STEP)) -lt $CHUNK_STEP_NUM ]; then
-			        SKIP=0;
-			    else
-			        SKIP=1;
-			    fi;
-
-		        chunk_fasta
-                [ $? -ne 0 ] && break; # eof
-    			((I++));
-			done;
-		    
-	    # FASTQ    
+	    while [ $I -le $CHUNK_LAST ]; do
+		if [ $(( ($I - $CHUNK_FIRST) % $CHUNK_STEP)) -lt $CHUNK_STEP_NUM ]; then
+		    SKIP=0;
 		else
-		    # skip until CHUNK_FIRST
+		    SKIP=1;
+		fi;
+
+		chunk_fasta
+                [ $? -ne 0 ] && break; # eof
+    		((I++));
+	    done;
+	    
+	    # FASTQ    
+	else
+	    # skip until CHUNK_FIRST
             SKIP=1;
-	        while [ $I -lt $CHUNK_FIRST ]; do
-	            chunk_fastq
-	            ((I++));
-	        done;
+	    while [ $I -lt $CHUNK_FIRST ]; do
+	        chunk_fastq
+	        ((I++));
+	    done;
+	    
+	    # process until CHUNK_LAST
+	    while [ $I -le $CHUNK_LAST ]; do
+	        if [ $(( ($I - $CHUNK_FIRST) % $CHUNK_STEP)) -lt $CHUNK_STEP_NUM ]; then
+	            SKIP=0;
+	        else
+	            SKIP=1;
+	        fi;
 	        
-	        # process until CHUNK_LAST
-	        while [ $I -le $CHUNK_LAST ]; do
-	            if [ $(( ($I - $CHUNK_FIRST) % $CHUNK_STEP)) -lt $CHUNK_STEP_NUM ]; then
-	                SKIP=0;
-	            else
-	                SKIP=1;
-	            fi;
-	
                 chunk_fastq
                 [ $? -ne 0 ] && break; # eof
                 ((I++));
             done;
-		fi;
+	fi;
 	
     ) < "$FILE";
-	
+    
 done;
 
 

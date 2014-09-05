@@ -28,13 +28,13 @@ CHUNK_END=0;
 
 show_usage()
 {
-  echo "Usage: SeqChunker [OPTIONS ...] FILE1 FILE2 ..."
+    echo "Usage: SeqChunker [OPTIONS ...] FILE1 FILE2 ..."
 }
 
 show_help()
 {
-  show_usage
-  cat <<EOF
+    show_usage
+    cat <<EOF
 
 SeqChunker efficiently samples and outputs chunks from FASTA and FASTQ files, 
  e.g. to serve as on-the-fly input for other tools. 
@@ -109,8 +109,8 @@ while true; do
                 exit 1;
             fi;
             if [[ "$2" =~ ~ ]]; then 
-	            CHUNK_SKIP=${2%%~*};
-	            CHUNK_STEP=${2##*~};
+	        CHUNK_SKIP=${2%%~*};
+	        CHUNK_STEP=${2##*~};
             else
                 CHUNK_SKIP=$2;
                 CHUNK_STEP=1;
@@ -150,8 +150,8 @@ while true; do
                 echo "$1: '$2' not a FLOAT" 1>&2;
                 exit 1;
             fi;
-	        CHUNK_RATIO=$2
-	        shift 2;;
+	    CHUNK_RATIO=$2
+	    shift 2;;
 
         -x|--chunk-step)
             [ ! -n "$2" ] && (echo "$1: value required" 1>&2 && exit 1);
@@ -175,7 +175,7 @@ while true; do
             [ ! -n "$2" ] && (echo "$1: value required" 1>&2 && exit 1);
             OUT=$2
             shift 2;;
-            	     
+        
         -m|--max-block-size)
             [ ! -n "$2" ] && (echo "$1: value required" 1>&2 && exit 1);
             if [[ "$2" =~ [^0-9] ]]; then
@@ -186,22 +186,26 @@ while true; do
             shift 2;;
 
         -q|--quiet)
-           DEBUG=0
-           shift;;
+            DEBUG=0
+            shift;;
 
         -d|--debug)
-           DEBUG=2
-           shift;;
-           	    	        	        
-	    -h|--help)
-	       show_help && exit 0;;
-	       
+            DEBUG=2
+            shift;;
+        
+	-h|--help)
+	    show_help && exit 0;;
+
+	-V|--version)
+            grep -m1 'Version' "$0" | sed 's/.*Version\s*//';
+            exit 0;;
+
         --)
             shift
             break;;
         *)
             echo "$1: Unknown option" 1>&2 && exit 1;;
-  esac
+    esac
 done
 
 if [ $# -eq 0 ]; then
@@ -218,9 +222,9 @@ else
     if [[ $OUT =~ % ]]; then
         # dynamic descriptor for every chunk, no default ...
         OUT_SPLIT=1;
-        else
-            eval "exec 3>$OUT";
-        fi;
+    else
+        eval "exec 3>$OUT";
+    fi;
 fi;
 
 
@@ -253,7 +257,7 @@ fi;
 
 for FILE in $@; do
 
-##determine format (FASTA/FASTQ)
+    ##determine format (FASTA/FASTQ)
     IS_FASTQ=$(head -c 1 "$FILE" | sed 's/[^>@]/\!/;s/>/0/;s/@/1/;s/\n//');    
     if [ "$IS_FASTQ" = "!" ]; then
         echo "FILE neither FASTA nor FASTQ" 1>&2 
@@ -267,7 +271,7 @@ if [ "$IS_FASTQ" -eq 0 ]; then
     exit 1
 
 else
-##Is FASTQ
+    ##Is FASTQ
 
     RECORD_STEP=$(($CHUNK_STEP * 4));                #4 lines, cause of FASTQ
     NUMBER_NS=$((($CHUNK_STEP_NUM * 4) - 1));        #additional 3 line -> 4 Lines
@@ -276,39 +280,39 @@ else
     LAST_RECORD=$(($CHUNK_LAST * 4 ));
 
     RECORD_NUMBER=$((($RECORD_FIRST+(($CHUNK_STEP*($CHUNK_END * 4)) / $CHUNK_STEP_NUM) - $RECORD_STEP + ($NUMBER_NS + 1)-1)));
- if [ "$CHUNK_END" -gt 0 ]; then
-     SED=''$RECORD_FIRST'~'$RECORD_STEP'{'$NS'p;'$RECORD_NUMBER'Q}';    #e.g. SED = '1~12{N;N;N;p;21Q}'
- elif [ "$LAST_RECORD" -gt 0 ]; then
-     SED=''$RECORD_FIRST'~'$RECORD_STEP'{'$NS'p;'$LAST_RECORD'Q}';
- else 
-     SED=''$RECORD_FIRST'~'$RECORD_STEP'{'$NS'p}';
- fi;
+    if [ "$CHUNK_END" -gt 0 ]; then
+        SED=''$RECORD_FIRST'~'$RECORD_STEP'{'$NS'p;'$RECORD_NUMBER'Q}';    #e.g. SED = '1~12{N;N;N;p;21Q}'
+    elif [ "$LAST_RECORD" -gt 0 ]; then
+        SED=''$RECORD_FIRST'~'$RECORD_STEP'{'$NS'p;'$LAST_RECORD'Q}';
+    else 
+        SED=''$RECORD_FIRST'~'$RECORD_STEP'{'$NS'p}';
+    fi;
 
 
     for FILE in $@; do
 	sed -ne "$SED" < "$FILE"
     done;
-#echo $SED
+    #echo $SED
 fi;
 
 
 
 ## OLD CODE - only fix Ratios
 #if [ $CHUNK_RATIO == 0.2 ]; then
- #   SED='1~20{N;N;N;p}' # 4/20 == 0.2
- #   for FILE in $@; do
- #       sed -ne "$SED" < "$FILE"
- #   done;
+#   SED='1~20{N;N;N;p}' # 4/20 == 0.2
+#   for FILE in $@; do
+#       sed -ne "$SED" < "$FILE"
+#   done;
 #elif [ $CHUNK_RATIO == 0.3 ]; then
- #   SED='1~40{N;N;N;N;N;N;N;N;N;N;N;p}' # 12/40 == 0.3
- #   for FILE in $@; do
- #       sed -ne "$SED" < "$FILE"
- #   done;
+#   SED='1~40{N;N;N;N;N;N;N;N;N;N;N;p}' # 12/40 == 0.3
+#   for FILE in $@; do
+#       sed -ne "$SED" < "$FILE"
+#   done;
 #elif [ $CHUNK_RATIO == 0.5 ]; then
- #   SED='1~8{N;N;N;p}' # 4/8 == 0.5
- #   for FILE in $@; do
- #       sed -ne "$SED" < "$FILE"
- #   done;
+#   SED='1~8{N;N;N;p}' # 4/8 == 0.5
+#   for FILE in $@; do
+#       sed -ne "$SED" < "$FILE"
+#   done;
 #else
- #   cat $@
+#   cat $@
 #fi;
