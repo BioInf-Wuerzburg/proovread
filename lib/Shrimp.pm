@@ -12,7 +12,7 @@ use lib './';
 
 use Verbose;
 
-our $VERSION = '0.07';
+our $VERSION = '0.08';
 
 
 
@@ -58,6 +58,21 @@ SHRiMP (2.2.0) gmapper interface.
 =cut
 
 =head1 CHANGELOG
+
+=head2 0.08
+
+=over
+
+=item [BugFix] Execution on MacOSX systems is now possible due to
+changes of the PID determination
+
+=item [ToDo] Canceling an active Shrimp process maybe fail due to a
+failed PID determination will not result in a verbose->exit call, but
+in a verbose->verbose message
+
+=back
+
+=cut
 
 =head2 0.07
 
@@ -601,14 +616,14 @@ sub _run_pipe_open {
 		# little hack to verify the listeners pid
 		# get the entry for the all running gmapper processes
 		# search for entry, where open pid is parent and then take the childs id as new id
-		my $ps = qx(ps -eF | grep -v grep | grep $self->{bin} | grep $open_pid);
-		($self->{_pid}) = $ps  =~ /^\S+\s+(\d+)\s+$open_pid/m;
+		my $ps = qx(ps -ef | grep -v grep | grep $self->{bin} | grep $open_pid);
+		($self->{_pid}) = $ps  =~ /^\s*\S+\s+(\d+)\s+$open_pid/m;
 		unless ($self->{_pid} and $self->{_pid} =~ /^\d+$/){
 			sleep(1);
-			$ps = qx(ps -eF | grep -v grep | grep $self->{bin} | grep $open_pid);
-			($self->{_pid}) = $ps  =~ /^\S+\s+(\d+)\s+$open_pid/m;
+			$ps = qx(ps -ef | grep -v grep | grep $self->{bin} | grep $open_pid);
+			($self->{_pid}) = $ps  =~ /^\s*\S+\s+(\d+)\s+$open_pid/m;
 		}
-		$V->exit("Could not determine childs pid\n$ps") unless $self->{_pid} and $self->{_pid} =~ /^\d+$/; 
+		$V->verbose("Could not determine childs pid\n$ps") unless $self->{_pid} and $self->{_pid} =~ /^\d+$/; 
 	}
 
 	$self->{_result_reader} = $rdr;
