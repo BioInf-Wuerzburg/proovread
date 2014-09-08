@@ -2178,7 +2178,7 @@ sub seq_and_siamaera_filter{
 	my %siam_params = @{$_[1]};
 	my $siam_params = param_join(\%siam_params);
 
-	my $cmd = "$RealBin/SeqFilter $seq_params --out - | $RealBin/siamaera $siam_params";
+	my $cmd = "$RealBin/SeqFilter $seq_params --out - | perl -I${RealBin}/../lib $RealBin/siamaera $siam_params";
 	
 	$VB->hline;
 	$VB->verbose($cmd);
