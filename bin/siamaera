@@ -3,11 +3,6 @@ use warnings;
 no warnings 'qw';
 use strict;
 
-use Fasta::Parser;
-use Fasta::Seq;
-use Fastq::Parser;
-use Fastq::Seq;
-
 use Log::Log4perl qw(:no_extra_logdie_message);
 use Log::Log4perl::Level;
 use Getopt::Long;
@@ -15,6 +10,13 @@ use Pod::Usage;
 use FindBin qw($RealBin $Script);
 use File::Basename;
 use File::Temp;
+
+use lib "$RealBin/../lib";
+
+use Fasta::Parser;
+use Fasta::Seq;
+use Fastq::Parser;
+use Fastq::Seq;
 
 use constant {
     qas => 0,
@@ -352,7 +354,7 @@ SEQ: while (my $fa=$fp->next_seq) {
             my $j = int((($b[qae] - $b[qas] -1) / 2) + $b[qas] + $opt{trim} + 0.5);
             
             
-            $L->info("SIAMAERA joined tail $j $sl");
+            $L->debug("SIAMAERA joined tail $j $sl");
             $L->debug( $blastre[0] );
 
 
@@ -369,7 +371,7 @@ SEQ: while (my $fa=$fp->next_seq) {
           
             my $j = int((($b[qae] - $b[qas] -1) / 2) + $b[qas] - $opt{trim} + 0.5);
 
-            $L->info("SIAMAERA joined head 0 $j"); 
+            $L->debug("SIAMAERA joined head 0 $j"); 
             $L->debug( join("\t", @b) );
 
             $L->debug($fa->seq);
@@ -393,7 +395,7 @@ SEQ: while (my $fa=$fp->next_seq) {
           
                 my $j = $b[sae]-1 + $opt{trim};
 
-                $L->info("SIAMAERA splitted tail $b[sae] $sl");
+                $L->debug("SIAMAERA splitted tail $b[sae] $sl");
                 $L->debug( join("\t", @b) );
           
                 $L->debug($fa->seq);
@@ -411,7 +413,7 @@ SEQ: while (my $fa=$fp->next_seq) {
           
                 my $j = $b[sas] - $opt{trim};
 
-                $L->info("SIAMAERA splitted head 0 $b[sas]"); 
+                $L->debug("SIAMAERA splitted head 0 $b[sas]"); 
                 $L->debug( join("\t", @b) );
           
                 $L->debug($fa->seq);
