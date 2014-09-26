@@ -37,7 +37,7 @@ use Time::HiRes qw(usleep);
 use Data::Dumper;
 $Data::Dumper::Sortkeys = 1;
 
-our $VERSION = '1.04';
+our $VERSION = '2.00';
 
 =head1 NAME
 
