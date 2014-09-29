@@ -646,7 +646,7 @@ Run the sample data set.
 
 =cut
 
-$opt{'sample!'} = \(my $opt_sample);
+$opt{'sample:s'} = \(my $opt_sample);
 
 =item [-h, --help]
 
@@ -670,10 +670,19 @@ $opt{'h|help'} = \(my $opt_help);
 GetOptions(%opt) or pod2usage(1);
 $opt_help && pod2usage(1);
 
-if($opt_sample){
-	$opt_lr_file = ["$RealBin/../sample/F.antasticus_long_error.fq"];
-	$opt_sr_file = ["$RealBin/../sample/F.antasticus_short.fq"];
+if(defined $opt_sample){
+    if($opt_sample =~ /^ec/i){
+        $opt_lr_file = ["$RealBin/../sample/Ec-pb.fq"];
+        $opt_sr_file = ["$RealBin/../sample/Ec-il-sim50X_1.fq"];
+        $opt_sr_qv_offset = 64;
+        $opt_prefix = 'pr-Ec' unless $opt_prefix;
+
+    }else{
+        $opt_lr_file = ["$RealBin/../sample/F.antasticus_long_error.fq"]; #
+	$opt_sr_file = ["$RealBin/../sample/F.antasticus_short.fq"]; #
 	$opt_sr_qv_offset = 33;
+        $opt_prefix = 'pr-Fa' unless $opt_prefix;
+    }
 } 
 
 $opt_sam_file || (@$opt_lr_file && @$opt_sr_file) || (@$opt_lr_file && @$opt_utg_file) || pod2usage("Either --long-reads and --short-reads/--unitigs or --sam required");
