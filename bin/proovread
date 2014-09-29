@@ -24,7 +24,7 @@ use Fasta::Parser 0.08;
 use Fasta::Seq 0.07;
 
 use Sam::Parser 0.11;
-use Sam::Alignment 0.07 ':flags';
+use Sam::Alignment 0.0 ':flags';
 use Sam::Seq 0.10;
 
 use Shrimp 0.08;
@@ -972,11 +972,11 @@ if($opt_sam_file){
 			$opt_mode = 'pacbio-ccs';
 			@TASKS = @{$cfg{'mode-tasks'}{$opt_mode}};
 		}else{
-			$opt_mode = 'pacbio-pre';
+			$opt_mode = 'bwa-pre';
 			@TASKS = @{$cfg{'mode-tasks'}{$opt_mode}};
 		}
 	}else{
-		print $opt_mode;
+		#print $opt_mode;
 		@TASKS = @{$cfg{'mode-tasks'}{$opt_mode}};
 	}
 }
@@ -1315,11 +1315,12 @@ $xf=1;
 		if($TASK =~ m/-finish/){
 			$ref_file = task_file_name('.unmasked.fa', task => $TASKS[$TC-1] );
 
-			seq_filter(
-				'--in' => task_file_name('.masked.fa', task => $TASKS[$TC-1] ),
-				'--out' => $ref_file,
-				'--fasta' => '',
-			);
+                        seq_filter(
+                                   '--in' => task_file_name('.fq', task => $TASKS[$TC-1] ),
+                                   '--out' => task_file_name('.unmasked.fa', task => $TASKS[$TC-1] ),
+                                   '--fasta' => '',
+                                   '--quiet' => '',
+                                  );
 		}else{
 			$ref_file = task_file_name('.masked.fa', task => $TASKS[$TC-1] )
 		}
@@ -1333,6 +1334,51 @@ $xf=1;
 				$sr_qv_offset_total == 64 
 					? ('--phred64' => '') 
 					: (),
+			}
+		);
+		
+		$sam_chunk_offsets = create_sorted_sam();
+
+		$lr_chunk_offsets = correct_sr_mt($sam_chunk_offsets, $lr_chunk_offsets);
+		
+		$LR = undef;
+
+	}elsif($TASK =~ m/bwa-/){
+
+		# configure Sam::Seq
+		my $xf=1;
+		if(my $x = cfg('sr-sampling',$TASK)){ # adjust if sampling
+			$xf = exists ${$x}{'--chunks-per-step'} 
+				? ${$x}{'--chunks-per-step'} / ${$x}{'--chunk-step'}
+				: 1 / ${$x}{'--chunk-step'};
+		}
+
+		Sam::Seq->MaxCoverage($opt_cov * $xf);
+		Sam::Seq->BinSize(cfg('bin-size'));
+
+		# cerate a unmasked reference for finish run
+		my $ref_file;
+		if($TASK =~ m/-finish/){
+			$ref_file = task_file_name('.unmasked.fa', task => $TASKS[$TC-1] );
+
+                        seq_filter(
+                                   '--in' => task_file_name('.fq', task => $TASKS[$TC-1] ),
+                                   '--out' => task_file_name('.unmasked.fa', task => $TASKS[$TC-1] ),
+                                   '--fasta' => '',
+                                   '--quiet' => '',
+                                  );
+		}else{
+			$ref_file = task_file_name('.masked.fa', task => $TASKS[$TC-1] )
+		}
+
+		run_bwa(
+			or_files => $opt_sr_file,
+			sr_sampling => cfg('sr-sampling', $TASK),
+			bwa => {
+				cfg($TASK), # basic task params from cfg
+				'ref' => $ref_file,
+                                'log' => task_file_name(suffix => "_bwa.log"),
+				'-t' => $opt_threads,
 			}
 		);
 		
@@ -1478,17 +1524,42 @@ sub read_sam{
 	
 	# read sam file
 	my $rsp_c = 0;
+        my $primary_aln;
+
 	while(my $aln = $rsp->next_aln()){
 	    next if $aln->is_unmapped();
-		# make sure Ref Seq entry exists
-		$VS->exit('The SAM file needs to have a header with an reference sequence entry @SQ foreach reference sequence')
-			unless exists $LR{$aln->rname};
-		# try to add aln, if sufficient score, add to temporary sam file
-		if($LR{$aln->rname}->add_aln_by_score($aln)){
-			$rsp_c++;
-			$tsp->append_aln($aln);
-		};
-		$pg_rsp->update() unless $rsp_c%10000;
+            # make sure Ref Seq entry exists
+            $VS->exit('The SAM file needs to have a header with an reference sequence entry @SQ foreach reference sequence')
+                unless exists $LR{$aln->rname};
+
+            # bwa does not report seq/qual for secondary alignments
+            # cache the primary aln, to restore seq/qual for secondaries if necessary
+            if(! $aln->is_secondary_alignment){
+                $primary_aln = $aln;
+            }else{
+                if($aln->seq eq "*"){ # restore secondary aln seq/qual
+                    $VS->exit("SAM stxarted with secondary alignment without seq/qual and without preceding primary alignment\n")
+                        unless defined $primary_aln;
+                    
+                    $VS->exit("Secondary alignment without seq/qual and without primary alignment\n$aln")
+                        unless($aln->qname eq $primary_aln->qname);
+                    
+                    if($aln->is_reverse_complement !=  $primary_aln->is_reverse_complement){
+                        $aln->seq(Fasta::Seq->Reverse_complement($primary_aln->seq));
+                        $aln->qual(reverse $primary_aln->qual);
+                    }else{
+                        $aln->seq($primary_aln->seq);
+                        $aln->qual($primary_aln->qual);
+                    }
+                }
+            }
+
+            # try to add aln, if sufficient score, add to temporary sam file
+            if($LR{$aln->rname}->add_aln_by_score($aln)){
+                $rsp_c++;
+                $tsp->append_aln($aln);
+            };
+            $pg_rsp->update() unless $rsp_c%10000;
 	}
 	$pg_rsp->finish();
 	
@@ -1625,9 +1696,33 @@ sub run_shrimp{
 		my $src = 0;
 		# shrimp log
 		my $slh = $shrimp->logh;
-		
+                my $primary_aln;
+                
 		if($p->{ram_sam}){
 			while(my $aln = $rsp->next_aln()){
+
+                            # bwa does not report seq/qual for secondary alignments
+                            # cache the primary aln, to restore seq/qual for secondaries if necessary
+                            if (! $aln->is_secondary_alignment) {
+                                $primary_aln = $aln;
+                            } else {
+                                if ($aln->seq eq "*") { # restore secondary aln seq/qual
+                                    $VS->exit("SAM started with secondary alignment without seq/qual and without preceding primary alignment\n")
+                                        unless defined $primary_aln;
+                                    
+                                    $VS->exit("Secondary alignment without seq/qual and without primary alignment\n$aln")
+                                        unless($aln->qname eq $primary_aln->qname);
+
+                                    if($aln->is_reverse_complement !=  $primary_aln->is_reverse_complement){
+                                        $aln->seq(Fasta::Seq->Reverse_complement($primary_aln->seq));
+                                        $aln->qual(reverse $primary_aln->qual);
+                                    }else{
+                                        $aln->seq($primary_aln->seq);
+                                        $aln->qual($primary_aln->qual);
+                                    }
+                                }
+                            }
+
 				# try to add aln
 				$add_c++ if($LR->{$aln->rname}->add_aln_by_score($aln));
 				# monitor shrimp progress
@@ -1649,31 +1744,47 @@ sub run_shrimp{
 			push @sr_matched, $reads_matched;
 
 		}else{ # create tmp sam
-			while(my $aln = $rsp->next_aln()){
-				# try to add aln, if sufficient score, add to temporary sam file
-				if($LR->{$aln->rname}->add_aln_by_score($aln)){
-					$add_c++; 
-					$tsp->append_aln($aln);
-				};
-				# monitor shrimp progress
-				unless($rsp_c% $pg_step){
-					seek($slh, -50, 2); # get, ..
-					read($slh, my $tail, 50); # .. read, .. 
-					# .. and parse last 50 chars of shrimp log for number of processed reads
-					($src) = $tail =~ /(\d+)\s+\S+\s+\S+\s*$/;
-					$pg_rsp->update($src) if defined $src; 
-				}
+                        my $primary_aln;
 
-# DEPRECATED: pre-SeqChunker				
-#				# shrimp pre, cancel after first fraction of reads
-#				if($src && $p->{stop_after} && $src > $p->{stop_after}){
-#					#$V->verbose('$src: '.$src);
-#					$VB->nline();
-#					$shrimp->cancel(); # cancel shrimp
-#					last;
-#				}
-				
-				$rsp_c++;
+			while(my $aln = $rsp->next_aln()){
+                            # bwa does not report seq/qual for secondary alignments
+                            # cache the primary aln, to restore seq/qual for secondaries if necessary
+                            if (! $aln->is_secondary_alignment) {
+                                $primary_aln = $aln;
+                            } else {
+                                if ($aln->seq eq "*") { # restore secondary aln seq/qual
+                                    $VS->exit("SAM started with secondary alignment without seq/qual and without preceding primary alignment\n")
+                                        unless defined $primary_aln;
+                                    
+                                    $VS->exit("Secondary alignment without seq/qual and without primary alignment\n$aln")
+                                        unless($aln->qname eq $primary_aln->qname);
+
+                                    if($aln->is_reverse_complement !=  $primary_aln->is_reverse_complement){
+                                        $aln->seq(Fasta::Seq->Reverse_complement($primary_aln->seq));
+                                        $aln->qual(reverse $primary_aln->qual);
+                                    }else{
+                                        $aln->seq($primary_aln->seq);
+                                        $aln->qual($primary_aln->qual);
+                                    }
+                                }
+                            }
+                            
+                            
+                            # try to add aln, if sufficient score, add to temporary sam file
+                            if($LR->{$aln->rname}->add_aln_by_score($aln)){
+                                $add_c++; 
+                                $tsp->append_aln($aln);
+                            };
+                            # monitor shrimp progress
+                            unless($rsp_c% $pg_step){
+                                seek($slh, -50, 2); # get, ..
+                                read($slh, my $tail, 50); # .. read, .. 
+                                # .. and parse last 50 chars of shrimp log for number of processed reads
+                                ($src) = $tail =~ /(\d+)\s+\S+\s+\S+\s*$/;
+                                $pg_rsp->update($src) if defined $src; 
+                            }
+                            
+                            $rsp_c++;
 			}
 
 			seek($slh, -1500, 2); # get, ..
@@ -1771,10 +1882,35 @@ sub run_blasr{
         my $add_c = 0;
         my $src_lib_sum = 0;
         my $src = 0;
-                                                
+        my $primary_aln;
+        
         # create tmp sam
         while (my $aln = $rsp->next_aln()) {
             # try to add aln, if sufficient score, add to temporary sam file
+
+            # bwa does not report seq/qual for secondary alignments
+            # cache the primary aln, to restore seq/qual for secondaries if necessary
+            if (! $aln->is_secondary_alignment) {
+                $primary_aln = $aln;
+            } else {
+                if ($aln->seq eq "*") { # restore secondary aln seq/qual
+                    $VS->exit("SAM started with secondary alignment without seq/qual and without preceding primary alignment\n")
+                        unless defined $primary_aln;
+                                    
+                    $VS->exit("Secondary alignment without seq/qual and without primary alignment\n$aln")
+                        unless($aln->qname eq $primary_aln->qname);
+
+                    if($aln->is_reverse_complement !=  $primary_aln->is_reverse_complement){
+                        $aln->seq(Fasta::Seq->Reverse_complement($primary_aln->seq));
+                        $aln->qual(reverse $primary_aln->qual);
+                    }else{
+                        $aln->seq($primary_aln->seq);
+                        $aln->qual($primary_aln->qual);
+                    }
+                }
+            }
+                            
+
             if ($LR->{$aln->rname}->add_aln_by_score($aln)) {
                 $add_c++; 
                 $tsp->append_aln($aln);
@@ -1782,6 +1918,147 @@ sub run_blasr{
         }
 
         close $blasr_oh;
+        $or_file_c++;
+    }
+}
+
+
+=head2 run_bwa
+
+Run and process bwa
+
+=cut
+
+sub run_bwa{
+    my $p = {
+             or_files => [],
+             sr_sampling => 0,
+             bwa => {},
+             tmp_sam => task_file_name("_tmp.sam"),
+             @_
+            };
+	
+    $V->nline;
+    $VS->verbose("Running task ".$TASK);
+	
+    # Index genome file first and save projection for multiple short read
+    #  files
+    $VS->verbose("Indexing Long reads");
+    
+    my $bwa_index_cmd = "bwa index $p->{bwa}{ref} $p->{bwa}{ref} 2>$p->{bwa}{log}";
+
+    $VB->hline();
+    $VB->verbose($bwa_index_cmd);
+    $VB->hline();
+    
+    qx($bwa_index_cmd);
+    
+    # init temporary sam writer
+    my $tsp = Sam::Parser->new(
+                               file => $p->{tmp_sam},
+                               mode => '+>',
+                              );
+
+    my $or_file_c = 0;
+    my $pg_rsp;
+    my $pg_step;
+	
+    ### foreach sr file read mappings	
+    foreach my $or_file (@{$p->{or_files}}) {
+		
+        my $or_count_netto = $or_count[$or_file_c];
+		
+        $VS->verbose("Mapping reads `$or_file`");
+
+        my @bwa_opts;
+        while(my ($k, $v) = each %{$p->{bwa}}){
+            push @bwa_opts, $k, $v if $k =~ /^-/;
+        }
+
+        my $pre_command = "";
+        my $reads;
+        if($p->{sr_sampling}){
+            $pre_command = seq_chunker(
+                                       'NO_EXEC',
+                                       $or_file,
+                                       %{$p->{sr_sampling}},
+                                      )
+                . ' | ';
+
+            $reads = '/dev/fd/0';
+        }else{
+            $reads = $or_file
+        }
+        
+        my $bwa_cmd = $pre_command."bwa mem @bwa_opts $p->{bwa}{ref} $reads 2>$p->{bwa}{log}";
+
+        $VB->hline();
+        $VB->verbose($bwa_cmd);
+        $VB->hline();
+
+        open(my $bwa_oh, "-|", $bwa_cmd) or $VS->exit($!);                
+		
+        # init input stream parser
+        my $rsp = Sam::Parser->new(fh => $bwa_oh);
+		
+        # read the header and create $LR only on first short read file
+        if ($or_file_c == 0) {
+            # read SAM header
+            while (my %h = $rsp->next_header_line('SQ|PG')) {
+				# @PG
+                if ($h{tag} eq '@PG') {
+                    $PG_line = $h{raw};
+                    next;
+                }
+                $LR->{$h{'SN'}} = Sam::Seq->new(
+                                                id => $h{SN}, 
+                                                len => $h{LN},
+                                                sam => $tsp, # indexed sam file, containing aln data
+                                               );
+            }
+        }
+	
+        # read SAM alignment section
+        my $add_c = 0;
+        my $src_lib_sum = 0;
+        my $src = 0;
+        my $primary_aln;
+                                                
+        # create tmp sam
+        while (my $aln = $rsp->next_aln()) {
+            # bwa outputs unmapped reads - ignore them
+	    next if $aln->is_unmapped();
+
+            # bwa does not report seq/qual for secondary alignments
+            # cache the primary aln, to restore seq/qual for secondaries if necessary
+            if (! $aln->is_secondary_alignment) {
+                $primary_aln = $aln;
+            } else {
+                if ($aln->seq eq "*") { # restore secondary aln seq/qual
+                    $VS->exit("SAM started with secondary alignment without seq/qual and without preceding primary alignment\n")
+                        unless defined $primary_aln;
+                    
+                    $VS->exit("Secondary alignment without seq/qual and without primary alignment\n$aln")
+                        unless($aln->qname eq $primary_aln->qname);
+
+                    if($aln->is_reverse_complement !=  $primary_aln->is_reverse_complement){
+                        $aln->seq(Fasta::Seq->Reverse_complement($primary_aln->seq));
+                        $aln->qual(reverse $primary_aln->qual);
+                    }else{
+                        $aln->seq($primary_aln->seq);
+                        $aln->qual($primary_aln->qual);
+                    }
+                }
+            }
+            
+            # try to add aln, if sufficient score, add to temporary sam file
+            if ($LR->{$aln->rname}->add_aln_by_score($aln)) {
+                $add_c++; 
+                $tsp->append_aln($aln);
+            }
+        }
+
+        close $bwa_oh;
         $or_file_c++;
     }
 }
@@ -1888,10 +2165,34 @@ sub run_bowtie2{
 		my $src = 0;
 		# shrimp log
 		my $slh = $bowtie2->stderr;
-		
+		my $primary_aln;
+                
 		while(my $aln = $rsp->next_aln()){
 			next if $aln->rname() eq '*';
-			# try to add aln, if sufficient score, add to temporary sam file
+
+                        # bwa does not report seq/qual for secondary alignments
+                        # cache the primary aln, to restore seq/qual for secondaries if necessary
+                        if (! $aln->is_secondary_alignment) {
+                            $primary_aln = $aln;
+                        } else {
+                            if ($aln->seq eq "*") { # restore secondary aln seq/qual
+                                $VS->exit("SAM started with secondary alignment without seq/qual and without preceding primary alignment\n")
+                                    unless defined $primary_aln;
+                                
+                                $VS->exit("Secondary alignment without seq/qual and without primary alignment\n$aln")
+                                    unless($aln->qname eq $primary_aln->qname);
+
+                                if($aln->is_reverse_complement !=  $primary_aln->is_reverse_complement){
+                                    $aln->seq(Fasta::Seq->Reverse_complement($primary_aln->seq));
+                                    $aln->qual(reverse $primary_aln->qual);
+                                }else{
+                                    $aln->seq($primary_aln->seq);
+                                    $aln->qual($primary_aln->qual);
+                                }
+                            }
+                        }
+
+                        # try to add aln, if sufficient score, add to temporary sam file
 			if($LR->{$aln->rname}->add_aln_by_score($aln)){
 				$add_c++; 
 				$tsp->append_aln($aln);
@@ -2128,7 +2429,7 @@ sub correct_sr_mt{
 				: task_file_name(".fq", task => $TASKS[$TC-1] ))
 			: (),
 			
-		$TASK =~ m/iter-1|pre-1|pre-2|pre-3/ # calculate hcrs on first iter for second iter
+		$TASK =~ m/iter-1|pre-\d/ # calculate hcrs on first iter for second iter
 			? ('--sr-min-length' => $min_sr_length) # params from config
 			: ('--hcr-min-ratio' => 0), # deactivate on finish/sam
 			'--lcr-end-ratio' => cfg('lcr-end-ratio', $TASKS[$TC]),
@@ -2136,7 +2437,7 @@ sub correct_sr_mt{
 		($TASK =~ /-finish/) # calculate hcrs on first iter for second iter
 			? (
 				'--max-ins-length' => 0,
-		             
+                           '--ignore-hcr' => '',
 			  ) # params from config
 			: (),
 

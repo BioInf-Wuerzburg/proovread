@@ -23,7 +23,7 @@ use Verbose;
 use Verbose::ProgressBar;
 
 use Sam::Parser;
-use Sam::Alignment ':flags';
+use Sam::Alignment 0.08 ':flags';
 use Sam::Seq 0.10;
 
 use Fasta::Parser;
@@ -422,9 +422,6 @@ Fastq::Seq->Qual_lcs_range(5, 41, $opt_qv_offset);
 ## 80 chars are cutoff at each side to keep overlaps => min length 160, better 200
 Fastq::Seq->Qual_lcs_min_length($hcr_min_length + (2 * $hcr_sticky_length)); 
 
-# qual window
-Fastq::Seq->Qual_window_min(3);  
-
 
 # use glob, to allow glob pattern instead of full filename (fa/fq is decided by parser)
 my $opt_ref_file;
@@ -537,8 +534,11 @@ $sp->seek($opt_sam_offset) if $opt_sam_offset;
 my $ref_seen = 0; # since we read the entire header to %LR, we need to count ref seqs
 my $ref_id = '';
 my $sso;
+# bwa only returns seq and qual for primary aln, secondaries have * *.
+my $primary_aln;
 
 while(my $aln = $sp->next_aln()){
+    
 	# new block
 	unless ($ref_id eq $aln->rname){
 		# process previous block
@@ -575,7 +575,23 @@ while(my $aln = $sp->next_aln()){
 			ref => $rpr ? $LR{$ref_id}{ref} : undef,
 		);
 	}
-	
+
+        # cache the primary aln, to restore seq/qual for secondaries if necessary
+        if(! $aln->is_secondary_alignment){
+            $primary_aln = $aln;
+        }else{
+            if($aln->seq eq "*"){ # restore secondary aln seq/qual
+                $v->exit("SAM started with secondary alignment without seq/qual and without preceding primary alignment\n")
+                    unless defined $primary_aln;
+                
+                $v->exit("Secondary alignment without seq/qual and without primary alignment\n$aln")
+                    unless($aln->qname eq $primary_aln->qname);
+                
+                $aln->seq($primary_aln->seq);
+                $aln->qual($primary_aln->qual);
+            }
+        }
+        
 	# process aln
 	$opt_detect_chimera		# binning required for chimera detection
 		? $sso->add_aln_by_score($aln)
@@ -618,12 +634,17 @@ sub generate_consensus{
 	my $sso = shift; # Sam::Seq object
 	print shift if @_;
 	my @hcrs = ();
+        my @mcrs = ();
 	
 	if($rpr && ! $opt_ignore_hcr){
 		if(my $hcrs = $sso->ref->desc){
 			while($hcrs =~ /HCR\d+:(\d+),(\d+)/g){
 				push @hcrs, [$1, $2];
 			}
+                        while($hcrs =~ /MCR\d+:(\d+),(\d+)/g){
+				push @mcrs, [$1, $2];
+			}
+
 		};
 	}
 	
@@ -662,8 +683,11 @@ sub generate_consensus{
 			return;
 		}
 	}
-	
-	my $con = $sso->consensus(@hcrs);
+
+	my $con = $sso->consensus(
+                                  hcrs => \@hcrs,
+                                  ignore_coords => \@mcrs
+                                 );
 	
 	# chimera
 	if($opt_detect_chimera){
@@ -848,115 +872,19 @@ sub generate_consensus{
 				};
 				
 				# remove unmodified hcrs before next cycle
-				foreach (@hcrs_short_idx_clean){
-					splice(@hcrs, $_, 1);
+                                my $rm_c = 0;
+                                foreach (@hcrs_short_idx_clean){
+					splice(@hcrs, $_ - $rm_c, 1);
+                                        $rm_c++;
 				}
 			}
 
 	
-=pod DEPRECATED			
-			my $i = 0;
-			# create a description string of hcrs in seq
-			my @hcrs_string = map{"HCR".++$i.":".$_->[OFFSET].','.$_->[LENGTH]}@hcrs;
+			# create a description for actually masked hcrs in seq
+                        my $mcr_c = 0;
+			my @mcrs_string = map{"MCR".++$mcr_c.":".$_->[OFFSET].','.$_->[LENGTH]}@hcrs;
 			# add desc to header
-			$con->{seq_head}.= ' '.join(" ", @hcrs_string);
-			# mask hcrs minus overlap ends
-			# NOTE: this actually changes the values @hcrs!
-			
-			# add sticky ends
-			foreach(@hcrs){
-				$_->[OFFSET]+=$hcr_sticky_length; 
-				$_->[LENGTH]-=($hcr_sticky_length * 2);
-			}			
-			
-			# mask/unmask start
-			my $lcr_start_missing = $lcr_min_length - $hcrs[0][OFFSET];
-			# Consider starts shorter then lcr_min_length
-			if($lcr_start_missing > 0){
-				# unmask start if its long enough to be worth it: missing < 50% lcr_min_length
-				if( $lcr_start_missing < $lcr_end_ratio * $lcr_min_length ){ 
-					#$v->hline;
-					#$v->verbose('first hcr to close to start '.$lcr_start_missing);
-					# if OFFSET is adjusted, LENGTH always needs to be adjusted
-					#  as well or the HCR is just shifted
-					# adjust length, check for hcr_min_length
-					if( ($hcrs[0][LENGTH] -= $lcr_start_missing) < $hcr_min_length){
-						#$v->verbose('first hcr to short: '.$hcrs[0][LENGTH]);
-						shift @hcrs; # remove first hcr if it becomes to short after trimming
-					}else{
-						#$v->verbose('first hcr trimmed');
-						$hcrs[0][OFFSET] += $lcr_start_missing;
-					}
-				}else{# mask start completely
-					$hcrs[0][LENGTH] += $hcrs[0][OFFSET];
-					$hcrs[0][OFFSET] = 0;
-				}
-			} 
-			
-			# mask/unmask end
-			if( scalar @hcrs ){ # check if there are HCRs, might be trimmed by first
-				my $lcr_end_missing = $lcr_min_length - (length($con_mask->seq) - ($hcrs[$#hcrs][OFFSET] + $hcrs[$#hcrs][LENGTH]));
-				# check if it is to close to the end
-				if($lcr_end_missing  > 0){
-					if($lcr_end_missing < $lcr_end_ratio * $lcr_min_length ){
-						#$v->verbose('last hcr to close to end '.$lcr_end_missing);
-						# shorten last hcr and check its length
-						if( ($hcrs[$#hcrs][LENGTH] -= $lcr_end_missing) < $hcr_min_length){
-							#$v->verbose('last hcr to short');
-							pop @hcrs; # remove last hcr if it becomes to short after trimming
-						}
-					}else{# extend hcr to end of seq
-						$hcrs[$#hcrs][LENGTH] += $lcr_min_length - $lcr_end_missing +1
-					}
-				}
-			} 
-			
-			# make sure unmask regions are large enough to map more reads
-			my @keep_hcrs;
-
-			if( scalar @hcrs){ # check if there are HCRs, might be trimmed by first
-				my ($ha, $hb) = shift @hcrs;
-				while($hb = shift @hcrs){
-					my $hbs = $hb->[OFFSET]; # start
-					my $hae = $ha->[OFFSET] + $ha->[LENGTH]; # end
-					
-					# lcr to short
-					if( (my $lcr_min_missing = $lcr_min_length - ($hbs - $hae)) > 0 ){
-						# what if adjusted both length
-						my $hal = $ha->[LENGTH] - $lcr_min_missing/2;
-						my $hbl = $hb->[LENGTH] - $lcr_min_missing/2;
-						if($hbl < $hcr_min_length){ # hb short
-							# ha stays ha unchanged, hb isnt kept, but overwritten
-							next;
-						}elsif($hal < $hcr_min_length){ # ha short
-							$ha=$hb; # set hb to new ha, unchanged, dont keep ha
-							next; # restart cycle
-						}else{ # both long enough
-							# make the changes
-							$ha->[LENGTH] -= $lcr_min_missing/2;
-							
-							$hb->[OFFSET] += $lcr_min_missing/2;
-							$hb->[LENGTH] -= $lcr_min_missing/2;
-							
-							push @keep_hcrs, $ha; # store ha
-							$ha=$hb; # set hb to new ha
-							next; # restart cycle
-						}
-					}else{
-						# nothing missing
-						push @keep_hcrs, $ha;
-						$ha=$hb;
-					}
-				}	
-
-				# process last hcr, now ha
-				if( $ha->[LENGTH] >= $hcr_min_length ){
-					push @keep_hcrs, $ha;
-				}
-			}
-=cut
-
-
+			$con->{seq_head}.= ' '.join(" ", @mcrs_string);
 
 			$con_mask->mask_seq(@hcrs) if @hcrs;
 		}
