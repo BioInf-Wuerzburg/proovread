@@ -19,7 +19,7 @@ use Fastq::Seq;
 use Fasta::Seq;
 
 
-our $VERSION = '0.10';
+our $VERSION = '0.11';
 
 
 
@@ -412,6 +412,7 @@ sub State_matrix{
 		'length' => undef,
 		states => {},
 		matrix => undef,
+                ignore_coords => undef,
 		@_
 	);
 	
@@ -424,8 +425,8 @@ sub State_matrix{
 	
 	# predefined states
 	my %states = %{$p{states}};
-	
-	foreach my $aln (@{$p{alns}}){
+        
+        foreach my $aln (@{$p{alns}}){
 		
 		###################
 		### prepare aln ###
@@ -511,44 +512,6 @@ sub State_matrix{
 			next if length($seq) < 50  || (length($seq)/$orig_seq_length) < 0.7;
 		}
 		
-=DEPRECATED leading/trailing long indel removal
-		#		# remove leading/trailing I
-		#		# there should be no l/t D since the reads are aligned semiglobal
-		#		# leading
-		#		if($cigar[1] eq 'I'){
-		#			#use Data::Dumper; print Dumper("leading I", $aln);
-		#			substr($seq,0,$cigar[0],''); # adjust read
-		#			splice(@cigar,0,2); # adjust cigar
-		#		}
-		#		# trailing
-		#		my $e = $#cigar;
-		#		if($cigar[$e] eq 'I'){
-		#			#use Data::Dumper; print Dumper("trailing I", $aln);
-		#			substr($seq,-$cigar[$e-1],$cigar[$e-1],''); # adjust read
-		#			splice(@cigar,$e-1,2); # adjust cigar
-		#		}
-		#		
-		#		# detect long I/Ds within first 3 M of read
-		#		if($cigar[1] eq 'M' && $cigar[0] < 4 && @cigar > 3){
-		#			if($cigar[3] eq 'I' && $cigar[2] > 2){
-		#				#use Data::Dumper; print Dumper("leading long I", $aln);
-		#				
-		#				# "long" (>= 3bp) I within first 3 matches -> discard read start
-		#				$rpos+=$cigar[0]; # increase rpos of M
-		#				substr($seq,0,$cigar[0]+$cigar[2],''); # remove I and M from read
-		#				splice(@cigar,0,4); # adjust cigar
-		#			}elsif($cigar[3] eq 'D' && $cigar[2] > 2){
-		#				#use Data::Dumper; print Dumper("leading long D", $aln);
-		#				
-		#				# "long" (>= 3bp) D within first 3 M -> discard read start
-		#				$rpos+=($cigar[0]+$cigar[2]); # increase rpos by number of M + D
-		#				substr($seq,0,$cigar[0],''); # remove M from read
-		#				splice(@cigar,0,4); # adjust cigar
-		#			}
-		#		}
-=cut		
-		
-		
 		
 		#######################
 		### cigar to states ###
@@ -588,57 +551,17 @@ sub State_matrix{
 		### states to matrix ###
 		
 		foreach my $state (@states){
-			if (length ($state) > 1 && ! exists $states{$state}){
-				$states{$state} = scalar keys %states; 
-			}		
-			($S[$rpos][$states{$state}])++;  # match/gap states always exist
-			$rpos++;
+                    if($p{ignore_coords} && _is_in_range($rpos, $p{ignore_coords})){
+                        $rpos++;
+                        next;
+                    }
+                    
+                    if (length ($state) > 1 && ! exists $states{$state}){
+                        $states{$state} = scalar keys %states; 
+                    }		
+                    ($S[$rpos][$states{$state}])++;  # match/gap states always exist
+                    $rpos++;
 		}
-
-	
-=DEPRECATED simultaneous cigar parsing and state matrix counting
-		#	my $state; # buffer last match, required if followed by insertion
-		#		for(my $i=0; $i<@cigar;$i+=2){
-		#			if($cigar[$i+1] eq 'M'){
-		#				my @subseq = split(//,substr($seq,0,$cigar[$i],''));
-		#				foreach $_ (@subseq){
-		#					($S[$rpos][$states{$_}])++;  # match states always exist
-		#					$rpos++;
-		#				}
-		#				$state = $subseq[$#subseq];
-		#			}elsif($cigar[$i+1] eq 'D'){
-		#				for(1..$cigar[$i]){
-		#					($S[$rpos][4])++;  # $states{'-'} is always 4 
-		#					$rpos++;
-		#				}
-		#				$state = '-';
-		#			}elsif($cigar[$i+1] eq 'I'){
-		#				#unless ($state){print STDERR $aln->pos," : ",$rpos,"\n"} 
-		#				my $complex_state;
-		#				if($state){
-		#					$complex_state = $state.substr($seq,0,$cigar[$i],'');
-		#					($S[$rpos-1][$states{$state}])--; #
-		#				}else{
-		#					$complex_state = substr($seq,0,$cigar[$i],'');
-		#				}
-		#				# replace by complex state, add state idx to %states if new
-		#				if(exists ($states{$complex_state})){
-		#					#TODO: insertion before first M
-		#					next if ($rpos-1 < 0);
-		#					$S[$rpos-1][$states{$complex_state}]++
-		#				}else{
-		#					next if ($rpos-1 < 0);
-		#					$states{$complex_state} = scalar keys %states;
-		#					$S[$rpos-1][$states{$complex_state}]++;
-		#				}
-		#				#($S[$rpos-1][exists ($states{$complex_state}) ? $states{$complex_state} : $states{$complex_state} = keys %states])++; 
-		#				#$seq[$#seq].= 
-		#			}else{
-		#				$V->exit("Unknown Cigar '".$cigar[$i+1]."'");
-		#			}
-		#		}
-=cut
-
 	
 	}
 	
@@ -878,9 +801,14 @@ Calculate and the consensus sequence from state matrix. Returns a Fastq::Seq
 
 sub consensus{
 	my $self = shift;
-	my @hcrs = @_;
-	$self->_init_state_matrix();# unless $self->_init_state_matrix();
-	$self->_add_pre_calc_fq(@hcrs) if @hcrs;
+        my %p = (
+                 hcrs => {},
+                 ignore_coords => {},
+                 @_
+                );
+        
+	$self->_init_state_matrix(0,$p{ignore_coords});# unless $self->_init_state_matrix();
+	$self->_add_pre_calc_fq(@{$p{hcrs}}) if $p{hcrs};
 	$self->_consensus;
 	return $self->{con};
 }
@@ -1125,6 +1053,7 @@ sub chimera{
 =cut
 
 =DEPRECATED approx_coverage
+
 #=head2 approx_coverage
 #
 #Calculate and returns a LIST of coverage values, one value every $BinSize
@@ -1448,12 +1377,13 @@ sub _init_read_bins{
 =cut
 
 sub _init_state_matrix{
-	my ($self,$append_matrix) = (@_,0);
+	my ($self,$append_matrix, $ignore_coords) = (@_,0,undef);
 	
 	my ($S, $states) = State_matrix(
 		'alns' => [$self->alns],
 		'states' => $self->{_states},
 		'length' => $self->len,
+                ignore_coords => $ignore_coords,
 		$append_matrix
 			? ('matrix' => $self->{_state_matrix})
 			: (),
@@ -1694,7 +1624,19 @@ sub _stddev{
 	return sqrt($mean2);
 }
 
+=head
 
+Test if a value lies within a given set of ranges.
+
+=cut
+
+sub _is_in_range{
+    my ($c, $ranges) = @_;
+    for my $r (@$ranges){
+        return 1 if $c >= $r->[0] && $c < $r->[0] + $r->[1];
+    }
+    return 0;
+}
 
 
 ##------------------------------------------------------------------------##
