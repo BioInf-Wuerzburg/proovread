@@ -3,18 +3,16 @@ package Sam::Alignment;
 use warnings;
 use strict;
 
-# $Id: Alignment.pm 113 2013-04-26 16:23:35Z s187512 $
+# $Id$
 
-use overload '""' => \&raw;
+use overload '""' => \&string;
 
 # preference libs in same folder over @INC
 use lib '../';
 
-
-
-our $VERSION = '0.07';
-
-
+our $VERSION = '0.08';
+our ($REVISION) = '$Revision$' =~ /(\d+)/;
+our ($MODIFIED) = '$Date$' =~ /Date: (\S+\s\S+)/;
 
 
 =head1 NAME 
@@ -125,6 +123,9 @@ Initial Alignment module. Provides Constructor, generic accessor
 =cut
 
 
+# alias for backward comp.
+*raw = \&string;
+
 =head1 Class ATTRIBUTES
 
 =cut
@@ -158,7 +159,6 @@ sub new{
 		my %sam;
 		@sam{@Sam::Alignment::_Fieldsnames} = split("\t",$sam, 12); 
 		$self = \%sam;
-		$self->{raw} = $sam."\n";
 	}else{ # input is key -> hash structure
 		$self = {
 			qname => undef,
@@ -176,13 +176,6 @@ sub new{
 			@_,
 			_opt => undef
 		};
-		if($self->{raw}){
-			$self->{raw}.= "\n" unless $self->{raw} =~ /\n$/; # just to be safe, make it have one newline.
-		}else{
-			$self->{raw} = join("\t", @$self{qw(qname flag rname pos mapq cigar rnext pnext tlen seq qual)});
-			$self->{raw}.= "\t".$self->{opt} if $self->{opt};
-			$self->{raw}.="\n";
-		}
 	}
 	# overwrite defaults
 	
@@ -366,8 +359,10 @@ Get/Set the qname.
 =cut
 
 sub qname{
-	my ($self, $qname) = @_;
-	$self->{qname} = $qname if $qname;
+	my ($self, $qname, $force) = @_;
+        if(defined $qname || $force){
+            $self->{qname} = $qname;
+        }
 	return $self->{qname};
 }
 
@@ -378,8 +373,10 @@ Get/Set the flag.
 =cut
 
 sub flag{
-	my ($self, $flag) = @_;
-	$self->{flag} = $flag if defined ($flag);
+	my ($self, $flag, $force) = @_;
+        if(defined $flag || $force){
+            $self->{flag} = $flag;
+        }
 	return $self->{flag};
 }
 
@@ -390,8 +387,10 @@ Get/Set the rname.
 =cut
 
 sub rname{
-	my ($self, $rname) = @_;
-	$self->{rname} = $rname if $rname;
+	my ($self, $rname, $force) = @_;
+        if(defined $rname || $force){
+            $self->{rname} = $rname;
+        }
 	return $self->{rname};
 }
 
@@ -402,8 +401,10 @@ Get/Set the pos.
 =cut
 
 sub pos{
-	my ($self, $pos) = @_;
-	$self->{pos} = $pos if $pos;
+	my ($self, $pos, $force) = @_;
+        if(defined $pos || $force){
+            $self->{pos} = $pos;
+        }
 	return $self->{pos};
 }
 
@@ -414,8 +415,10 @@ Get/Set the mapq.
 =cut
 
 sub mapq{
-	my ($self, $mapq) = @_;
-	$self->{mapq} = $mapq if $mapq;
+	my ($self, $mapq, $force) = @_;
+        if(defined $mapq || $force){
+            $self->{mapq} = $mapq;
+        }
 	return $self->{mapq};
 }
 
@@ -426,8 +429,10 @@ Get/Set the cigar.
 =cut
 
 sub cigar{
-	my ($self, $cigar) = @_;
-	$self->{cigar} = $cigar if $cigar;
+	my ($self, $cigar, $force) = @_;
+        if(defined $cigar || $force){
+            $self->{cigar} = $cigar;
+        }
 	return $self->{cigar};
 }
 
@@ -438,8 +443,10 @@ Get/Set the rnext.
 =cut
 
 sub rnext{
-	my ($self, $rnext) = @_;
-	$self->{rnext} = $rnext if $rnext;
+	my ($self, $rnext, $force) = @_;
+        if(defined $rnext || $force){
+            $self->{rnext} = $rnext;
+        }
 	return $self->{rnext};
 }
 
@@ -450,8 +457,10 @@ Get/Set the pnext.
 =cut
 
 sub pnext{
-	my ($self, $pnext) = @_;
-	$self->{pnext} = $pnext if $pnext;
+	my ($self, $pnext, $force) = @_;
+        if(defined $pnext || $force){
+            $self->{pnext} = $pnext;
+        }
 	return $self->{pnext};
 }
 
@@ -462,8 +471,10 @@ Get/Set the tlen.
 =cut
 
 sub tlen{
-	my ($self, $tlen) = @_;
-	$self->{tlen} = $tlen if $tlen;
+	my ($self, $tlen, $force) = @_;
+        if(defined $tlen || $force){
+            $self->{tlen} = $tlen;
+        }
 	return $self->{tlen};
 }
 
@@ -474,8 +485,10 @@ Get/Set the seq.
 =cut
 
 sub seq{
-	my ($self, $seq) = @_;
-	$self->{seq} = $seq if $seq;
+	my ($self, $seq, $force) = @_;
+        if(defined $seq || $force){
+            $self->{seq} = $seq;
+        }
 	return $self->{seq};
 }
 
@@ -486,12 +499,30 @@ Get/Set the seq.
 =cut
 
 sub qual{
-	my ($self, $qual) = @_;
-	$self->{qual} = $qual if $qual;
+	my ($self, $qual, $force) = @_;
+        if(defined $qual || $force){
+            $self->{qual} = $qual;
+        }
 	return $self->{qual};
 }
 
+
+=head2 string
+
+Get stringified alignment.
+
+=cut
+
+sub string{
+    my ($self) = @_;
+    my $s = join("\t", @$self{qw(qname flag rname pos mapq cigar rnext pnext tlen seq qual)});
+    $s.= "\t".$self->{opt} if $self->{opt};
+    return $s."\n";
+}
+
 =head2 raw
+
+DEPRECATED, aliased to string() for backward compatibility.
 
 Get/Set the raw line. 
 
@@ -499,22 +530,20 @@ NOTE: Following v0.04, inludes trailing newline.
 
 =cut
 
-sub raw{
-	my ($self, $raw) = @_;
-	if($raw){ # guarantee newline
-		$self->{raw} = $raw =~ /\n$/ ? $raw : $raw."\n";
-	}
+# sub raw{
+# 	my ($self, $raw, $force) = @_;
+# 	if(defined $raw || $force){ # guarantee newline
+#             $self->{raw} = $raw =~ /\n$/ ? $raw : $raw."\n";
+# 	}
 	
-	# {raw} is reset if any other value is changed and will be generated 
-	# if required
-	unless($self->{raw}){
-		$self->{raw} = join("\t", @$self{qw(qname flag rname pos mapq cigar rnext pnext tlen seq qual)});
-		$self->{raw}.= "\t".$self->{opt} if $self->{opt};
-		$self->{raw}.="\n";
-	}
+# 	# {raw} is reset if any other value is changed and will be generated 
+# 	# if required
+# 	unless($self->{raw}){
+# 	}
 	
-	return $self->{raw};
-}
+# 	return $self->{raw};
+# }
+
 
 =head2 opt
 
@@ -537,8 +566,6 @@ sub opt{
 	my ($self, $tag, $type, $value) = @_;
 	# set
 	if($type){
-		# reset raw, is regenerated with updated opt if required		
-		$self->{raw} = undef;
 		
 		# make sure, opt has been parsed, so it can be overwritten
 		unless ($self->{_opt}){
