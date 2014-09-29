@@ -1,0 +1,3 @@
+[submodule "util/SeqFilter"]
+	path = util/SeqFilter
+	url = git:/software/SeqFilter
