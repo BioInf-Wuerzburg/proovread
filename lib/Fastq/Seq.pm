@@ -1,6 +1,6 @@
 package Fastq::Seq;
 
-# $Id: Seq.pm 128 2013-05-21 10:07:49Z s187512 $
+# $Id$
 
 use warnings;
 use strict;
@@ -14,9 +14,9 @@ use lib '../';
 use Verbose;
 
 	
-our $VERSION = '0.11';
-
-
+our $VERSION = '0.13';
+our ($REVISION) = '$Revision$' =~ /(\d+)/;
+our ($MODIFIED) = '$Date$' =~ /Date: (\S+\s\S+)/;
 
 
 ##------------------------------------------------------------------------##
@@ -34,6 +34,34 @@ Class for handling FASTQ sequences.
 =cut
 
 =head1 CHANGELOG
+
+=cut
+
+=head2 0.12
+
+=over
+
+=item [Refactor] qual_window(): replaced messed up loop structure by more
+ readable sub based implementation.
+
+=item [BugFix] qual_window(): Low qual bases in cannot start a high init 
+ window at sequence start.
+
+=item [BugFix] qual_window(): In case of high quality window at the end of the sequence, 
+ qual_window returned END position of subseq in sequence instead of LENGTH 
+ of subseq.
+
+=item [BugFix] phred_offset() now sets phred_offset and not phred.
+
+=item [Feature] $Qual_window_min_hard/Qual_window_min_hard(): break windows 
+ at quals lower than this regardless of window mean qual.
+
+=item [BugFix] qual_window(0) -> sort by occurance; qual_window(1) -> sort 
+ by length
+
+=back
+
+=cut
 
 =head2 0.11
 
@@ -150,6 +178,38 @@ Initial Alignment module. Provides Constructor and generic accessor
 
 ##------------------------------------------------------------------------##
 
+=head1 Phred scores table
+
+  
+    Freq.   Phred    ASCII  |     Freq   Phred    ASCII   
+                  Phred+64  |                  Phred+64
+  --------------------------------------------------------
+        0       0        @  |       20      32        `
+        1       7        G  |       21      32        `
+        2      10        J  |       22      33        a
+        3      12        L  |       23      34        b
+        4      14        N  |       24      35        c
+        5      16        P  |       25      35        c
+        6      17        Q  |       26      36        d
+        7      19        S  |       27      37        e
+        8      20        T  |       28      37        e
+        9      21        U  |       29      38        f
+       10      22        V  |       30      39        g
+       11      23        W  |       31      39        g
+       12      24        X  |       32      40        h
+       13      25        Y  |       33      40        h
+       14      26        Z  |       34      40        h
+       15      27        [  |       35      40        h
+       16      28        \  |       36      40        h
+       17      29        ]  |       37      40        h
+       18      30        ^  |       38      40        h
+       19      31        _  |       39      40        h
+       20      32        `  |      ...
+  
+
+=cut
+
+
 =head1 Class Attributes
 
 =cut
@@ -183,8 +243,13 @@ our $Qual_low_range = 'ABCDEFGHIJKLMNOPQRSTUVWX';
 our $Qual_low_regex = qr/([$Qual_low_range]+)/o;
 
 our $Qual_window_size = 10;
-
-our $Qual_window_min = 25;
+our $Qual_window_min_score_soft = 25;
+our $Qual_window_min_score_hard = 3;
+our $Qual_window_min_strecht_length = $Qual_window_size;
+our $_Qual_window_window_min_score_soft = undef;
+our $_qw_I = undef; # qual win position
+our $_qw_WX= undef; # qual win win score
+our @_qw_X = ();
 
 # phred transform 
 my $o33 = join("", map{chr($_+33)}(1..60));
@@ -244,7 +309,7 @@ sub Complement{
 sub Reverse_complement{
 	my ($class, $seq) = @_;
 	$seq =~ tr/ATGCatgc/TACGtacg/;
-	return reverse $seq;
+	return scalar reverse $seq;
 }
 
 =head2 Add_base_content_scan
@@ -354,17 +419,32 @@ sub Qual_low_regex{
 	return $Qual_low_regex;
 }
 
-=head2 Qual_window_min [25]
+=head2 Qual_window_min_score_soft [25]
 
-Get/Set min quality value for quality sliding window.
+Get/Set window mean quality value for quality sliding window.
 
 =cut
 
-sub Qual_window_min{
+sub Qual_window_min_score_soft{
 	my ($class, $re) = @_;
-	$Qual_window_min = $re if $re;
-	return $Qual_window_min;
+	$Qual_window_min_score_soft = $re if $re;
+	return $Qual_window_min_score_soft;
 }
+
+=head2 Qual_window_min_score_hard [0]
+
+Get/Set hard min quality value for quality sliding window. Quals below this
+ value will cause the window to be rejected regardless of the windows mean
+ quality.
+
+=cut
+
+sub Qual_window_min_score_hard{
+	my ($class, $re) = @_;
+	$Qual_window_min_score_hard = $re if defined $re;
+	return $Qual_window_min_score_hard;
+}
+
 
 =head2 Qual_window_size [10]
 
@@ -377,6 +457,21 @@ sub Qual_window_size{
 	$Qual_window_size = $re if $re;
 	return $Qual_window_size;
 }
+
+=head2 Qual_window_min_stretch_length [10]
+
+Get/Set minimum stretch length for high quality region to be reported. at
+ least C<$Qual_window_size>.
+
+=cut
+
+sub Qual_window_min_stretch_length{
+	my ($class, $re) = @_;
+	$Qual_window_min_strecht_length = $re if $re;
+	return $Qual_window_min_strecht_length;
+}
+
+
 
 
 =head2 Phreds2Char
@@ -841,8 +936,14 @@ sub base_content{
 	return &{$Base_content_scans->{$patt}}($self->seq)
 }
 
+=head2 qual_window
+
+=cut
+
+=DEPRECATED
+
 sub qual_window{
-	my ($self, $sorted_by_occurance) = (@_);
+	my ($self, $sorted_by_length) = (@_);
 	
 	# sliding window
 	# each window starts/ends above $min, values below $min are allowed as long
@@ -863,26 +964,41 @@ sub qual_window{
 	my $wlen = undef;
 	my $wsize = $Qual_window_size;
 	my $wmin = $Qual_window_min * $wsize;
+	my $wmin_hard = $Qual_window_min_hard;
 
+	# init vars
+	#    [$j]--<$wsize>--[$i]
+	# tagctacgatcgatcgatcagtcatag
+	my $i=$wsize; 
+	my $j=0;
 
 	# init first window
-	$wsum += $_ for @s[0..$wsize-1];
-	unless($wsum < $wmin){ # init window start
-		#print "high init\n";
-		$re[0][0] = 0;
+	for(my $x = $j; $x < $i; $x++){
+		if($s[$x] < $wmin_hard){ # init win cannot have < min_hard qual
+			$wsum=0; # reset wsum
+			# move window behind min_hard pos
+			$j+=$x+1;
+			$i+=$x+1;
+			last if $i > @s; # exceeded read length
+		}else{
+			$wsum+=$s[$x];	
+		}
+	}
+	
+	
+	# init window high
+	if($wsum >= $wmin && $s[$j] > $Qual_window_min){ 
+		$re[0][0] = $j;
 		$wlen+=$wsize;
 	}; 
 
-	# init vars
-	my $i=$wsize;
-	my $j=0;
 	
 	#print " "x($wsize-1), $wsum,"\n";
 	# loop
 	for(;$i < @s; $i++){
-		$wsum+=($s[$i]- $s[$j]); # new window sum
+		$wsum+=($s[$i]- $s[$j]); # next window sum
 		#print " "x$i, $wsum,"\n";
-		if($wsum < $wmin){# low
+		if($wsum < $wmin || $s[$i] < $wmin_hard){# low
 			if($wlen){# high ends
 				my $x = $i-1;
 				while($s[$x] < $Qual_window_min){ # go back to last pos over min
@@ -900,12 +1016,32 @@ sub qual_window{
 				$wlen = 0;
 				
 				## no overlap ##
-				# inti next window w/o overlap
+				# reinit next window w/o overlap
 				$i+=($wsize-1);
 				$j+=($wsize-1);
-				last if $j+$wsize > $#s; # make sure there is still enough sequence left
-				$wsum = $s[$j+1];
-				$wsum += $_ for @s[$j+2..($j+$wsize)];
+				last if $i > $#s; # exceeded seq length
+				$wsum = 0; # new win sum
+			
+				###$wsum += $_ for @s[$j..$i-1];
+				#$wsum += $_ for @s[$j+1..($j+$wsize)];
+				
+				# reinit next non min_hard window
+				for(my $x = $j; $x < $i; $x++){
+					print "$x,";
+					if($s[$x] < $wmin_hard){ # init win cannot have < min_hard qual
+						print "reinit min_hard\n";
+						$wsum=0; # reset wsum
+						# move window behind min_hard pos
+						my $xrel = $x-$j;
+						$j+=$xrel;
+						$i+=$xrel;
+						last if $i > $#s; # exceeded seq length
+					}else{
+						$wsum+=$s[$x];	
+					}
+				}
+				print "\n$j - $i\n";
+				
 			}
 		}else{# high
 			unless($wlen){
@@ -926,12 +1062,113 @@ sub qual_window{
 	# print $wlen , "\t", $wsum, "\t", $wmin,"\n";
 	if($wlen){
 		# print "yeah\n";
-		$re[$#re][1] = scalar @s;
+		$re[$#re][1] = scalar @s-$re[$#re][0];
 	}
 	
-	return $sorted_by_occurance ? sort{$b->[1] <=> $a->[1]}@re : @re;	
+	return $sorted_by_length ? sort{$b->[1] <=> $a->[1]}@re : @re;	
 
 }
+
+=cut
+
+sub qual_window{
+	my ($self, $sorted_by_length) = (@_);
+	use Data::Dumper;
+	
+	$_Qual_window_window_min_score_soft = $Qual_window_min_score_soft * $Qual_window_size;
+	@_qw_X = $self->phreds;
+	$_qw_I=-1;
+	$_qw_WX=0;
+	my @re;
+	
+	while($_qw_I<@_qw_X-$Qual_window_size){
+		_qw_slide_init() || next;
+		_qw_slide_low() || next;
+		my @H = _qw_slide_high();
+		push @re, \@H if @H; 
+	}
+	
+	return $sorted_by_length ? sort{$b->[1] <=> $a->[1]}@re : @re;
+}
+
+
+
+sub _qw_slide_init{
+	# ? exceeded seq length
+	$_qw_I+$Qual_window_size < @_qw_X || return;
+
+	# reset $_qw_WX on first iter
+	$_qw_WX=0; 
+
+	#print join("\t", 'I', $_qw_I, $_qw_X[$_qw_I], $_qw_WX), "\n";
+	
+	for(my $x=$Qual_window_size; $x; $x--){
+		# move forward
+		$_qw_I++;
+		# test hard_min + recurse slide_init on fail
+		$_qw_X[$_qw_I] < $Qual_window_min_score_hard && return; 
+		# increase win score
+		$_qw_WX+= $_qw_X[$_qw_I];
+		
+		#print join("\t", 'i', $_qw_I, $_qw_X[$_qw_I], $_qw_WX), "\n";
+	}
+	
+	return 1; # return 1 if successful init
+}
+
+sub _qw_slide_low{
+	# reinit on hard min
+	$_qw_X[$_qw_I] < $Qual_window_min_score_hard && return;
+	# init win is end of low
+	$_qw_WX < $_Qual_window_window_min_score_soft || $_qw_X[$_qw_I-$Qual_window_size+1] > $Qual_window_min_score_soft && return 1; 
+
+	#print join("\t", 'L', $_qw_I, $_qw_X[$_qw_I], $_qw_WX), "\n";
+	
+	# move forward and search for end of low
+	while(++$_qw_I < @_qw_X){
+		# reinit on hard min
+		$_qw_X[$_qw_I] < $Qual_window_min_score_hard && return;
+		# move forward slide
+		$_qw_WX+= ($_qw_X[$_qw_I]-$_qw_X[$_qw_I-$Qual_window_size+1]); 
+		# still low?
+		$_qw_WX < $_Qual_window_window_min_score_soft || $_qw_X[$_qw_I-$Qual_window_size+1] > $Qual_window_min_score_soft && return 1; # end of low
+	
+		#print join("\t", 'l', $_qw_I,$_qw_X[$_qw_I], $_qw_WX), "\n";
+
+	}
+	$_qw_I--;
+	
+	return; # exceed seq length low
+}
+
+sub _qw_slide_high{
+	# save start;
+	my $o = $_qw_I-$Qual_window_size+1;
+
+	#print join("\t", 'H', $_qw_I,$_qw_X[$_qw_I], $_qw_WX), "\n";
+	
+	while(++$_qw_I < @_qw_X){
+		# move forward slide
+		$_qw_WX+= ($_qw_X[$_qw_I]-$_qw_X[$_qw_I-$Qual_window_size]); 
+		
+		# end of high, soft or hard
+		($_qw_WX < $_Qual_window_window_min_score_soft || $_qw_X[$_qw_I] < $Qual_window_min_score_hard) && last;
+		#print join("\t", 'h', $_qw_I,$_qw_X[$_qw_I], $_qw_WX), "\n";
+
+	}
+	$_qw_I--;
+	
+	# trim high end
+	my $j=$_qw_I;
+	$j-- while $_qw_X[$j] < $Qual_window_min_score_soft; # rewind to last pos over min
+
+	# get win length
+	my $l = $j-$o+1;
+
+	# return win if long enough
+	return $l >= $Qual_window_min_strecht_length ? ($o, $l) : ();
+}
+
 
 =head2
 
@@ -1028,7 +1265,7 @@ Get/Set the phred_offset.
 
 sub phred_offset{
 	my ($self, $offset) = @_;
-	$self->{phred} = $offset if defined $offset;
+	$self->{phred_offset} = $offset if defined $offset;
 	return $self->{phred_offset};
 }
 

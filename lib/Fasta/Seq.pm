@@ -3,7 +3,7 @@ package Fasta::Seq;
 use warnings;
 use strict;
 
-# $Id: Seq.pm 113 2013-04-26 16:23:35Z s187512 $
+# $Id$
 
 # preference libs in same folder over @INC
 use lib '../';
@@ -15,9 +15,9 @@ use overload
 	'""' => \&string;
 
 
-our $VERSION = '0.06';
-
-
+our $VERSION = '0.07';
+our ($REVISION) = '$Revision$' =~ /(\d+)/;
+our ($MODIFIED) = '$Date$' =~ /Date: (\S+\s\S+)/;
 
 ##------------------------------------------------------------------------##
 
@@ -178,7 +178,7 @@ sub Complement{
 sub Reverse_complement{
 	my ($class, $seq) = @_;
 	$seq =~ tr/ATGCatgc/TACGtacg/;
-	return reverse $seq;
+	return scalar reverse $seq;
 }
 
 ##------------------------------------------------------------------------##
@@ -230,11 +230,10 @@ sub new{
 	if(@_){
 		if(@_%2){ # input is string to split
 			my %self;
-			@self{'id','desc', 'seq'} = shift =~ m/
-				(?:>?(\S*))			# id, >? for records
-				(?:[^\S\n]([^\n]+))?\n	# desc, optional
-				(.+)				# seq
-			/xs;					# . includes \n
+			my $head;
+			($head, $self->{seq}) = split("\n", shift, 2);
+			($self->{id}) = $head =~ />?(\S*)/;
+			($self{desc}) = $head =~ /[^\S\n](.+)$/;
 			$self = {
 				%$self,
 				%self,
