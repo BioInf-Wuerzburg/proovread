@@ -37,7 +37,7 @@ use Time::HiRes qw(usleep);
 use Data::Dumper;
 $Data::Dumper::Sortkeys = 1;
 
-our $VERSION = '2.00';
+our $VERSION = '2.01';
 
 =head1 NAME
 
@@ -1248,10 +1248,11 @@ $xf=1;
 	
 		# cerate a unmasked reference for finish run
 		seq_filter(
-			'--in' => task_file_name('.fq', task => $TASKS[$TC-1] ),
-			'--out' => task_file_name('.unmasked.fa', task => $TASKS[$TC-1] ),
-			'--fasta' => '',
-			'--quiet' => '',
+                           '--in' => task_file_name('.fq', task => $TASKS[$TC-1] ),
+                           '--out' => task_file_name('.unmasked.fa', task => $TASKS[$TC-1] ),
+                           '--fasta' => '',
+                           '--quiet' => '',
+                           '--phred-offset' => 33,
 		);
 		
 		run_shrimp(
@@ -1320,6 +1321,7 @@ $xf=1;
                                    '--out' => task_file_name('.unmasked.fa', task => $TASKS[$TC-1] ),
                                    '--fasta' => '',
                                    '--quiet' => '',
+                                   '--phred-offset' => 33,
                                   );
 		}else{
 			$ref_file = task_file_name('.masked.fa', task => $TASKS[$TC-1] )
@@ -1366,6 +1368,7 @@ $xf=1;
                                    '--out' => task_file_name('.unmasked.fa', task => $TASKS[$TC-1] ),
                                    '--fasta' => '',
                                    '--quiet' => '',
+                                   '--phred-offset' => 33,
                                   );
 		}else{
 			$ref_file = task_file_name('.masked.fa', task => $TASKS[$TC-1] )
@@ -1420,6 +1423,7 @@ if(cfg('seq-filter')){
 			cfg('seq-filter'),
 			'--substr' => $opt_chim_fil,
 			'--in' => $opt_fq_raw,
+                        '--phred-offset' => 33,
 		],[
 			cfg('siamaera'),
 			'>' => $opt_fq_fil
@@ -1430,7 +1434,8 @@ if(cfg('seq-filter')){
 			cfg('seq-filter'),
 			'--substr' => $opt_chim_fil,
 			'--in' => $opt_fq_raw,
-			'--out' => $opt_fq_fil
+			'--out' => $opt_fq_fil,
+                        '--phred-offset' => 33,  
 		);
 	}
 }
@@ -1440,9 +1445,10 @@ if(cfg('seq-filter') && -s $opt_fq_fil){ # no need to create FASTA from empty FA
 	$V->nline;
 	$VS->verbose("Converting to FASTA file");
 	seq_filter(
-		'--in' => $opt_fq_fil,
-		'--out' => $opt_fa_fil,
-		'--fasta' => '',
+                   '--in' => $opt_fq_fil,
+                   '--out' => $opt_fa_fil,
+                   '--fasta' => '',
+                   '--phred-offset' => 33,  
 	);
 }
 
@@ -1946,12 +1952,13 @@ sub run_bwa{
     $VS->verbose("Indexing Long reads");
     
     my $bwa_index_cmd = "bwa index $p->{bwa}{ref} $p->{bwa}{ref} 2>$p->{bwa}{log}";
-
+    
     $VB->hline();
     $VB->verbose($bwa_index_cmd);
     $VB->hline();
     
     qx($bwa_index_cmd);
+    $V->exit("bwa failed: $?\n", do { local $/; local @ARGV = ("$p->{bwa}{log}") ; <> }) if $?;
     
     # init temporary sam writer
     my $tsp = Sam::Parser->new(
@@ -2059,6 +2066,8 @@ sub run_bwa{
         }
 
         close $bwa_oh;
+        $V->exit("bwa failed: $?\n", do { local $/; local @ARGV = ("$p->{bwa}{log}") ; <> }) if $?;
+
         $or_file_c++;
     }
 }
@@ -2300,12 +2309,13 @@ sub read_long{
 		push @lr_length, $lr_length;
 		push @lr_bps, ($lr_length * $lr_count);
 		
-	
+
+                $lrpw = Fastq::Parser->new( 
+                                           file => task_file_name(".fq", task => $TASKS[$TC] ), 
+                                           mode => '+>'
+                                          );
+
 		if(ref $lrpr eq 'Fasta::Parser'){ # FASTA ref
-			$lrpw = Fasta::Parser->new( 
-				file => task_file_name(".masked.fa", task => $TASKS[$TC] ), 
-				mode => '+>'
-			);
 			
 			my $fi_file = task_file_name(suffix => ".ignored.tsv", task => '');
 			my $stubby_count = 0;
@@ -2319,10 +2329,14 @@ sub read_long{
 				if(exists $lr{$lr->id}){
 					$VS->exit('Non-unique long read id ('. $lr->id .') in '. $_);
 				}
-				# convert seq to lower case, allow HCRs in external-sam
-				$lr->seq(lc($lr->seq())); 
-				$lr{$lr->id} = $lr;
-			}
+
+				$lr{$lr->id} = Fastq::Seq->new(
+                                                               '@'.substr($lr->seq_head,1),
+                                                               $lr->seq,
+                                                               "+",
+                                                               '$'x length($lr->seq)
+                                                              );
+                        }
 			close IGNORE;
 			$V->verbose("Skipped $stubby_count stubby reads with length <".2*$min_sr_length) if $stubby_count;
 			
@@ -2334,11 +2348,6 @@ sub read_long{
 				$V->exit("Only offset 33 and 64 are supported")
 					unless $po;
 					
-				$lrpw = Fastq::Parser->new( 
-					file => task_file_name(".masked.fq", task => $TASKS[$TC] ), 
-					mode => '+>',
-				);
-
 				$lrpr->phred_offset($po);
 				
 				while(my $lr = $lrpr->next_seq){
@@ -2348,14 +2357,9 @@ sub read_long{
 					# convert seq to lower case, allow HCRs in external-sam
 					$lr->phred_transform if $po == 64;
 					$lr{$lr->id} = $lr;
-				}
+                                }
 				
-
 			}else{
-				$lrpw = Fasta::Parser->new( 
-					file => task_file_name(".masked.fa", task => $TASKS[$TC] ), 
-					mode => '+>'
-				);
 				
 				my $fi_file = task_file_name(suffix => ".ignored.tsv", task => '');
 				my $stubby_count = 0;
@@ -2370,12 +2374,7 @@ sub read_long{
 						$VS->exit('Non-unique long read id ('. $lr->id .') in '. $_);
 					}
 					# convert FASTQ to FASTA
-					$lr{$lr->id} = Fasta::Seq->new(
-						id => $lr->id,
-						desc => $lr->desc,
-						# convert seq to lower case, allow HCRs in external-sam
-						seq => $opt_mode ne 'external-sam' ? lc($lr->seq) : $lr->seq,
-					)
+					$lr{$lr->id} = $lr;
 				}
 				close IGNORE;
 				$V->verbose("Skipped $stubby_count stubby reads with length <".2*$min_sr_length) if $stubby_count;
@@ -2384,6 +2383,9 @@ sub read_long{
 		}
 	}
 
+
+        
+        
 	# write sorted/indexed fq/fa lr file for mapping/sam2cns
 	my @lr_idxs;
 	my $lr_c = 0;
@@ -2393,6 +2395,16 @@ sub read_long{
 		push @lr_idxs, $pos unless $lr_c % cfg('chunk-size');
 		$lr_c++;
 	}
+
+        seq_filter(
+                   '--in' => $lrpw->{file},
+                   '--out' => task_file_name('.masked.fa', task => $TASKS[$TC] ),
+                   '--fasta' => '',
+                   '--quiet' => '',
+                   '--lower-case' => '',
+                   '--phred-offset' => 33,
+                  );
+        
 	return \@lr_idxs;
 }
 
@@ -2424,9 +2436,7 @@ sub correct_sr_mt{
 		cfg('hcr-ignore', $TASK) ? ('--ignore-hcr' => '') : (),
 		 
 		@$opt_lr_file
-			? ('--ref' 		=> $TC == 1
-				? task_file_name(".masked.f[aq]", task => $TASKS[$TC-1] )
-				: task_file_name(".fq", task => $TASKS[$TC-1] ))
+			? ('--ref' => task_file_name(".fq", task => $TASKS[$TC-1] ))
 			: (),
 			
 		$TASK =~ m/iter-1|pre-\d/ # calculate hcrs on first iter for second iter
@@ -2436,7 +2446,8 @@ sub correct_sr_mt{
 
 		($TASK =~ /-finish/) # calculate hcrs on first iter for second iter
 			? (
-				'--max-ins-length' => 0,
+                           '--max-ins-length' => 0,
+                           '--no-use-ref-qual' => '',
                            '--ignore-hcr' => '',
 			  ) # params from config
 			: (),

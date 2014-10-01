@@ -370,6 +370,14 @@ Simple do not generate consensus for weakly supported reads, output them
 
 $opt{'ignore-weak-reads=i'} = \(my $opt_ignore_weak_reads = 20);
 
+=item [--[no]-use-ref-qual] [ON]
+
+Utilize reference qualities during consensus computation-
+
+=cut
+
+$opt{'use-ref-qual!'} = \(my $opt_use_ref_qual = 1);
+
 
 $opt{'chimera-min-score'} = \(my $opt_chimera_min_score = 0);
 
@@ -685,7 +693,8 @@ sub generate_consensus{
 	}
 
 	my $con = $sso->consensus(
-                                  hcrs => \@hcrs,
+                                  #hcrs => \@hcrs,
+                                  use_ref_qual => $opt_use_ref_qual,
                                   ignore_coords => \@mcrs
                                  );
 	
