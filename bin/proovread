@@ -1157,7 +1157,7 @@ $xf=1;
 
 		$LR = undef;
 
-	}elsif($TASK =~ m/shrimp-pre-[2-5]/){
+	}elsif($TASK =~ m/^shrimp-pre-[2-5]/){
 
 		# configure Sam::Seq
 		my $xf=1;
@@ -1299,7 +1299,7 @@ $xf=1;
 		
 		$LR = undef;
 		
-	}elsif($TASK =~ m/bowtie2-/){
+	}elsif($TASK =~ m/^bowtie2-/){
 
 		# configure Sam::Seq
 		my $xf=1;
@@ -1315,7 +1315,7 @@ $xf=1;
 
 		# cerate a unmasked reference for finish run
 		my $ref_file;
-		if($TASK =~ m/-finish/){
+		if($TASK =~ m/-finish$/){
 			$ref_file = task_file_name('.unmasked.fa', task => $TASKS[$TC-1] );
 
                         seq_filter(
@@ -1347,7 +1347,7 @@ $xf=1;
 		
 		$LR = undef;
 
-	}elsif($TASK =~ m/bwa-/){
+	}elsif($TASK =~ m/^bwa-/){
 
 		# configure Sam::Seq
 		my $xf=1;
@@ -1362,7 +1362,7 @@ $xf=1;
 
 		# cerate a unmasked reference for finish run
 		my $ref_file;
-		if($TASK =~ m/-finish/){
+		if($TASK =~ m/-finish$/){
 			$ref_file = task_file_name('.unmasked.fa', task => $TASKS[$TC-1] );
 
                         seq_filter(
