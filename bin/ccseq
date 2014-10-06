@@ -1,0 +1,407 @@
+#!/usr/bin/env perl
+use warnings;
+no warnings 'qw';
+use strict;
+
+use Log::Log4perl qw(:no_extra_logdie_message);
+use Log::Log4perl::Level;
+use Getopt::Long;
+use Pod::Usage;
+use FindBin qw($RealBin $Script);
+use File::Basename;
+use File::Temp;
+
+use lib "$RealBin/../lib";
+
+use Fasta::Parser;
+use Fasta::Seq;
+use Fastq::Parser;
+use Fastq::Seq;
+
+use Sam::Parser;
+use Sam::Alignment ':flags';
+use Sam::Seq;
+
+use Data::Dumper;
+$Data::Dumper::Sortkeys = 1;
+
+=head1 NAME
+
+  ccseq - Generate PacBio cicular consensus sequences from subreads.
+
+=head1 DESCRIPTION
+
+=head1 SYNOPSIS
+
+  ccseq [options] < pacbio.fa/fq > pacbio.ccs.fa/fq
+
+=head1 OPTIONS
+
+=over
+
+=item -r/--reads
+
+Reads for ccs compuation.g
+
+=item -t/--threads
+
+=item -c/--config <PATH PATH ...>
+
+Read parameter from config file
+
+=item -D/--debug
+
+Toggle verbose messages.
+
+=item -h/--help
+
+Display this help screen.
+
+=item -V/--version
+
+Display script version.
+
+=back
+
+=cut
+
+
+##----------------------------------------------------------------------------##
+# Globals
+
+our $VERSION = 0.01;
+
+Log::Log4perl->init( \(q(
+        log4perl.rootLogger                     = INFO, Screen
+        log4perl.appender.Screen                = Log::Log4perl::Appender::Screen
+        log4perl.appender.Screen.stderr         = 1
+        log4perl.appender.Screen.layout         = PatternLayout
+        log4perl.appender.Screen.layout.ConversionPattern = [%d{yy-MM-dd HH:mm:ss}] [).$Script.q(] %m%n
+)));
+
+my $L = Log::Log4perl->get_logger();
+
+##----------------------------------------------------------------------------##
+# GetOptions
+
+my %def = (
+           chunk_seqs => 2000,
+           threads => 1,
+           bwa_opt => [qw(-a -e -k 9 -W 18 -w 300 -A 5 -B 11 -O 2,1 -E 4,3 -Y)],
+           #bwa_opt => [qw(-a -e -k 17 -W30 -w 300 -A 5 -B 11 -O 2,1 -E 4,3 -L 30)],
+          );
+
+my %opt = (
+           config => []
+           );
+GetOptions(                     # use %opt (Cfg) as defaults
+           \%opt, qw(
+                        reads=s
+                        threads=i
+                        chunk_seqs=i
+                        config|c=s{,}
+                        version|V!
+                        debug|D!
+                        help|h!
+                   )
+          ) or $L->logcroak('Failed to "GetOptions"');
+
+# help
+$opt{help} && pod2usage(1);
+
+# version
+if ($opt{version}) {
+    print "$VERSION\n"; 
+    exit 0;
+}
+
+
+##----------------------------------------------------------------------------##
+# Config
+
+my %cfg;
+
+# core
+my $core_cfg = "$RealBin/../".basename($Script, qw(.pl)).".cfg";
+
+if ( -e $core_cfg) {
+    $opt{core_config} = File::Spec->rel2abs($core_cfg);
+    %cfg = (%cfg, Cfg->Read($opt{core_config}, $Script));
+}
+
+
+# read all configs
+if (@{$opt{config}}) {
+    foreach my $cfg ( @{$opt{config}} ) {
+	$cfg=File::Spec->rel2abs($cfg);
+	%cfg = (%cfg, Cfg->Read($cfg, $Script));
+    }
+}
+
+
+# create template for user cfg
+if (defined $opt{create_config}) {
+    pod2usage(-msg => 'To many arguments', -exitval=>1) if @ARGV > 1;
+    my $user_cfg = Cfg->Copy($core_cfg, $opt{create_config}) or $L->logdie("Creatring config failed: $!");
+    $L->info("Created config file: $user_cfg");
+    exit 0;
+}
+
+##----------------------------------------------------------------------------##
+# Config + Opt
+
+%opt = (%def, %cfg, %opt);
+
+if(@ARGV && ! $opt{reads}){
+    $opt{reads} = shift @ARGV;
+}
+
+if(@ARGV){
+    $L->logdie("unused argument: @ARGV");
+}
+
+# required stuff  
+for (qw()) {
+    if (ref $opt{$_} eq 'ARRAY') {
+	pod2usage("required: --$_") unless @{$opt{$_}}
+    } else {
+	pod2usage("required: --$_") unless defined ($opt{$_})
+    }
+}
+;
+
+
+# debug level
+$L->level($DEBUG) if $opt{debug};
+$L->debug('Verbose level set to DEBUG');
+
+$L->debug(Dumper(\%opt));
+
+
+
+##----------------------------------------------------------------------------##
+# Main
+##----------------------------------------------------------------------------##
+
+# open input
+$L->info("Reading STDIN") unless $opt{reads};
+my $rpr = Fastq::Parser->new($opt{reads} ? (file => $opt{reads}) : ())->check_format;
+if ($rpr) {
+    my $po = $rpr->guess_phred_offset();
+    $L->logdie("Expected phred offset 33") if $po && $po != 33;
+    $rpr->phred_offset($po); # should be 33 for PacBio
+} else {
+    $rpr = Fasta::Parser->new($opt{reads} ? (file => $opt{reads}) : ())->check_format;
+}
+$L->logdie("Unknown format of reference file: $opt{reads}") unless $rpr;
+
+
+
+Sam::Seq->Trim(0);
+Sam::Seq->PhredOffset(33);
+
+
+# read input
+# get "a bunch" of potential ccs seqs
+my $sr_ccs_c;
+my $cid = "";
+my ($id, $range, $sr_id);
+my $R;
+my @sr_cache; # subread cache
+my @ids;
+my @ccs_ids;
+my $fq;
+
+while($fq = $rpr->next_seq){
+    unless( ($id,$range) = $fq->id =~ m!^(m[^/]+/\d+)/(\d+_\d+)!){
+        $L->logdie("Not a valid PacBio subread id: ".($fq->id));
+    }
+    $sr_id = $fq->id;
+    push @ids, $sr_id;
+    $L->logdie("Non-unique ID: $sr_id") if exists $R->{$sr_id};
+    $R->{$sr_id} = Sam::Seq->new(
+                              id => $sr_id, 
+                              len => length($fq->seq),
+                              ref => $fq,
+                             );
+    
+    if($id eq $cid){
+        push @sr_cache, $sr_id;
+    }else{
+        if(@sr_cache > 1){
+            push @ccs_ids, @sr_cache;
+
+            if(@ccs_ids > $opt{chunk_seqs}){
+
+                print STDERR Dumper([sort @ids],[sort keys %$R],[sort @ccs_ids]);
+                # process chunk
+                ccs_chunk($R, \@ccs_ids);
+
+                my $sam_tmp;
+                foreach (@ids){
+                    if($R->{$_}{sam}){ # if there are alignments, compute and print ccs
+                        $sam_tmp = $R->{$_}{sam}{file};
+                        my $con = $R->{$_}->consensus(
+                                                      use_ref_qual => 1,
+                                                      qual_weighted => 1,
+                                                     );
+                        $con->desc_append("CCS");
+                        print $con;
+                    }else{ # no alignments, output unprocessed
+                        print $R->{$_}->ref;
+                    }
+                }
+
+                # reset
+                unlink $sam_tmp if $sam_tmp && ! $opt{debug};
+                @ccs_ids = ();
+                @ids = ($sr_id);
+                $R = {$sr_id => $R->{$sr_id}};
+            }
+        }
+        
+        $cid = $id;
+        @sr_cache = ($sr_id);
+    }
+}
+
+# eof
+if(@sr_cache > 1){
+    push @ccs_ids, @sr_cache;
+}
+
+ccs_chunk($R, \@ccs_ids);
+
+my $sam_tmp;
+foreach (@ids) {
+    if ($R->{$_}{sam}) { # if there are alignments, compute and print ccs
+        $sam_tmp = $R->{$_}{sam}{file};
+        my $con = $R->{$_}->consensus(
+                                      use_ref_qual => 1,
+                                      qual_weighted => 1,
+                                     );
+        $con->desc_append("CCS");
+        print $con;
+    } else {                    # no alignments, output unprocessed
+        print $R->{$_}->ref;
+    }
+}
+
+# reset
+unlink $sam_tmp if $sam_tmp && ! $opt{debug};
+
+
+
+
+
+
+##----------------------------------------------------------------------------##
+
+=head2 ccs_chunk
+
+=cut
+
+sub ccs_chunk{
+    my ($SR, $ids) = @_;
+    $ids = [keys %$SR] unless $ids; # default is to run alignments on all ids
+    
+    # create tmp fastq file for mapper
+    my $srfh = File::Temp->new(
+                               TEMPLATE => "ccseq-XXXXX",
+                               SUFFIX => '.fq',
+                               $opt{debug} ? (UNLINK => 0) : ()
+                          );
+
+    foreach (@$ids){
+        print $srfh $SR->{$_}->ref;
+    }
+
+    my $srf = $srfh->filename;
+    my $srf_base = $srf;
+    $srf_base =~ s/.fq$//;
+
+    # init temporary sam writer
+    my $tsp = Sam::Parser->new(
+                               file => $srf_base.".sam",
+                               mode => '+>',
+                              );
+
+    my $sam_cmd;
+    
+    # index chunk
+    $L->debug("Indexing chunk $srf");
+    my $bwa_index_cmd = "bwa index $srf $srf 2>$srf.idx.log";
+    $L->debug($bwa_index_cmd);
+    qx($bwa_index_cmd);
+    $L->logdie("bwa failed: $?\n", do { local $/; local @ARGV = ("$srf.idx.log") ; <> }) if $?;
+    
+    $sam_cmd = "bwa mem -t $opt{threads} @{$opt{bwa_opt}} $srf $srf 2>$srf.bwa.log";
+    
+    $L->debug("Mapping chunk $srf");
+    $L->debug($sam_cmd);
+    open(my $sam_oh, "-|", $sam_cmd) or $L->logdie($!);                
+    
+    # init input stream parser
+    my $rsp = Sam::Parser->new(fh => $sam_oh);
+
+    my $PG_line;
+    # read SAM header
+    while (my %h = $rsp->next_header_line('SQ|PG')) {
+        $tsp->append_aln($h{raw});
+        next if $h{tag} eq '@PG';
+
+        $SR->{$h{'SN'}}{sam} = $tsp; # indexed sam file, containing aln data
+    }
+
+	
+    # read SAM alignment section
+    my $primary_aln;
+                                                
+    # create tmp sam
+    while (my $aln = $rsp->next_aln()) {
+        # bwa outputs unmapped reads - ignore them
+        next if $aln->is_unmapped();
+        
+        # bwa does not report seq/qual for secondary alignments
+        # cache the primary aln, to restore seq/qual for secondaries if necessary
+        if (! $aln->is_secondary_alignment) {
+            $primary_aln = $aln;
+        } else {
+            if ($aln->seq eq "*") { # restore secondary aln seq/qual
+                $L->logdie("SAM started with secondary alignment without seq/qual and without preceding primary alignment\n")
+                    unless defined $primary_aln;
+                    
+                $L->logdie("Secondary alignment without seq/qual and without primary alignment\n$aln")
+                    unless($aln->qname eq $primary_aln->qname);
+
+                if ($aln->is_reverse_complement !=  $primary_aln->is_reverse_complement) {
+                    $aln->seq(Fasta::Seq->Reverse_complement($primary_aln->seq));
+                    $aln->qual(reverse $primary_aln->qual);
+                } else {
+                    $aln->seq($primary_aln->seq);
+                    $aln->qual($primary_aln->qual);
+                }
+            }
+        }
+
+        # run this filter after secondary seq/qual recovery
+        # primary hit might not be to self
+        my $qid = $aln->qname; $qid =~ s!/\d+_\d+$!!;
+        my $rid = $aln->rname; $rid =~ s!/\d+_\d+$!!;
+        next unless $qid eq $rid;
+        
+        # try to add aln, if sufficient score, add to temporary sam file
+        if ($SR->{$aln->rname}->add_aln($aln)) {
+            $tsp->append_aln($aln);
+        }
+    }
+
+    close $sam_oh;
+    # calc cns
+    $L->logdie("bwa failed: $?\n", do { local $/; local @ARGV = ("$srf.bwa.log") ; <> } ) if $?;
+
+    unlink ("$srf.idx.log", "$srf.bwa.log") unless $opt{debug};
+
+    return $SR;
+
+}

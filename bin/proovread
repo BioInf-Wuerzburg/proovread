@@ -1392,7 +1392,27 @@ $xf=1;
 		$lr_chunk_offsets = correct_sr_mt($sam_chunk_offsets, $lr_chunk_offsets);
 		
 		$LR = undef;
+        }elsif($TASK =~ m/^ccs-\d+/){
+            my $fqi = task_file_name('.fq', task => $TASKS[$TC-1]);
+            my $fqo = task_file_name('.fq', task => $TASKS[$TC]);
+            my $fmo = task_file_name('.masked.fa', task => $TASKS[$TC]);
 
+            my @ccs_mask = split(",", cfg('hcr-mask', $TASK));
+            $ccs_mask[2] = int(($ccs_mask[2] * $min_sr_length  / 100 ) +.5);
+            $ccs_mask[3] = int(($ccs_mask[3] * $min_sr_length  / 100 ) +.5);
+            my $ccs_mask = join(",", @ccs_mask );
+            my $cmd = "$RealPerl/ccseq --threads $opt_threads <$fqi | tee $fqo | "
+              ."$RealPerl/SeqFilter --phred-offset 33 --phred-mask $ccs_mask --fasta --out $fmo --base-content N";
+            
+            $VB->hline;
+            $VB->verbose($cmd);
+            qx($cmd);
+            $VB->hline;
+            
+            $V->exit("ccseq failed: $?\n") if $?;
+
+            $lr_chunk_offsets = chunk_index($fqo);
+            
 	}else{
 		$VB->exit("unknown task: ".$TASK);
 	}
@@ -2607,6 +2627,29 @@ sub task_file_name{
 	return $tfn;
 }
 
+
+=head2 chunk_index
+
+=cut
+
+sub chunk_index{
+    my $file = shift;
+    my $fp;
+    $fp = Fasta::Parser->new(file => $file)->check_format();
+    $fp = Fastq::Parser->new(file => $file)->check_format() unless $fp;
+    $fp || $VS->exit("Unknown format in file `$file`");
+
+            
+    # write sorted/indexed fq/fa lr file for mapping/sam2cns
+    my @lr_idxs = (0);
+    my $lr_c = 1;
+    while($fp->next_seq){
+        my $pos = $fp->append_tell();
+        push @lr_idxs, $pos unless $lr_c % cfg('chunk-size');
+        $lr_c++;
+    }
+    return \@lr_idxs;
+}
 
 =head2 create_custom_cfg
 
