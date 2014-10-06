@@ -640,15 +640,16 @@ Takes a Sam::Seq object, creates, processes and outputs consensus
 
 sub generate_consensus{
 	my $sso = shift; # Sam::Seq object
-	print shift if @_;
-	my @hcrs = ();
+
+	#my @hcrs = ();
         my @mcrs = ();
 	
 	if($rpr && ! $opt_ignore_hcr){
 		if(my $hcrs = $sso->ref->desc){
-			while($hcrs =~ /HCR\d+:(\d+),(\d+)/g){
-				push @hcrs, [$1, $2];
-			}
+                   	# DEPRECATED: HCRs aren't used anymore
+                    	# while($hcrs =~ /HCR\d+:(\d+),(\d+)/g){
+			# 	push @hcrs, [$1, $2];
+			# }
                         while($hcrs =~ /MCR\d+:(\d+),(\d+)/g){
 				push @mcrs, [$1, $2];
 			}
@@ -656,42 +657,44 @@ sub generate_consensus{
 		};
 	}
 	
-	if(! @hcrs){
-		if(
-			($opt_mask_weak_reads && $sso->{_aln_idc} < $opt_mask_weak_reads)
-			|| ($opt_ignore_weak_reads && $sso->{_aln_idc} < $opt_ignore_weak_reads)
-		){
-			my $seq = $sso->ref;
-			unless (ref $seq eq "Fastq::Seq"){
-				$seq = Fastq::Seq->new(
-					substr($seq->seq_head, 1),
-					$seq->seq,
-					'+',
-					'!' x length ($seq->seq),
-					phred_offset => 33,
-				);
-			}else{
-				$seq->qual('!' x length ($seq->seq)),
-			}
+        # # DEPRECATED: mask-weak in sam2cns
+        # # TODO: stand-alone mask-weak filter
+ 	# if(! @hcrs){
+	# 	if(
+	# 		($opt_mask_weak_reads && $sso->{_aln_idc} < $opt_mask_weak_reads)
+	# 		|| ($opt_ignore_weak_reads && $sso->{_aln_idc} < $opt_ignore_weak_reads)
+	# 	){
+	# 		my $seq = $sso->ref;
+	# 		unless (ref $seq eq "Fastq::Seq"){
+	# 			$seq = Fastq::Seq->new(
+	# 				substr($seq->seq_head, 1),
+	# 				$seq->seq,
+	# 				'+',
+	# 				'!' x length ($seq->seq),
+	# 				phred_offset => 33,
+	# 			);
+	# 		}else{
+	# 			$seq->qual('!' x length ($seq->seq)),
+	# 		}
 			
 			
-			unless ($seq->desc() =~ /IGNORED:low_support/){
-				$seq->desc_append("IGNORED:low_support"); 
-				# write to ignored fastq
-				printf $fih "%s\t%s\n", $seq->id, "low_support";
-			}
+	# 		unless ($seq->desc() =~ /IGNORED:low_support/){
+	# 			$seq->desc_append("IGNORED:low_support"); 
+	# 			# write to ignored fastq
+	# 			printf $fih "%s\t%s\n", $seq->id, "low_support";
+	# 		}
 			
-			# write unprocessed fastq
-			print $fqh "$seq";
+	# 		# write unprocessed fastq
+	# 		print $fqh "$seq";
 			
-			# write masked/unprocessed fasta
-			printf $fmh (">%s\n%s\n", substr($seq->seq_head, 1), 
-				$opt_mask_weak_reads ? "N" x length($seq->seq) : $seq->seq);
+	# 		# write masked/unprocessed fasta
+	# 		printf $fmh (">%s\n%s\n", substr($seq->seq_head, 1), 
+	# 			$opt_mask_weak_reads ? "N" x length($seq->seq) : $seq->seq);
 
-			return;
-		}
-	}
-
+	# 		return;
+	# 	}
+	# }
+ 
 	my $con = $sso->consensus(
                                   #hcrs => \@hcrs,
                                   use_ref_qual => $opt_use_ref_qual,
@@ -699,213 +702,69 @@ sub generate_consensus{
                                  );
 	
 	# chimera
-	if($opt_detect_chimera){
-		my @coords = $sso->chimera(); 
+	detect_chimera($sso, $con) if $opt_detect_chimera;
+	
+	# undef state matrix to make memory availabe again
+	$sso->{_state_matrix} = {}; 
+
+        # # DEPRECATED: mask-hcrs in sam2cns; Is now performed as
+        # # independent step using SeqFilter-1.06 hcrs
+        # mask_hcrs($con) if $hcr_min_length;
+
+	# write current fastq
+	print $fqh "$con";
+	
+}
+
+=head2 detect_chimera
+
+=cut
+
+sub detect_chimera{
+    my ($sso, $con) = @_;
+    my @coords = $sso->chimera(); 
 		
-		#-----------------------------------------------------------------#
-		#my %cigar = (M=>0, I=>0, D=>0);
-		#while($con->{cigar} =~ m/(\d+)(\w)/g){
-		#	$cigar{$2}+=$1;
-		#}
-		#my $pred_len = $cigar{M}+$cigar{D};
-		#my $corr_len = length($LR{$pb_id}{ref}->seq)+$cigar{D}-$cigar{I};
-		#printf("%s\t%s\t%s\n", length($con->seq), $pred_len, $corr_len) if $pred_len !=  $corr_len or length($con->seq) != $corr_len;
-		#
-		#-----------------------------------------------------------------#
-		
-		
-		if(@coords){
-			my $i;
-			my %cigar = (M=>0, I=>0, D=>0);
-			for($i=0; $i<@coords; $i++){
+    if (@coords) {
+        my $i;
+        my %cigar = (M=>0, I=>0, D=>0);
+        for ($i=0; $i<@coords; $i++) {
 				
-				my $fr = $coords[$i]{col_range}[0];
-				my $to = $coords[$i]{col_range}[1];
-				my $sc = $coords[$i]{score};
+            my $fr = $coords[$i]{col_range}[0];
+            my $to = $coords[$i]{col_range}[1];
+            my $sc = $coords[$i]{score};
 				
 				# use cigar to compute correct location of chimera coords on corrected seq.
 				# -I, +D
 				# get read cigar, eg 80M2D3M1IM4
 				# /g remembers position even between multiple calls to while on same cigar
 				# hence we can just always add to %cigar outside the for loop
-				while($con->{cigar} =~ m/(\d+)(\w)/g && ($cigar{M}+$cigar{I} < $fr)){ 
-					$cigar{$2}+=$1;
-				}
+            while ($con->{cigar} =~ m/(\d+)(\w)/g && ($cigar{M}+$cigar{I} < $fr)) { 
+                $cigar{$2}+=$1;
+            }
 				
-				my $pos_corr = $cigar{D}-$cigar{I}; # corrected string has additional nucs
-					# at D's and has lost nucs at I's
-				$fr+=$pos_corr;
-				$to+=$pos_corr;
+            my $pos_corr = $cigar{D}-$cigar{I}; # corrected string has additional nucs
+            # at D's and has lost nucs at I's
+            $fr+=$pos_corr;
+            $to+=$pos_corr;
 
-				if($to > length($con->seq)){
-					use Data::Dumper;
-					die "Chimera Breakpoint outside of sequence", Dumper({
-						cigar => \%cigar,
-						poscorr => $pos_corr,
-						conlen => length ($con->seq),
-						concigar => $con->{cigar},
-						reflen => length ($sso->ref->seq),
-						coords => $coords[$i],
-					});
-				};
+            if ($to > length($con->seq)) {
+                use Data::Dumper;
+                die "Chimera Breakpoint outside of sequence", Dumper({
+                                                                      cigar => \%cigar,
+                                                                      poscorr => $pos_corr,
+                                                                      conlen => length ($con->seq),
+                                                                      concigar => $con->{cigar},
+                                                                      reflen => length ($sso->ref->seq),
+                                                                      coords => $coords[$i],
+                                                                     });
+            }
+            ;
 
-				printf $fch("%s\t%d\t%d\t%s\n", $sso->id, $fr, $to, $sc);
-			}
-		}
-	}
-	
-	# undef state matrix to make memory availabe again
-	$sso->{_state_matrix} = {}; 
-
-	if($hcr_min_length){
-		# $hcrs[$i][0] == $hcrs[$i][OFFSET] := offset
-		# $hcrs[$i][1] == $hcrs[$i][LENGTH] := length
-		
-		# clone
-		my $con_mask = $con->new;
-		# compute high coverage regions 
-		my @hcrs = ($con_mask->qual_lcs());
-		if(@hcrs){
-			my $hcr_c = 0;
-			# create a description string of hcrs in seq
-			my @hcrs_string = map{"HCR".++$hcr_c.":".$_->[OFFSET].','.$_->[LENGTH]}@hcrs;
-			# add desc to header
-			$con->{seq_head}.= ' '.join(" ", @hcrs_string);
-
-			#hcr sticky
-			foreach(@hcrs){
-				$_->[OFFSET]+=$hcr_sticky_length; 
-				$_->[LENGTH]-=($hcr_sticky_length * 2);
-			}	
-			
-			#head
-			# mask/unmask start
-			my $seq_length = length($con_mask->seq);
-			my $lcr_start_short = $lcr_min_length - $hcrs[0][OFFSET];
-			# Consider starts shorter then lcr_min_length
-			if($lcr_start_short > 0){
-				# unmask start if its long enough to be worth it: short < 50% lcr_min_length
-				if( $lcr_start_short < $opt_lcr_end_ratio * $lcr_min_length ){ 
-					#$v->hline;
-					#$v->verbose('first hcr to close to start '.$lcr_start_short);
-					# if OFFSET is adjusted, LENGTH always needs to be adjusted
-					#  as well or the HCR is just shifted
-					# adjust length, check for hcr_min_length
-					if( ($hcrs[0][LENGTH] -= $lcr_start_short) < $hcr_min_length){
-						#$v->verbose('first hcr to short: '.$hcrs[0][LENGTH]);
-						shift @hcrs; # remove first hcr if it becomes to short after trimming
-					}else{
-						#$v->verbose('first hcr trimmed');
-						$hcrs[0][OFFSET] += $lcr_start_short;
-					}
-				}else{# mask start completely
-					$hcrs[0][LENGTH] += $hcrs[0][OFFSET];
-					$hcrs[0][OFFSET] = 0;
-				}
-			} 
-			
-			# mask/unmask end
-			if( scalar @hcrs ){ # check if there are HCRs, might be trimmed by first
-				my $lcr_end_short = $lcr_min_length - ($seq_length - ($hcrs[$#hcrs][OFFSET] + $hcrs[$#hcrs][LENGTH]));
-				# check if it is to close to the end
-				if($lcr_end_short  > 0){
-					if($lcr_end_short < $opt_lcr_end_ratio * $lcr_min_length ){
-						#$v->verbose('last hcr to close to end '.$lcr_end_short);
-						# shorten last hcr and check its length
-						if( ($hcrs[$#hcrs][LENGTH] -= $lcr_end_short) < $hcr_min_length){
-							#$v->verbose('last hcr to short');
-							pop @hcrs; # remove last hcr if it becomes to short after trimming
-						}
-					}else{# extend hcr to end of seq
-						$hcrs[$#hcrs][LENGTH] += $lcr_min_length - $lcr_end_short
-					}
-				}
-			} 
-			
-			# precompute changes
-			my $cc=0;
-			while( @hcrs ){
-				#print "#- hcr trimming cycle ", ++$cc, " --#\n";
-				# create temporary hash structure with indexes as keys
-				my %hcrs;
-				my @hcrs_short_idx;
-				# DEEEEP COPY REQUIRED !!!!!!!!!!
-				my @tmp_hcrs = @{dclone(\@hcrs)};
-				@hcrs{0..$#hcrs} = @tmp_hcrs;
-				# find + extend short hcrs
-				# + cache short hcr idxs
-				my $i=0;
-				for(;$i<$#hcrs;$i++){
-					# compute gap to next
-					my ($ha, $hb) = ($hcrs{$i}, $hcrs{$i+1});
-					my $hae = $ha->[OFFSET]+$ha->[LENGTH];
-					my $hbs = $hb->[OFFSET];
-					if((my $lcr_short = $lcr_min_length - ($hbs - $hae)) > 0){
-						my $lcr_short_a = int($lcr_short/2);
-						my $lcr_short_b = $lcr_short_a + $lcr_short%2; 
-						$ha->[LENGTH] -= $lcr_short_a;
-						if( $ha->[LENGTH] < $hcr_min_length ){ # $ha is completely processed
-							push @hcrs_short_idx, $i 
-						}
-						$hb->[OFFSET] += $lcr_short_b;
-						$hb->[LENGTH] -= $lcr_short_b;
-					}
-				}
-				# and dont forget the last hcr length
-				if( $hcrs{$i}[LENGTH] < $hcr_min_length ){ # $ha is completely processed
-					push @hcrs_short_idx, $i 
-				}
-				
-				# skip longer adjacent
-				my @hcrs_short_idx_clean;
-				foreach (@hcrs_short_idx){
-					unless(@hcrs_short_idx_clean){
-						push @hcrs_short_idx_clean, $_
-					}elsif( $_ -1 == $hcrs_short_idx_clean[-1] ){ # adjacent
-						# compare lengths
-						if($hcrs{$_}[LENGTH] < $hcrs{$hcrs_short_idx_clean[-1]} ){
-							# prev was longer, remove from clean, push new
-							pop @hcrs_short_idx_clean;
-							push @hcrs_short_idx_clean, $_;
-						}
-						# else do nothing -> skip
-					}else{ # non adjacent
-						push @hcrs_short_idx_clean, $_
-					}
-				}
-				
-				# all conflicting hcrs/lcrs trimmed
-				unless(@hcrs_short_idx_clean){
-					@hcrs = @tmp_hcrs;
-					last;
-				};
-				
-				# remove unmodified hcrs before next cycle
-                                my $rm_c = 0;
-                                foreach (@hcrs_short_idx_clean){
-					splice(@hcrs, $_ - $rm_c, 1);
-                                        $rm_c++;
-				}
-			}
-
-	
-			# create a description for actually masked hcrs in seq
-                        my $mcr_c = 0;
-			my @mcrs_string = map{"MCR".++$mcr_c.":".$_->[OFFSET].','.$_->[LENGTH]}@hcrs;
-			# add desc to header
-			$con->{seq_head}.= ' '.join(" ", @mcrs_string);
-
-			$con_mask->mask_seq(@hcrs) if @hcrs;
-		}
-	
-		# write (masked) FASTA for next pass
-		printf $fmh (">%s\n%s\n", substr($con->seq_head, 1), $con_mask->seq);
-	}
-	
-	# write current fastq
-	print $fqh "$con";
-	
+            printf $fch("%s\t%d\t%d\t%s\n", $sso->id, $fr, $to, $sc);
+        }
+    }
 }
+
 
 
 =head2 byfile
@@ -931,6 +790,155 @@ sub byfile{
   }
   $res;
 }
+
+
+# DEPRECATED, using SeqFilter now
+# sub mask_hcrs{
+# 	my $con = shift;
+# 	# $hcrs[$i][0] == $hcrs[$i][OFFSET] := offset
+# 	# $hcrs[$i][1] == $hcrs[$i][LENGTH] := length
+		
+# 	# clone
+# 	my $con_mask = $con->new;
+# 	# compute high coverage regions 
+# 	my @hcrs = ($con_mask->qual_lcs());
+# 	if(@hcrs){
+# 		my $hcr_c = 0;
+# 		# create a description string of hcrs in seq
+# 		my @hcrs_string = map{"HCR".++$hcr_c.":".$_->[OFFSET].','.$_->[LENGTH]}@hcrs;
+# 		# add desc to header
+# 		$con->{seq_head}.= ' '.join(" ", @hcrs_string);
+
+# 		#hcr sticky
+# 		foreach(@hcrs){
+# 			$_->[OFFSET]+=$hcr_sticky_length; 
+# 			$_->[LENGTH]-=($hcr_sticky_length * 2);
+# 		}	
+			
+# 		#head
+# 		# mask/unmask start
+# 		my $seq_length = length($con_mask->seq);
+# 		my $lcr_start_short = $lcr_min_length - $hcrs[0][OFFSET];
+# 		# Consider starts shorter then lcr_min_length
+# 		if($lcr_start_short > 0){
+# 			# unmask start if its long enough to be worth it: short < 50% lcr_min_length
+# 			if( $lcr_start_short < $opt_lcr_end_ratio * $lcr_min_length ){ 
+# 				#$v->hline;
+# 				#$v->verbose('first hcr to close to start '.$lcr_start_short);
+# 				# if OFFSET is adjusted, LENGTH always needs to be adjusted
+# 				#  as well or the HCR is just shifted
+# 				# adjust length, check for hcr_min_length
+# 				if( ($hcrs[0][LENGTH] -= $lcr_start_short) < $hcr_min_length){
+# 					#$v->verbose('first hcr to short: '.$hcrs[0][LENGTH]);
+# 					shift @hcrs; # remove first hcr if it becomes to short after trimming
+# 				}else{
+# 					#$v->verbose('first hcr trimmed');
+# 					$hcrs[0][OFFSET] += $lcr_start_short;
+# 				}
+# 			}else{# mask start completely
+# 				$hcrs[0][LENGTH] += $hcrs[0][OFFSET];
+# 				$hcrs[0][OFFSET] = 0;
+# 			}
+# 		} 
+			
+# 		# mask/unmask end
+# 		if( scalar @hcrs ){ # check if there are HCRs, might be trimmed by first
+# 			my $lcr_end_short = $lcr_min_length - ($seq_length - ($hcrs[$#hcrs][OFFSET] + $hcrs[$#hcrs][LENGTH]));
+# 			# check if it is to close to the end
+# 			if($lcr_end_short  > 0){
+# 				if($lcr_end_short < $opt_lcr_end_ratio * $lcr_min_length ){
+# 					#$v->verbose('last hcr to close to end '.$lcr_end_short);
+# 					# shorten last hcr and check its length
+# 					if( ($hcrs[$#hcrs][LENGTH] -= $lcr_end_short) < $hcr_min_length){
+# 						#$v->verbose('last hcr to short');
+# 						pop @hcrs; # remove last hcr if it becomes to short after trimming
+# 					}
+# 				}else{# extend hcr to end of seq
+# 					$hcrs[$#hcrs][LENGTH] += $lcr_min_length - $lcr_end_short
+# 				}
+# 			}
+# 		} 
+			
+# 		# precompute changes
+# 		my $cc=0;
+# 		while( @hcrs ){
+# 			#print "#- hcr trimming cycle ", ++$cc, " --#\n";
+# 			# create temporary hash structure with indexes as keys
+# 			my %hcrs;
+# 			my @hcrs_short_idx;
+# 			# DEEEEP COPY REQUIRED !!!!!!!!!!
+# 			my @tmp_hcrs = @{dclone(\@hcrs)};
+# 			@hcrs{0..$#hcrs} = @tmp_hcrs;
+# 			# find + extend short hcrs
+# 			# + cache short hcr idxs
+# 			my $i=0;
+# 			for(;$i<$#hcrs;$i++){
+# 				# compute gap to next
+# 				my ($ha, $hb) = ($hcrs{$i}, $hcrs{$i+1});
+# 				my $hae = $ha->[OFFSET]+$ha->[LENGTH];
+# 				my $hbs = $hb->[OFFSET];
+# 				if((my $lcr_short = $lcr_min_length - ($hbs - $hae)) > 0){
+# 					my $lcr_short_a = int($lcr_short/2);
+# 					my $lcr_short_b = $lcr_short_a + $lcr_short%2; 
+# 					$ha->[LENGTH] -= $lcr_short_a;
+# 					if( $ha->[LENGTH] < $hcr_min_length ){ # $ha is completely processed
+# 						push @hcrs_short_idx, $i 
+# 					}
+# 					$hb->[OFFSET] += $lcr_short_b;
+# 					$hb->[LENGTH] -= $lcr_short_b;
+# 				}
+# 			}
+# 			# and dont forget the last hcr length
+# 			if( $hcrs{$i}[LENGTH] < $hcr_min_length ){ # $ha is completely processed
+# 				push @hcrs_short_idx, $i 
+# 			}
+				
+# 			# skip longer adjacent
+# 			my @hcrs_short_idx_clean;
+# 			foreach (@hcrs_short_idx){
+# 				unless(@hcrs_short_idx_clean){
+# 					push @hcrs_short_idx_clean, $_
+# 				}elsif( $_ -1 == $hcrs_short_idx_clean[-1] ){ # adjacent
+# 					# compare lengths
+# 					if($hcrs{$_}[LENGTH] < $hcrs{$hcrs_short_idx_clean[-1]} ){
+# 						# prev was longer, remove from clean, push new
+# 						pop @hcrs_short_idx_clean;
+# 						push @hcrs_short_idx_clean, $_;
+# 					}
+# 					# else do nothing -> skip
+# 				}else{ # non adjacent
+# 					push @hcrs_short_idx_clean, $_
+# 				}
+# 			}
+				
+# 			# all conflicting hcrs/lcrs trimmed
+# 			unless(@hcrs_short_idx_clean){
+# 				@hcrs = @tmp_hcrs;
+# 				last;
+# 			};
+				
+# 			# remove unmodified hcrs before next cycle
+#                         my $rm_c = 0;
+#                         foreach (@hcrs_short_idx_clean){
+# 				splice(@hcrs, $_ - $rm_c, 1);
+#                                 $rm_c++;
+# 			}
+# 		}
+
+	
+# 		# create a description for actually masked hcrs in seq
+#                 my $mcr_c = 0;
+# 		my @mcrs_string = map{"MCR".++$mcr_c.":".$_->[OFFSET].','.$_->[LENGTH]}@hcrs;
+# 		# add desc to header
+# 		$con->{seq_head}.= ' '.join(" ", @mcrs_string);
+
+# 		$con_mask->mask_seq(@hcrs) if @hcrs;
+# 	}
+	
+# 	# write (masked) FASTA for next pass
+# 	printf $fmh (">%s\n%s\n", substr($con->seq_head, 1), $con_mask->seq);
+# }
+
 
 =head1 AUTHORS
 

@@ -1049,7 +1049,7 @@ $xf=1;
 		}
 		
 		$lr_chunk_offsets = read_long() if @$opt_lr_file; # 'external-sam does not require LR
-		
+
 	}elsif($TASK eq 'shrimp-iter-1'){
 
 		# configure Sam::Seq
@@ -2456,7 +2456,7 @@ sub correct_sr_mt{
 
 		($TASK eq 'read-sam') # calculate hcrs on first iter for second iter
 			? (@$opt_lr_file ? ()	: ('--ignore-hcr' => 1),
-				'--max-ins-length' => 0,
+ 				'--max-ins-length' => 0,
 			  ) # params from config
 			: (),
 		
@@ -2514,14 +2514,14 @@ sub correct_sr_mt{
 	my $fq_file = task_file_name(".fq");
 	my $fq_glob = task_file_name(".[0-9]*.fq");
 	my $fa_file = task_file_name(".masked.fa");
-	my $fa_glob = task_file_name(".[0-9]*.masked.fa");
+#	my $fa_glob = task_file_name(".[0-9]*.masked.fa");
 	my $fi_file = task_file_name(suffix => ".ignored.tsv", task => '');
 	my $fi_glob = task_file_name(".[0-9]*.ignored.tsv");
 	my $fc_file = task_file_name(".chim.tsv");
 	my $fc_glob = task_file_name(".[0-9]*.chim.tsv");
 	
 	my @fq_glob = sort byfile glob $fq_glob;
-	my @fa_glob = sort byfile glob $fa_glob;
+#	my @fa_glob = sort byfile glob $fa_glob;
 	my @fi_glob = sort byfile glob $fi_glob;
 	my @fc_glob = sort byfile glob $fc_glob;
 #	my $fq_glob_sorted = join(" ", @fq_glob);
@@ -2550,16 +2550,31 @@ sub correct_sr_mt{
 	    my $t = 499+$i > $#fq_glob ? $#fq_glob : 499+$i;
 
 	    system("cat ".join(" ", @fq_glob[$f..$t])." >>$fq_file") && die $!;
-	    system("cat ".join(" ", @fa_glob[$f..$t])." >>$fa_file") && die $!;
+#	    system("cat ".join(" ", @fa_glob[$f..$t])." >>$fa_file") && die $!;
 	    system("cat ".join(" ", @fi_glob[$f..$t])." >>$fi_file") && die $!;
 	    system("cat ".join(" ", @fc_glob[$f..$t])." >>$fc_file") && die $!;
 	}
 
 	
 	unlink @fq_glob unless $opt_keep > 1;
-	unlink @fa_glob unless $opt_keep > 1;
+#	unlink @fa_glob unless $opt_keep > 1;
 	unlink @fi_glob unless $opt_keep > 1;
 	unlink @fc_glob unless $opt_keep > 1;
+
+        # Masking
+        my @hcr_mask = split(",", cfg('hcr-mask', $TASK));
+        $hcr_mask[2] = int(($hcr_mask[2] * $min_sr_length  / 100 ) +.5);
+        $hcr_mask[3] = int(($hcr_mask[3] * $min_sr_length  / 100 ) +.5);
+        my $hcr_mask = join(",", @hcr_mask );
+        my $cmd = "$RealPerl/SeqFilter $fq_file --out $fa_file --phred-offset 33 --phred-mask $hcr_mask --fasta --base-content N";
+        
+        $VB->hline;
+        $VB->verbose($cmd);
+        qx($cmd);
+        $VB->hline;
+        
+        $V->exit("SeqFilter failed to mask $fq_file: $?\n") if $?;
+
 	
 	return \@ref_idxs;
 }
