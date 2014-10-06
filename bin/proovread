@@ -39,6 +39,8 @@ $Data::Dumper::Sortkeys = 1;
 
 our $VERSION = '2.01';
 
+my $RealLib = "$RealBin/../lib/";
+my $RealPerl = "perl -I${RealLib} $RealBin";
 =head1 NAME
 
 proovread
@@ -2485,7 +2487,7 @@ sub correct_sr_mt{
 	
 	# xarg cmds, capture stderr;
 	my $xgr;
-	open($xgr, "(cat $cfg_file | xargs -P $opt_threads -L 1 -t perl $RealBin/sam2cns) 2>&1 |")
+	open($xgr, "(cat $cfg_file | xargs -P $opt_threads -L 1 -t $RealPerl/sam2cns) 2>&1 |")
 		or $VS->exit($!);
 	
 	$VB->hline();
@@ -2629,7 +2631,7 @@ sub chim_filter{
 	my %params = (cfg('chimera-filter'), @_);
 	my $params = param_join(\%params);
 
-	my $cmd_chim_fil = "perl $RealBin/ChimeraToSeqFilter.pl $params";
+	my $cmd_chim_fil = "$RealPerl/ChimeraToSeqFilter.pl $params";
 	
 	$V->nline;
 	$VS->verbose("Filtering chimera annotations");
@@ -2683,14 +2685,13 @@ sub seq_filter{
 	my %params = @_;
 	my $params = param_join(\%params);
 
-	my $cmd = "$RealBin/SeqFilter $params";
+	my $cmd = "$RealPerl/SeqFilter $params";
 	
 	$VB->hline;
 	$VB->verbose($cmd);
 	qx($cmd);
 	$VB->hline;
 }
-
 
 =head2 seq_and_siamaera_filter
 
@@ -2706,7 +2707,7 @@ sub seq_and_siamaera_filter{
 	my %siam_params = @{$_[1]};
 	my $siam_params = param_join(\%siam_params);
 
-	my $cmd = "$RealBin/SeqFilter $seq_params --out - | perl -I${RealBin}/../lib $RealBin/siamaera $siam_params";
+	my $cmd = "$RealPerl/SeqFilter $seq_params --out - | $RealPerl/siamaera $siam_params";
 	
 	$VB->hline;
 	$VB->verbose($cmd);
