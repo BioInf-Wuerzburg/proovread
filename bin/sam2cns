@@ -462,24 +462,22 @@ if($opt_ref_pat){
 
 # output files
 my $fq_out =  $opt_pre.'.fq';
-my $fam_out = $opt_pre.'.masked.fa';
 my $fqi_out = $opt_pre.'.ignored.tsv'; # ignored
 my $fc_out =  $opt_pre.'.chim.tsv'; # chimera annot
-my $tr_out =  $opt_pre.'.trace.fq'; # chimera annot
+my $tr_out =  $opt_pre.'.trace'; # chimera annot
 
 my $mode = $opt_append ? ">>" : ">";
 
 my $fqh;
 open($fqh, $mode, $fq_out) || $v->exit("Can't open output read file: '$fq_out'");
-my $fmh;
-open($fmh, $mode, $fam_out) || $v->exit("Can't open output read file: '$fam_out'");
 my $fih;
 open($fih, $mode, $fqi_out) || $v->exit("Can't open output read file: '$fqi_out'");
 my $fch;
 open($fch, $mode, $fc_out) || $v->exit("Can't open output read file: '$fc_out'");
 my $trh;
-open($trh, $mode, $tr_out) || $v->exit("Can't open output read file: '$tr_out'");
-
+if($debug){
+    open($trh, $mode, $tr_out) || $v->exit("Can't open output read file: '$tr_out'");
+}
 
 #print $fch (join("\t", '#id', qw(from to score)),"\n") if ! -s $fch;
 

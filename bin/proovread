@@ -2534,14 +2534,16 @@ sub correct_sr_mt{
 	my $fq_file = task_file_name(".fq");
 	my $fq_glob = task_file_name(".[0-9]*.fq");
 	my $fa_file = task_file_name(".masked.fa");
-#	my $fa_glob = task_file_name(".[0-9]*.masked.fa");
+
+	my $tr_file = task_file_name(".trace");
+	my $tr_glob = task_file_name(".[0-9]*.trace");
 	my $fi_file = task_file_name(suffix => ".ignored.tsv", task => '');
 	my $fi_glob = task_file_name(".[0-9]*.ignored.tsv");
 	my $fc_file = task_file_name(".chim.tsv");
 	my $fc_glob = task_file_name(".[0-9]*.chim.tsv");
 	
 	my @fq_glob = sort byfile glob $fq_glob;
-#	my @fa_glob = sort byfile glob $fa_glob;
+	my @tr_glob = sort byfile glob $tr_glob;
 	my @fi_glob = sort byfile glob $fi_glob;
 	my @fc_glob = sort byfile glob $fc_glob;
 #	my $fq_glob_sorted = join(" ", @fq_glob);
@@ -2562,22 +2564,24 @@ sub correct_sr_mt{
 	pop(@ref_idxs);
 	
 	qx(>$fq_file); # create empty file, just to be safe
-	qx(>$fa_file);
+        print Dumper(@tr_glob);
+	qx(>$tr_file) if @tr_glob > 0;
 	# $fi_file gets appended over iters
 	qx(echo -e "#id\tfrom\tto\tscore" > $fc_file); # create file with header
-	for (my $i=0;$i<@fq_glob;$i+=500){
+
+        for (my $i=0;$i<@fq_glob;$i+=500){
 	    my $f = 0+$i;
 	    my $t = 499+$i > $#fq_glob ? $#fq_glob : 499+$i;
 
 	    system("cat ".join(" ", @fq_glob[$f..$t])." >>$fq_file") && die $!;
-#	    system("cat ".join(" ", @fa_glob[$f..$t])." >>$fa_file") && die $!;
+	    if(@tr_glob > 0){system("cat ".join(" ", @tr_glob[$f..$t])." >>$tr_file") && die $!};
 	    system("cat ".join(" ", @fi_glob[$f..$t])." >>$fi_file") && die $!;
 	    system("cat ".join(" ", @fc_glob[$f..$t])." >>$fc_file") && die $!;
 	}
 
 	
 	unlink @fq_glob unless $opt_keep > 1;
-#	unlink @fa_glob unless $opt_keep > 1;
+	unlink @tr_glob unless $opt_keep > 1;
 	unlink @fi_glob unless $opt_keep > 1;
 	unlink @fc_glob unless $opt_keep > 1;
 
