@@ -381,6 +381,8 @@ $opt{'use-ref-qual!'} = \(my $opt_use_ref_qual = 1);
 
 $opt{'chimera-min-score'} = \(my $opt_chimera_min_score = 0);
 
+$opt{'debug!'} = \(my $debug = $cfg{debug});
+
 =back
 
 =cut
@@ -463,6 +465,7 @@ my $fq_out =  $opt_pre.'.fq';
 my $fam_out = $opt_pre.'.masked.fa';
 my $fqi_out = $opt_pre.'.ignored.tsv'; # ignored
 my $fc_out =  $opt_pre.'.chim.tsv'; # chimera annot
+my $tr_out =  $opt_pre.'.trace.fq'; # chimera annot
 
 my $mode = $opt_append ? ">>" : ">";
 
@@ -474,6 +477,10 @@ my $fih;
 open($fih, $mode, $fqi_out) || $v->exit("Can't open output read file: '$fqi_out'");
 my $fch;
 open($fch, $mode, $fc_out) || $v->exit("Can't open output read file: '$fc_out'");
+my $trh;
+open($trh, $mode, $tr_out) || $v->exit("Can't open output read file: '$tr_out'");
+
+
 #print $fch (join("\t", '#id', qw(from to score)),"\n") if ! -s $fch;
 
 
@@ -700,7 +707,11 @@ sub generate_consensus{
                                   use_ref_qual => $opt_use_ref_qual,
                                   ignore_coords => \@mcrs
                                  );
-	
+        if($debug){
+            print $trh "$con";
+            print $trh $con->{trace},"\n";
+        }
+        
 	# chimera
 	detect_chimera($sso, $con) if $opt_detect_chimera;
 	
