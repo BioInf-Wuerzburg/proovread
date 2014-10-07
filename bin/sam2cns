@@ -722,8 +722,8 @@ sub generate_consensus{
 
 sub detect_chimera{
     my ($sso, $con) = @_;
-    my @coords = $sso->chimera(); 
-		
+    my @coords = $sso->chimera();
+    
     if (@coords) {
         my $i;
         my %cigar = (M=>0, I=>0, D=>0);

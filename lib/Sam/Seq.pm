@@ -467,6 +467,7 @@ sub State_matrix{
             for(my $i=0; $i<@seq; $i++){
                 # never add 0, if nothing more matches, a 0 count might be introduced
                 next unless $freqs[$i];
+                #ie Dumper($self->{_states}, "@seq", $self->ref) unless defined $self->{_states}{$seq[$i]};
                 ($S[$i][$self->{_states}{$seq[$i]}])+= $freqs[$i];
             }
         }
@@ -607,7 +608,7 @@ sub State_matrix{
                     } elsif ($cigar[$i+1] eq 'I') {
                         if ($i) {
                             # append to prev state
-                          print STDERR "@cigar\n" unless @states;
+                            #print STDERR "@cigar\n" unless @states;
                             if ($states[$#states] eq '-') {
                                 # some mappers, e.g. bowtie2 produce 1D1I instead of 
                                 # mismatchas (1M), as it is cheaper. This needs to be 
@@ -925,9 +926,7 @@ By default the state matrix is calculated, wether or not it has
 sub variants{
 	my ($self, $reuse_matrix) = (@_,0);
 	# compute state_matrix if required/wanted
-	unless($self->{_state_matrix} || !$reuse_matrix){
-		$self->_init_state_matrix();
-	}
+        $self->_init_state_matrix() if (!$self->{_state_matrix} || !$reuse_matrix);
 	
 	return $self->_variants;
 }
@@ -946,9 +945,7 @@ sub coverage{
 	# calculate from _state_matrix, not the fastest way but accurate and
 	#  already implemented :)
 	# compute state_matrix if required/wanted
-	unless($self->{_state_matrix} || !$reuse_matrix){
-		$self->_init_state_matrix();
-	}
+        $self->_init_state_matrix() if (!$self->{_state_matrix} || !$reuse_matrix);
 
 	my @covs;
 	foreach my $col(@{$self->{_state_matrix}}){
@@ -974,7 +971,7 @@ By default the state matrix is calculated, wether or not it has
 sub chimera{
 	my ($self, $reuse_matrix) = (@_,0);
 	# compute state_matrix if required/wanted
-	$self->_init_state_matrix() unless ($self->{_state_matrix} || !$reuse_matrix);
+        $self->_init_state_matrix() if (!$self->{_state_matrix} || !$reuse_matrix);
 
 	my @bin_bases = @{$self->{_bin_bases}};
 	return unless @bin_bases > 20; # need at least 20 bins to make sense
@@ -1069,16 +1066,16 @@ sub chimera{
 			
 		}
 		
-		# x of the overlapping columns need to increase Hx
-		# 1,2,3,4:		>1 (0 mm)
-		# 5,6,7,8:		>2 (1 mm)
-		# 9,10,11,12:	>3 (2 mm)
-		# ...
-		
+                # Hx > 0.7:
+                #  4:1 = 0.72
+                #  5:1 = 0.65
+                #  8:2 = 0.72
+                # 12:3 = 0.72
+                
 		push @coords, {
 			col_range => [$mat_from + $self->{bin_size}, $mat_to - $self->{bin_size}],
 			hx => \@hx_delta,
-			score => (grep{$_> 0}@hx_delta) / @hx_delta,  # number of + columns normalized to total n columns
+			score => (grep{$_> 0.7}@hx_delta) / @hx_delta,  # number of + columns normalized to total n columns
 		}if @hx_delta;
 
 		#TODO: self chimera
@@ -1596,8 +1593,8 @@ sub _consensus{
 		
 		# get most prominent state
 		my $con = $states_rev{$idx};
-
-		printf "%s\t%s %s\n", $self->{ref}->id(), $con, $idx if $con =~ /-/;
+		#use Data::Dumper;
+		#printf "%s\t%s %s\n", $self->{ref}->id(), $con, $idx if $con =~ /-/;
 		$seq.= $con;
 		push @freqs, ($max_freq) x length($con);
 		$trace.= length($con) == 1 ? 'M' : 'M'.('D'x (length($con)-1));
