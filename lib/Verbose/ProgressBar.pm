@@ -3,8 +3,6 @@ package Verbose::ProgressBar;
 use warnings;
 use strict;
 
-# $Id: ProgressBar.pm 121 2013-05-19 20:57:34Z s187512 $
-
 # preference libs in same folder over @INC
 use lib '../';
 
@@ -13,9 +11,7 @@ use Verbose;
 use IO::File;
 use IO::Uncompress::Gunzip;
 
-our $VERSION = '0.08';
-
-
+our $VERSION = '0.09';
 
 $|++;
 
@@ -194,7 +190,7 @@ sub update{
 	$self->{level} > $self->{report_level} && return;
 	
 	if (!defined ($value) && defined($self->{_fh})){
-		$self->{value} = $self->{_fh}->tell;
+		$self->{value} = tell($self->{_fh});
 	}elsif(!$value){
 		$self->{value} = $value = 0;
 	}else{
