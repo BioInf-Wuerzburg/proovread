@@ -487,16 +487,18 @@ sub State_matrix{
 		my @cigar = split(/(\d+)/,$aln->cigar);
 		shift @cigar;
                 
+                print STDERR "@cigar\n";
+
                 if($cigar[1] eq 'S'){
                     # just move on in query, do nothing else
-                    $aln->seq($aln->seq(substr($aln->seq, $cigar[0])));
-                    $aln->qual($aln->qual(substr($aln->qual, $cigar[0])));
+                    $seq = substr($seq, $cigar[0]);
+                    $qua = substr($qua, $cigar[0]);
                     shift @cigar;
                     shift @cigar;
                 }
                 if($cigar[-1] eq 'S'){
-                    $aln->seq($aln->seq(substr($aln->seq, 0, -$cigar[0])));
-                    $aln->qual($aln->qual(substr($aln->qual, 0, -$cigar[0])));
+                    $seq = substr($seq, 0, -$cigar[0]);
+                    $qua = substr($qua, 0, -$cigar[0]);
                     pop @cigar;
                     pop @cigar;
                 }
