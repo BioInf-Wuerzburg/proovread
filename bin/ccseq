@@ -41,9 +41,15 @@ $Data::Dumper::Sortkeys = 1;
 
 =item -r/--reads
 
-Reads for ccs compuation.g
+Reads for ccs compuation.
+
+=item -p/--pre
+
+Output prefix.
 
 =item -t/--threads
+
+Number of threads to use.
 
 =item -c/--config <PATH PATH ...>
 
@@ -86,6 +92,7 @@ my $L = Log::Log4perl->get_logger();
 
 my %def = (
            chunk_seqs => 2000,
+           pre => '',
            threads => 1,
            bwa_opt => [qw(-a -e -k 9 -W 18 -w 300 -A 5 -B 11 -O 2,1 -E 4,3 -Y)],
            #bwa_opt => [qw(-a -e -k 17 -W30 -w 300 -A 5 -B 11 -O 2,1 -E 4,3 -L 30)],
@@ -97,6 +104,7 @@ my %opt = (
 GetOptions(                     # use %opt (Cfg) as defaults
            \%opt, qw(
                         reads=s
+                        pre|p=s
                         threads=i
                         chunk_seqs=i
                         config|c=s{,}
@@ -235,7 +243,6 @@ while($fq = $rpr->next_seq){
 
             if(@ccs_ids > $opt{chunk_seqs}){
 
-                print STDERR Dumper([sort @ids],[sort keys %$R],[sort @ccs_ids]);
                 # process chunk
                 ccs_chunk($R, \@ccs_ids);
 
@@ -271,6 +278,9 @@ while($fq = $rpr->next_seq){
 if(@sr_cache > 1){
     push @ccs_ids, @sr_cache;
 }
+
+#print STDERR Dumper([sort @ids],[sort keys %$R],[sort @ccs_ids]);
+
 
 ccs_chunk($R, \@ccs_ids);
 
@@ -309,7 +319,7 @@ sub ccs_chunk{
     
     # create tmp fastq file for mapper
     my $srfh = File::Temp->new(
-                               TEMPLATE => "ccseq-XXXXX",
+                               TEMPLATE => $opt{pre}."/ccseq-XXXXX",
                                SUFFIX => '.fq',
                                $opt{debug} ? (UNLINK => 0) : ()
                           );

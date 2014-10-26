@@ -1401,7 +1401,8 @@ $xf=1;
             $ccs_mask[2] = int(($ccs_mask[2] * $min_sr_length  / 100 ) +.5);
             $ccs_mask[3] = int(($ccs_mask[3] * $min_sr_length  / 100 ) +.5);
             my $ccs_mask = join(",", @ccs_mask );
-            my $cmd = "$RealPerl/ccseq --threads $opt_threads <$fqi | tee $fqo | "
+
+            my $cmd = "$RealPerl/ccseq ".(cfg('debug') ? "--debug" : "")." --threads $opt_threads --pre $opt_prefix/$TASK <$fqi | tee $fqo | "
               ."$RealPerl/SeqFilter --phred-offset 33 --phred-mask $ccs_mask --fasta --out $fmo --base-content N";
             
             $VB->hline;
@@ -2564,7 +2565,6 @@ sub correct_sr_mt{
 	pop(@ref_idxs);
 	
 	qx(>$fq_file); # create empty file, just to be safe
-        print Dumper(@tr_glob);
 	qx(>$tr_file) if @tr_glob > 0;
 	# $fi_file gets appended over iters
 	qx(echo -e "#id\tfrom\tto\tscore" > $fc_file); # create file with header
