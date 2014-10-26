@@ -197,7 +197,9 @@ $L->logdie("Unknown format of reference file: $opt{reads}") unless $rpr;
 
 
 
-Sam::Seq->Trim(0);
+Sam::Seq->Trim(1);
+Sam::Seq->InDelTaboo(0.001);
+
 Sam::Seq->PhredOffset(33);
 
 
