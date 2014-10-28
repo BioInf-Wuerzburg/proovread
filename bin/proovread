@@ -1966,7 +1966,7 @@ sub read_long{
 
 	my $lrpw;
 
-        my $no_css;
+        my $noccs;
         
 	foreach(@$opt_lr_file){
 		
@@ -1994,7 +1994,7 @@ sub read_long{
 			open(IGNORE, '>>', $fi_file) or $VS->exit($!." $fi_file");
 			while(my $lr = $lrpr->next_seq){
                             	unless( my($id,$range) = $lr->id =~ m!^(m[^/]+/\d+)/(\d+_\d+)!){
-                                    $no_css++;
+                                    $noccs++;
                                 }
 
                                 if(length($lr->seq) < 2*$min_sr_length){
@@ -2028,7 +2028,7 @@ sub read_long{
 				
 				while(my $lr = $lrpr->next_seq){
                                     	unless( my($id,$range) = $lr->id =~ m!^(m[^/]+/\d+)/(\d+_\d+)!){
-                                            $no_css++;
+                                            $noccs++;
                                         }
 
                                         if(exists $lr{$lr->id}){
@@ -2046,7 +2046,7 @@ sub read_long{
 				open(IGNORE, '>>', $fi_file) or $VS->exit($!." $fi_file");
 				while(my $lr = $lrpr->next_seq){
                                     	unless( my($id,$range) = $lr->id =~ m!^(m[^/]+/\d+)/(\d+_\d+)!){
-                                            $no_css++;
+                                            $noccs++;
                                         }
 
                                         if(length($lr->seq) < 2*$min_sr_length){
@@ -2089,8 +2089,11 @@ sub read_long{
                    '--phred-offset' => 33,
                   );
 
-        if($no_css && grep{$_ =~ /ccs/}@TASKS){
-            $VS->exit("\nRead ids don't look like proper PacBio subread ids.\nUse 'no-ccs' mode for non-subread data.");
+        if($opt_mode !~ /noccs/ &&$noccs && grep{$_ =~ /ccs/}@TASKS){
+            $opt_mode =~ s/^([^-]+)/$1-noccs/; 
+            $VS->verbose("Read IDs don't look like proper PacBio subread IDs.\nFalling back to running mode: $opt_mode");
+            $V->exit("unknown mode $opt_mode") unless exists $cfg{'mode-tasks'}{$opt_mode};
+            @TASKS = @{$cfg{'mode-tasks'}{$opt_mode}};
         }
         
         return \@lr_idxs;
