@@ -37,10 +37,11 @@ use Time::HiRes qw(usleep);
 use Data::Dumper;
 $Data::Dumper::Sortkeys = 1;
 
-our $VERSION = '2.01';
+our $VERSION = '2.02';
 
 my $RealLib = "$RealBin/../lib/";
 my $RealPerl = "perl -I${RealLib} $RealBin";
+
 =head1 NAME
 
 proovread
@@ -176,12 +177,11 @@ $opt{'s|short-reads=s@'} = \(my $opt_sr_file = cfg('short-reads') || []);
 
 =item -u, --unitigs=<PATHNAME>
 
-High confidence unitigs to use for correction. Can be specified
-multiple times.
+High confidence unitigs to use for correction. Can be specified multiple times.
 
 =cut
 
-$opt{'u|unitigs=s@'} = \(my $opt_utg_file = cfg('unitigs'));
+$opt{'u|unitigs=s@'} = \(my $opt_utg_file = cfg('unitigs') || []);
 
 =item [-p, --prefix=<STRING>]
 
@@ -222,7 +222,9 @@ $opt{'m|mode=s'} = \(my $opt_mode= cfg('mode'));
 
 External SAM file to compute corrected consensus sequences from. Provide as
  input instead of --long-reads/--short-reads. Automatically sets --mode to
- 'external-sam'.  =cut
+ 'external-sam'.
+
+=cut
 
 $opt{'sam=s'} = \(my $opt_sam_file = cfg('sam'));
 
@@ -317,8 +319,12 @@ if(defined $opt_sample){
         $opt_lr_file = ["$RealBin/../sample/Ec-pb.fq"];
         $opt_sr_file = ["$RealBin/../sample/Ec-il-sim50X_1.fq"];
         $opt_sr_qv_offset = 64;
-        $opt_prefix = 'pr-Ec' unless $opt_prefix;
-
+        if($opt_sample =~ /uni|utg/i){
+            $opt_utg_file = ["$RealBin/../sample/EcGen-ctg-rand.fa"];
+            $opt_prefix = 'pr-Ec-utg' unless $opt_prefix;
+        }else{
+            $opt_prefix = 'pr-Ec' unless $opt_prefix;
+        }
     }else{
         $opt_lr_file = ["$RealBin/../sample/F.antasticus_long_error.fq"]; #
 	$opt_sr_file = ["$RealBin/../sample/F.antasticus_short.fq"]; #
@@ -561,14 +567,14 @@ if($opt_utg_file && @$opt_utg_file){
 	
 			# length		
 			($or_length, $or_length_dev) = $fp->guess_seq_length;
-			$V->verbose(sprintf("Estimating short read length: %d +-%d", $or_length, $or_length_dev));
+			$V->verbose(sprintf("Estimating fragment length: %d +-%d", $or_length, $or_length_dev));
 	
                         # dont really care about length
 			# dont care about offset
 
 			# count
 			$or_count = $fp->guess_seq_count();
-			$V->verbose(sprintf("Estimating approximate number of short reads: %s", Verbose->Humanize($or_count)));
+			$V->verbose(sprintf("Estimating approximate number of fragments: %s", Verbose->Humanize($or_count)));
 	
 			
 		}else{
@@ -605,22 +611,32 @@ my @TASKS;
 my $TC = -1;
 my $TASK; # current task
 
+if($opt_utg_file && @$opt_utg_file){
+    unless($opt_mode =~ /utg$/){
+        $opt_mode.="-utg";
+    }
+}
+
 if($opt_sam_file){
-	$opt_mode = 'external-sam';
-	@TASKS = @{$cfg{'mode-tasks'}{$opt_mode}};
+    $opt_mode = 'external-sam';
+    $V->exit("unknown mode $opt_mode") unless exists $cfg{'mode-tasks'}{$opt_mode};
+    @TASKS = @{$cfg{'mode-tasks'}{$opt_mode}};
 }else{
-	unless($opt_mode){
-		if($min_sr_length > 260){
-			$opt_mode = 'pacbio-ccs';
-			@TASKS = @{$cfg{'mode-tasks'}{$opt_mode}};
-		}else{
-			$opt_mode = 'bwa-pre';
-			@TASKS = @{$cfg{'mode-tasks'}{$opt_mode}};
-		}
-	}else{
-		#print $opt_mode;
-		@TASKS = @{$cfg{'mode-tasks'}{$opt_mode}};
-	}
+    unless($opt_mode){
+        if($min_sr_length > 260){
+            $opt_mode = 'progressive';
+            $V->exit("unknown mode $opt_mode") unless exists $cfg{'mode-tasks'}{$opt_mode};
+            @TASKS = @{$cfg{'mode-tasks'}{$opt_mode}};
+        }else{
+            $opt_mode = 'progressive';
+            $V->exit("unknown mode $opt_mode") unless exists $cfg{'mode-tasks'}{$opt_mode};
+            @TASKS = @{$cfg{'mode-tasks'}{$opt_mode}};
+        }
+    }else{
+        #print $opt_mode;
+        $V->exit("unknown mode $opt_mode") unless exists $cfg{'mode-tasks'}{$opt_mode};
+        @TASKS = @{$cfg{'mode-tasks'}{$opt_mode}};
+    }
 }
 
 # DIRTY FIX: mode unitigs w/o sr reads
@@ -914,12 +930,12 @@ $xf=1;
 		
 		$LR = undef;
 		
-	}elsif($TASK eq 'blasr-unitigs'){
+	}elsif($TASK eq 'blasr-utg'){
 
                 # unitigs means no sampling, coverage=1 and should be run on large bin size
 
                 Sam::Seq->MaxCoverage(1);
-		Sam::Seq->BinSize(cfg('unitig-bin-size'));
+		Sam::Seq->BinSize(cfg('utg-bin-size'));
 
                 run_blasr(			
 			or_files => $opt_utg_file,
@@ -930,6 +946,31 @@ $xf=1;
                                   ? task_file_name('.masked.fa', task => $TASKS[$TC-1] )
                                   : task_file_name('.fa', task => $TASKS[$TC-1] ),
 				'-nproc' => $opt_threads,
+			}
+		);
+                
+		$sam_chunk_offsets = create_sorted_sam();
+
+		$lr_chunk_offsets = correct_sr_mt($sam_chunk_offsets, $lr_chunk_offsets);
+		
+		$LR = undef;
+		
+	}elsif($TASK eq 'bwa-utg'){
+
+                # unitigs means no sampling, coverage=1 and should be run on large bin size
+
+                Sam::Seq->MaxCoverage(1);
+		Sam::Seq->BinSize(cfg('utg-bin-size'));
+
+                run_bwa(			
+			or_files => $opt_utg_file,
+                        bwa => {
+				cfg($TASK), # basic shrimp params from cfg
+				'log' => task_file_name(suffix => "_bwa.log"),
+				'ref' => $TC < 2
+                                  ? task_file_name('.masked.fa', task => $TASKS[$TC-1] )
+                                  : task_file_name('.fa', task => $TASKS[$TC-1] ),
+				'-t' => $opt_threads,
 			}
 		);
                 
@@ -1579,7 +1620,10 @@ sub run_blasr{
                 }
             }
                             
-
+            if($aln->qual eq "*"){
+                $aln->qual("?" x length($aln->seq));
+            }
+            
             if ($LR->{$aln->rname}->add_aln_by_score($aln)) {
                 $add_c++; 
                 $tsp->append_aln($aln);
@@ -1720,7 +1764,11 @@ sub run_bwa{
                     }
                 }
             }
-            
+
+            if($aln->qual eq "*" && $TASK =~ /utg$/){
+                $aln->qual("?" x length($aln->seq));
+            }
+
             # try to add aln, if sufficient score, add to temporary sam file
             if ($LR->{$aln->rname}->add_aln_by_score($aln)) {
                 $add_c++; 
@@ -2114,6 +2162,9 @@ sub correct_sr_mt{
                            '--ignore-hcr' => '',
 			  ) # params from config
 			: (),
+
+                ($TASK =~ /utg/) # calculate hcrs on first iter for second iter
+			? ('--qual-weighted' => '') : (),
 
 		($TASK eq 'read-sam') # calculate hcrs on first iter for second iter
 			? (@$opt_lr_file ? ()	: ('--ignore-hcr' => 1),
