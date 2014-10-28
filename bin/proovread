@@ -677,7 +677,7 @@ foreach my $task (@TASKS){
 				: 1 / ${$x}{'--chunk-step'};
 		}
 $xf=1;
-		Sam::Seq->MaxCoverage($opt_cov * $xf);
+		Sam::Seq->MaxCoverage($opt_cov * $xf * 0.7);
 		Sam::Seq->BinSize(cfg('bin-size'));
                 
 
@@ -704,7 +704,7 @@ $xf=1;
 				: 1 / ${$x}{'--chunk-step'};
 		}
 $xf=1;
-		Sam::Seq->MaxCoverage($opt_cov * $xf);
+		Sam::Seq->MaxCoverage($opt_cov * $xf * 0.7);
 		Sam::Seq->BinSize(cfg('bin-size'));
                
 
@@ -737,7 +737,7 @@ $xf=1;
 				: 1 / ${$x}{'--chunk-step'};
 		}
 $xf=1;
-		Sam::Seq->MaxCoverage($opt_cov * $xf);
+		Sam::Seq->MaxCoverage($opt_cov * $xf * 0.7);
 		Sam::Seq->BinSize(cfg('bin-size'));
 
 
@@ -811,7 +811,7 @@ $xf=1;
 				: 1 / ${$x}{'--chunk-step'};
 		}
 
-		Sam::Seq->MaxCoverage($opt_cov * $xf);
+		Sam::Seq->MaxCoverage($opt_cov * $xf * 0.7);
 		Sam::Seq->BinSize(cfg('bin-size'));
                     ##my $maco = $opt_cov * $xf;                   # for compare parameters with old versions
                     ##$VS->verbose( "--XF is $xf and $maco" ); 
@@ -853,7 +853,7 @@ $xf=1;
 				: 1 / ${$x}{'--chunk-step'};
 		}
 $xf=1;
-		Sam::Seq->MaxCoverage($opt_cov * $xf);
+		Sam::Seq->MaxCoverage($opt_cov * $xf * 0.7);
 		Sam::Seq->BinSize(cfg('bin-size'));
 
 		run_shrimp(			
@@ -884,7 +884,7 @@ $xf=1;
 				: 1 / ${$x}{'--chunk-step'};
 		}
 $xf=1;
-		Sam::Seq->MaxCoverage($opt_cov * $xf);
+		Sam::Seq->MaxCoverage($opt_cov * $xf * 0.7);
 		Sam::Seq->BinSize(cfg('bin-size'));
 
 
@@ -953,7 +953,7 @@ $xf=1;
 				: 1 / ${$x}{'--chunk-step'};
 		}
 
-		Sam::Seq->MaxCoverage($opt_cov * $xf);
+		Sam::Seq->MaxCoverage($opt_cov * $xf * 0.7);
 		Sam::Seq->BinSize(cfg('bin-size'));
 
 
@@ -1001,7 +1001,7 @@ $xf=1;
 				: 1 / ${$x}{'--chunk-step'};
 		}
 
-		Sam::Seq->MaxCoverage($opt_cov * $xf);
+		Sam::Seq->MaxCoverage($opt_cov * $xf * 0.7);
 		Sam::Seq->BinSize(cfg('bin-size'));
 
 		# cerate a unmasked reference for finish run
