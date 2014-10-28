@@ -311,15 +311,15 @@ Minimal expected short read length.
 
 $opt{'sr-min-length=s'} = \(my $opt_sr_min_length = 100);
 
-=item [--lcr-min-ratio=<FLOAT>] [.cfg]
+=item [--lcr-min-ratio=<FLOAT>] [0]
 
 Minimum length of unmasked nts between hcrs w/r/t --sr-min-length
 
 =cut
 
-$opt{'lcr-min-ratio=s'} = \(my $opt_lcr_min_ratio = $cfg{'lcr-min-ratio'});
+$opt{'lcr-min-ratio=s'} = \(my $opt_lcr_min_ratio = $cfg{'lcr-min-ratio'} || 0);
 
-=item [--lcr-end-ratio=<FLOAT>] [.cfg]
+=item [--lcr-end-ratio=<FLOAT>] [0]
 
 End mask/unmasked threshold. Read ends are either masked completely or 
  unmasked to --min-sr-length to allow new mappings. The value specifies the
@@ -327,15 +327,15 @@ End mask/unmasked threshold. Read ends are either masked completely or
 
 =cut
 
-$opt{'lcr-end-ratio=s'} = \(my $opt_lcr_end_ratio = $cfg{'lcr-end-ratio'});
+$opt{'lcr-end-ratio=s'} = \(my $opt_lcr_end_ratio = $cfg{'lcr-end-ratio'} || 0);
 
-=item [--hcr-min-ratio=<FLOAT>] [.9]
+=item [--hcr-min-ratio=<FLOAT>] [0]
 
 Minimum length of masked nts in hcrs
 
 =cut
 
-$opt{'hcr-min-ratio=s'} = \(my $opt_hcr_min_ratio = $cfg{'hcr-min-ratio'});
+$opt{'hcr-min-ratio=s'} = \(my $opt_hcr_min_ratio = $cfg{'hcr-min-ratio'} || 0);
 
 =item [--hcr-sticky-ratio=<FLOAT>] [.4]
 
@@ -744,7 +744,7 @@ sub detect_chimera{
 				
 				# use cigar to compute correct location of chimera coords on corrected seq.
 				# -I, +D
-				# get read cigar, eg 80M2D3M1IM4
+				# get read cigar, eg 80M2D3M
 				# /g remembers position even between multiple calls to while on same cigar
 				# hence we can just always add to %cigar outside the for loop
             while ($con->{cigar} =~ m/(\d+)(\w)/g && ($cigar{M}+$cigar{I} < $fr)) { 
