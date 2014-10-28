@@ -2112,44 +2112,37 @@ sub correct_sr_mt{
 	$V->nline;
 	$VS->verbose("Correcting Sequences (".@$sam_chunk_offsets." batches)");
 	
-	# pbc_correct.pl 
+	# sam2cns
 	my %pbc_default = (
-		'--sam' 		=> task_file_name(".sam"),
-		'--max-reads'	=> cfg('chunk-size'),
-		'--coverage'	=> $opt_cov,
-		'--append'		=> 1,
+		'--sam' => task_file_name(".sam"),
+		'--max-reads' => cfg('chunk-size'),
+		'--coverage' => $opt_cov,
+		'--append' => 1,
 		'--cfg'	=> $cfg || undef,		
 		'--mask-weak-reads' => cfg('mask-weak-reads', $TASK),
 		'--ignore-weak-reads' => cfg('ignore-weak-reads', $TASK), 
-
+                '--sr-min-length' => $min_sr_length,
+                '--max-ins-length' => cfg('max-ins-length', $TASK),
+                           
 		cfg('detect-chimera', $TASK) ? ('--detect-chimera' => '') : (), 
 		cfg('hcr-ignore', $TASK) ? ('--ignore-hcr' => '') : (),
 		 
 		@$opt_lr_file
-			? ('--ref' => task_file_name(".fq", task => $TASKS[$TC-1] ))
-			: (),
+			? ('--ref' => task_file_name(".fq", task => $TASKS[$TC-1] )) : (),
 			
-		$TASK =~ m/iter-1|pre-\d/ # calculate hcrs on first iter for second iter
-			? ('--sr-min-length' => $min_sr_length) # params from config
-			: ('--hcr-min-ratio' => 0), # deactivate on finish/sam
-			'--lcr-end-ratio' => cfg('lcr-end-ratio', $TASKS[$TC]),
-
-		($TASK =~ /-finish/) # calculate hcrs on first iter for second iter
+                ($TASK =~ /-finish/) # calculate hcrs on first iter for second iter
 			? (
                            '--max-ins-length' => 0,
                            '--no-use-ref-qual' => '',
                            '--ignore-hcr' => '',
-			  ) # params from config
+			  )
 			: (),
 
                 ($TASK =~ /utg/) # calculate hcrs on first iter for second iter
 			? ('--qual-weighted' => '') : (),
 
 		($TASK eq 'read-sam') # calculate hcrs on first iter for second iter
-			? (@$opt_lr_file ? ()	: ('--ignore-hcr' => 1),
- 				'--max-ins-length' => 0,
-			  ) # params from config
-			: (),
+			? (@$opt_lr_file ? () : ('--ignore-hcr' => 1)) : (),
 		
 	);
 	
