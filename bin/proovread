@@ -1962,12 +1962,14 @@ Read the pacbio long read file and create a new, indexed long read file,
 sub read_long{
 
 	$VS->verbose("Preparing long reads");
-
+        
 	# read fasta/fastq, write and sort by id
 	my %lr;
 
 	my $lrpw;
 
+        my $no_css;
+        
 	foreach(@$opt_lr_file){
 		
 		my $lrpr;
@@ -1993,7 +1995,11 @@ sub read_long{
 			my $stubby_count = 0;
 			open(IGNORE, '>>', $fi_file) or $VS->exit($!." $fi_file");
 			while(my $lr = $lrpr->next_seq){
-				if(length($lr->seq) < 2*$min_sr_length){
+                            	unless( my($id,$range) = $lr->id =~ m!^(m[^/]+/\d+)/(\d+_\d+)!){
+                                    $no_css++;
+                                }
+
+                                if(length($lr->seq) < 2*$min_sr_length){
 					$stubby_count++;
 					printf IGNORE "%s\t%s\n", $lr->id, "stubby";
 					next;
@@ -2023,7 +2029,11 @@ sub read_long{
 				$lrpr->phred_offset($po);
 				
 				while(my $lr = $lrpr->next_seq){
-					if(exists $lr{$lr->id}){
+                                    	unless( my($id,$range) = $lr->id =~ m!^(m[^/]+/\d+)/(\d+_\d+)!){
+                                            $no_css++;
+                                        }
+
+                                        if(exists $lr{$lr->id}){
 						$VS->exit('Non-unique long read id ('. $lr->id .') in '. $_);
 					}
 					# convert seq to lower case, allow HCRs in external-sam
@@ -2037,7 +2047,11 @@ sub read_long{
 				my $stubby_count = 0;
 				open(IGNORE, '>>', $fi_file) or $VS->exit($!." $fi_file");
 				while(my $lr = $lrpr->next_seq){
-					if(length($lr->seq) < 2*$min_sr_length){
+                                    	unless( my($id,$range) = $lr->id =~ m!^(m[^/]+/\d+)/(\d+_\d+)!){
+                                            $no_css++;
+                                        }
+
+                                        if(length($lr->seq) < 2*$min_sr_length){
 						$stubby_count++;
 						printf IGNORE "%s\t%s\n", $lr->id, "stubby";
 						next;
@@ -2076,8 +2090,12 @@ sub read_long{
                    '--lower-case' => '',
                    '--phred-offset' => 33,
                   );
+
+        if($no_css && grep{$_ =~ /ccs/}@TASKS){
+            $VS->exit("\nRead ids don't look like proper PacBio subread ids.\nUse 'no-ccs' mode for non-subread data.");
+        }
         
-	return \@lr_idxs;
+        return \@lr_idxs;
 }
 
 
