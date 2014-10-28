@@ -320,7 +320,7 @@ if(defined $opt_sample){
         $opt_sr_file = ["$RealBin/../sample/Ec-il-sim50X_1.fq"];
         $opt_sr_qv_offset = 64;
         if($opt_sample =~ /uni|utg/i){
-            $opt_utg_file = ["$RealBin/../sample/EcGen-ctg-rand.fa"];
+            $opt_utg_file = ["$RealBin/../sample/Ec-utg-rand.fa"];
             $opt_prefix = 'pr-Ec-utg' unless $opt_prefix;
         }else{
             $opt_prefix = 'pr-Ec' unless $opt_prefix;
@@ -611,33 +611,31 @@ my @TASKS;
 my $TC = -1;
 my $TASK; # current task
 
-if($opt_utg_file && @$opt_utg_file){
-    unless($opt_mode =~ /utg$/){
-        $opt_mode.="-utg";
+if($opt_sam_file){
+    $opt_mode = 'sam';
+}else{
+    if(! $opt_mode or $opt_mode eq "auto"){
+        if(! $min_sr_length){
+            if($opt_utg_file && @$opt_utg_file){
+                $opt_mode ="utg";
+            }
+        }elsif($min_sr_length > 150){
+            $opt_mode = 'mr';
+        }else{
+            $opt_mode = 'sr';
+        }
+
+    }
+
+    if($opt_utg_file && @$opt_utg_file){
+        unless($opt_mode =~ /utg$/){
+            $opt_mode.="+utg";
+        }
     }
 }
 
-if($opt_sam_file){
-    $opt_mode = 'external-sam';
-    $V->exit("unknown mode $opt_mode") unless exists $cfg{'mode-tasks'}{$opt_mode};
-    @TASKS = @{$cfg{'mode-tasks'}{$opt_mode}};
-}else{
-    unless($opt_mode){
-        if($min_sr_length > 260){
-            $opt_mode = 'progressive';
-            $V->exit("unknown mode $opt_mode") unless exists $cfg{'mode-tasks'}{$opt_mode};
-            @TASKS = @{$cfg{'mode-tasks'}{$opt_mode}};
-        }else{
-            $opt_mode = 'progressive';
-            $V->exit("unknown mode $opt_mode") unless exists $cfg{'mode-tasks'}{$opt_mode};
-            @TASKS = @{$cfg{'mode-tasks'}{$opt_mode}};
-        }
-    }else{
-        #print $opt_mode;
-        $V->exit("unknown mode $opt_mode") unless exists $cfg{'mode-tasks'}{$opt_mode};
-        @TASKS = @{$cfg{'mode-tasks'}{$opt_mode}};
-    }
-}
+$V->exit("unknown mode $opt_mode") unless exists $cfg{'mode-tasks'}{$opt_mode};
+@TASKS = @{$cfg{'mode-tasks'}{$opt_mode}};
 
 # DIRTY FIX: mode unitigs w/o sr reads
 $min_sr_length = 200 unless $min_sr_length;
