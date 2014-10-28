@@ -101,13 +101,13 @@ $V->exit("An error ocuured while processing the config file: $@") if $@; # captu
 
 =item [--create-cfg=<CFGFILENAME>] [<CWD>/proovread_cfg.pm]
 
-Create a custom config file. Unless you provide a PATHNAME, defaults to 
- CWD/proovread.cfg. Does not run the pipeline. The custom config file 
- can be modified/renamed and supplied to the pipeline using -c/--cfg. The
- config file is optional, supercedes default parameters, but has lower 
- priority than command line options. The config fall also allows control
- of advanced options, not available via command line. For details, create
- a config file and have a look at its header section.
+Create a custom config file. Unless you provide a PATHNAME, defaults to
+ CWD/proovread.cfg. Does not run the pipeline. The custom config file can be
+ modified/renamed and supplied to the pipeline using -c/--cfg. The config file
+ is optional, supercedes default parameters, but has lower priority than command
+ line options. The config fall also allows control of advanced options, not
+ available via command line. For details, create a config file and have a look
+ at its header section.
 
 =item [-c, --cfg]
 
@@ -148,25 +148,23 @@ $opt{'c|cfg=s'} = \$cfg;
 
 =item -l, --long-reads=<PATHNAME>
 
-Pacbio reads file to correct. FASTA or FASTQ format. To correct
- mulitple files at once, provide parameter mulitple times.
- 
+Pacbio reads file to correct. FASTA or FASTQ format. To correct mulitple files
+ at once, provide parameter mulitple times.
+
   -l cell1 -l cell2 ... # correct 2 cells at once
 
 =cut
 
-$opt{'l|long-reads=s@'} = \(my $opt_lr_file = cfg('long-reads'));
+$opt{'l|long-reads=s@'} = \(my $opt_lr_file = cfg('long-reads') || []);
 
 =item -s, --short-reads=<PATHNAME>
 
-High confidence short reads file used for correction in FASTQ or
- FASTA format.
-To correct with mulitple files at once, provide parameter mulitple
+High confidence short reads file used for correction in FASTQ or FASTA
+ format. To correct with mulitple files at once, provide parameter mulitple
  times.
 
-NOTE: If multiple libraries are provided, they need to be of the 
- same format (FASTA or FASTQ) and quality offset (33,64...)
- respectively.
+NOTE: If multiple libraries are provided, they need to be of the same format
+ (FASTA or FASTQ) and quality offset (33,64...)  respectively.
 
   -s lib1 -s lib2 # use reads from to libraries for correction
 
@@ -174,7 +172,7 @@ NOTE: If multiple libraries are provided, they need to be of the
 
 
 
-$opt{'s|short-reads=s@'} = \(my $opt_sr_file = cfg('short-reads'));
+$opt{'s|short-reads=s@'} = \(my $opt_sr_file = cfg('short-reads') || []);
 
 =item -u, --unitigs=<PATHNAME>
 
@@ -203,8 +201,8 @@ $opt{'coverage=s'} = \(my $opt_cov = cfg('coverage'));
 
 =item [-t, --threads] [8]
 
-Number of threads to use for mapping. Defaults to 8 (or maximum available 
- number of processors, if kess than 8 availabe).
+Number of threads to use for mapping. Defaults to 8 (or maximum available number
+ of processors, if kess than 8 availabe).
 
 =cut
 
@@ -212,38 +210,36 @@ $opt{'t|threads=i'} = \(my $opt_threads = cfg('threads'));
 
 =item [-m, --mode] [auto]
 
-Running mode of the pipeline, accepted values are 
- 'pacbio-iterative', 'pacbio-ccs', 'external-sam'. By default, the
- most appropriate mode is choosen based on the provided input data.
- See manual for further information. 
+Running mode of the pipeline, accepted values are 'pacbio-iterative',
+ 'pacbio-ccs', 'external-sam'. By default, the most appropriate mode is choosen
+ based on the provided input data.  See manual for further information.
 
 =cut
 
-$opt{'m|mode=s'} = \(my $opt_mode);
+$opt{'m|mode=s'} = \(my $opt_mode= cfg('mode'));
 
 =item [--sam] [8]
 
-External SAM file to compute corrected consensus sequences from. 
- Provide as input instead of --long-reads/--short-reads. Automatically
- sets --mode to 'external-sam'.
- 
-=cut
+External SAM file to compute corrected consensus sequences from. Provide as
+ input instead of --long-reads/--short-reads. Automatically sets --mode to
+ 'external-sam'.  =cut
 
 $opt{'sam=s'} = \(my $opt_sam_file = cfg('sam'));
 
 =item [--lr-qv-offset=<INT>]
 
 Required if you use --sam and --long together and the phred offset cannot be
- determined automatically from --long read file.
- 
+determined automatically from --long read file.
+
 =cut
 
 $opt{'lr-qv-offset=i'} = \(my $opt_lr_qv_offset = cfg('lr-qv-offset'));
 
 =item [--sr-qv-offset=<INT>]
 
-Required if phred offset cannot be determined automatically from --short read file.
- 
+Required if phred offset cannot be determined automatically from --short read
+file.
+
 =cut
 
 $opt{'sr-qv-offset=i'} = \(my $opt_sr_qv_offset = cfg('sr-qv-offset'));
@@ -251,9 +247,9 @@ $opt{'sr-qv-offset=i'} = \(my $opt_sr_qv_offset = cfg('sr-qv-offset'));
 
 =item [--sort-sam-by-coordinates] [OFF]
 
-Sort the filtered SAM files by coordinates in addition to the 
- sorting of references. This has no effect on the pipeline, just 
- a convenience if you need the files for something else.
+Sort the filtered SAM files by coordinates in addition to the sorting of
+ references. This has no effect on the pipeline, just a convenience if you need
+ the files for something else.
 
 =cut
 
@@ -270,8 +266,8 @@ $opt{'keep-temporary-files+'} = \(my $opt_keep = cfg('keep-temporary-files'));
 
 =item [--ignore-sr-length]
 
-Since the pipeline is designed to use short reads for correction, it stops
- in case an average short read length above 700bp has been estimated. Set 
+Since the pipeline is designed to use short reads for correction, it stops in
+ case an average short read length above 700bp has been estimated. Set
  C<--ignore-sr-length> to omit this test.
 
 =cut
