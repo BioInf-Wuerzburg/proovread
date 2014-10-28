@@ -774,46 +774,7 @@ $xf=1;
 
 ############################################################################
 
-	}elsif($TASK eq 'shrimp-pre-1'){
-
-		# configure Sam::Seq
-		my $xf=1;
-		if(my $x = cfg('sr-sampling',$TASK)){ # adjust if sampling
-			$xf = exists ${$x}{'--chunks-per-step'} 
-				? ${$x}{'--chunks-per-step'} / ${$x}{'--chunk-step'}
-				: 1 / ${$x}{'--chunk-step'};
-		}
-
-		Sam::Seq->MaxCoverage($opt_cov * $xf);
- 		Sam::Seq->BinSize(cfg('bin-size'));
-##                my $maco = $opt_cov * $xf;                           # for compare parameters with old versions
-##                $VS->verbose( "--XF is $xf and $maco" );
-
-		run_shrimp(
-			sr_files => $opt_sr_file,
-			sr_sampling => cfg('sr-sampling', $TASK),
-#			($sr_count_total > 1_000_000
-#				? (stop_after => $sr_count_total * cfg('sr-sampling', $TASK))
-#				: ()
-#			),
-			shrimp => {
-				cfg($TASK), # basic shrimp params from cfg
-				'verbose' => 1,
-				'log' => task_file_name(suffix => "_shrimp.log"),
-				'ref' => task_file_name('.masked.fa', task => $TASKS[$TC-1] ),
-				#'--al' => task_file_name(suffix => "_sr.fq"),
-				'--threads' => $opt_threads,
-				'--qv-offset' => $sr_qv_offset_total,
-			}
-		);
-	
-		$sam_chunk_offsets = create_sorted_sam();
-		
-		$lr_chunk_offsets = correct_sr_mt($sam_chunk_offsets, $lr_chunk_offsets);
-
-		$LR = undef;
-
-	}elsif($TASK =~ m/^shrimp-pre-[2-5]/){
+	}elsif($TASK =~ m/^shrimp-.*\d$/){
 
 		# configure Sam::Seq
 		my $xf=1;
