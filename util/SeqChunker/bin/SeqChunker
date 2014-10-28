@@ -1,0 +1,35 @@
+#!/bin/bash
+
+# Author:
+#   Frank Foerster, frank.foerster@biozentrum.uni-wuerzburg.de
+#   Simon Pfaff, simon.pfaff@stud-mail.uni-wuerzburg.de
+#   Thomas Hackl, thomas.hackl@uni-wuerzburg.de
+#
+# Last Modified: Thomas Hackl, 2014-09-10
+
+# Version 0.3 
+# reliable detect binary folder
+Bin="$(dirname "$(readlink -f "$0")")"
+
+# check if perl exists, than use the perl version
+if [ ! -z $(which perl) ]; then
+
+    perl "$Bin/SeqChunker-perl" $@
+
+else 
+    # use the bash only or the sed based version of SeqChunker
+
+    #SeqChunker-dd need Bash Version 4 or higher, fallback to slower sed version
+
+    VER=`bash --version | grep -Eo [0-9][.][0-9] | cut -d. -f1`
+
+    if [ "$VER" -ge 4 ]; then
+
+	bash "$Bin/SeqChunker-dd" $@
+    
+    else
+
+	bash "$Bin/SeqChunker-sed" $@
+	echo "#Bash Version older than 4.0, using SeqChunker-sed"
+    fi;
+fi;

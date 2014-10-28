@@ -1,3 +1,6 @@
 [submodule "util/SeqFilter"]
 	path = util/SeqFilter
-	url = git@132.187.22.105:/software/SeqFilter
+	url = https://github.com/BioInf-Wuerzburg/SeqFilter.git
+[submodule "util/SeqChunker"]
+	path = util/SeqChunker
+	url = https://github.com/BioInf-Wuerzburg/SeqChunker.git
