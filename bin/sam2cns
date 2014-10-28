@@ -378,6 +378,7 @@ Utilize reference qualities during consensus computation-
 
 $opt{'use-ref-qual!'} = \(my $opt_use_ref_qual = 1);
 
+$opt{'qual-weighted!'} = \(my $opt_qual_weighted = 0);
 
 $opt{'chimera-min-score'} = \(my $opt_chimera_min_score = 0);
 
@@ -703,7 +704,8 @@ sub generate_consensus{
 	my $con = $sso->consensus(
                                   #hcrs => \@hcrs,
                                   use_ref_qual => $opt_use_ref_qual,
-                                  ignore_coords => \@mcrs
+                                  ignore_coords => \@mcrs,
+                                  qual_weighted => $opt_qual_weighted,
                                  );
         if($debug){
             print $trh "$con";
