@@ -1558,7 +1558,7 @@ sub run_bwa{
     #  files
     $VS->verbose("Indexing Long reads");
     
-    my $bwa_index_cmd = "bwa index $p->{bwa}{ref} $p->{bwa}{ref} 2>$p->{bwa}{log}";
+    my $bwa_index_cmd = cfg('bwa-path')."bwa index $p->{bwa}{ref} $p->{bwa}{ref} 2>$p->{bwa}{log}";
     
     $VB->hline();
     $VB->verbose($bwa_index_cmd);
@@ -1604,7 +1604,7 @@ sub run_bwa{
             $reads = $or_file
         }
         
-        my $bwa_cmd = $pre_command."bwa mem @bwa_opts $p->{bwa}{ref} $reads 2>$p->{bwa}{log}";
+        my $bwa_cmd = $pre_command.cfg('bwa-path')."bwa mem @bwa_opts $p->{bwa}{ref} $reads 2>$p->{bwa}{log}";
 
         $VB->hline();
         $VB->verbose($bwa_cmd);
