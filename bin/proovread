@@ -37,7 +37,7 @@ use Time::HiRes qw(usleep);
 use Data::Dumper;
 $Data::Dumper::Sortkeys = 1;
 
-our $VERSION = '2.02';
+our $VERSION = '2.03';
 
 my $RealLib = "$RealBin/../lib/";
 my $RealPerl = "perl -I${RealLib} $RealBin";
@@ -738,9 +738,10 @@ $xf=1;
 		);
 
 		$sam_chunk_offsets = create_sorted_sam();
-
-		$lr_chunk_offsets = correct_sr_mt($sam_chunk_offsets, $lr_chunk_offsets);
-	
+                my $masked_frac;
+		($lr_chunk_offsets, $masked_frac) = correct_sr_mt($sam_chunk_offsets, $lr_chunk_offsets);
+                mask_shortcut_frac($masked_frac);
+                
 		$LR = undef;
 
 ############################################################################		
@@ -961,9 +962,12 @@ $xf=1;
 		
 		$sam_chunk_offsets = create_sorted_sam();
 
-		$lr_chunk_offsets = correct_sr_mt($sam_chunk_offsets, $lr_chunk_offsets);
-		
+                my $masked_frac;
+		($lr_chunk_offsets, $masked_frac) = correct_sr_mt($sam_chunk_offsets, $lr_chunk_offsets);
+                mask_shortcut_frac($masked_frac);
+                
 		$LR = undef;
+                
         }elsif($TASK =~ m/^ccs-\d+/){
             my $fqi = task_file_name('.fq', task => $TASKS[$TC-1]);
             my $fqo = task_file_name('.fq', task => $TASKS[$TC]);
@@ -975,15 +979,19 @@ $xf=1;
             my $ccs_mask = join(",", @ccs_mask );
 
             my $cmd = "$RealPerl/ccseq ".(cfg('debug') ? "--debug" : "")." --threads $opt_threads --pre $opt_prefix/$TASK <$fqi | tee $fqo | "
-              ."$RealPerl/SeqFilter --phred-offset 33 --phred-mask $ccs_mask --fasta --out $fmo --base-content N";
+              ."$RealPerl/SeqFilter --phred-offset 33 --phred-mask $ccs_mask --fasta --out $fmo --base-content N --tsv - --quiet";
             
             $VB->hline;
             $VB->verbose($cmd);
-            qx($cmd);
+            my $re = qx($cmd);
+            my ($bpt, $bpN) = (split(/\s/, $re))[1,6];
             $VB->hline;
-            
+        
             $V->exit("ccseq failed: $?\n") if $?;
-
+            $VB->nline;
+            $VS->verbose(sprintf "Masked: %0.1f%%", $bpN/$bpt*100);
+            $VB->nline;
+            
             $lr_chunk_offsets = chunk_index($fqo);
             
 	}else{
@@ -2040,8 +2048,6 @@ sub read_long{
 sub correct_sr_mt{
 	my ($sam_chunk_offsets, $lr_chunk_offsets) = @_;
 	
-	print $TASK,"\n";
-	
 	$V->nline;
 	$VS->verbose("Correcting Sequences (".@$sam_chunk_offsets." batches)");
 	
@@ -2186,17 +2192,21 @@ sub correct_sr_mt{
         $hcr_mask[2] = int(($hcr_mask[2] * $min_sr_length  / 100 ) +.5);
         $hcr_mask[3] = int(($hcr_mask[3] * $min_sr_length  / 100 ) +.5);
         my $hcr_mask = join(",", @hcr_mask );
-        my $cmd = "$RealPerl/SeqFilter $fq_file --out $fa_file --phred-offset 33 --phred-mask $hcr_mask --fasta --base-content N";
+        my $cmd = "$RealPerl/SeqFilter $fq_file --quiet --out $fa_file --phred-offset 33 --phred-mask $hcr_mask --fasta --base-content N --tsv -";
         
         $VB->hline;
         $VB->verbose($cmd);
-        qx($cmd);
+        my $re = qx($cmd);
+        my ($bpt, $bpN) = (split(/\s/, $re))[1,6];
         $VB->hline;
         
         $V->exit("SeqFilter failed to mask $fq_file: $?\n") if $?;
 
+        my $bpN_frac = $bpN/$bpt;
+        $VB->nline;
+        $VS->verbose(sprintf "Masked : %0.1f%%", $bpN/$bpt*100);
 	
-	return \@ref_idxs;
+	return wantarray ? (\@ref_idxs, $bpN_frac) : \@ref_idxs; # wantarray guarantees backward compatibility
 }
 
 =head2 file_name
@@ -2491,6 +2501,21 @@ sub cfg{
 		}
 	}
 	return $v;
+}
+
+sub mask_shortcut_frac{
+    my $mask_shortcut_frac = cfg('mask-shortcut-frac');
+    return if (! $mask_shortcut_frac || $TC >= @TASKS-2); # no need to check in second to last task
+    my ($masked_frac) = @_;
+    
+    if($masked_frac > $mask_shortcut_frac){
+        $VS->verbose("Masked more than ". $mask_shortcut_frac*100 ."% - skipping all but last iteration");
+        $V->nline;
+        splice(@TASKS, $TC+1, $#TASKS-$TC-1);
+    }else{
+        $VS->verbose("Masked less than ". $mask_shortcut_frac*100 ."% - continuing iterations");
+        $V->nline;
+    }
 }
 
 ################
