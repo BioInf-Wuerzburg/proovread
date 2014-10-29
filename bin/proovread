@@ -1207,8 +1207,9 @@ sub run_shrimp{
 	
 	# init shrimp handler
 	my $shrimp_ldx = Shrimp->new( 
-		%{$p->{shrimp}},
-		'--save' => task_file_name("_shrimp_idx"),
+                %{$p->{shrimp}},
+                bin => cfg('shrimp-path').'gmapper-ls',
+                '--save' => task_file_name("_shrimp_idx"),
 		'log' => task_file_name(suffix => "_shrimp_idx.log"),
 	);
 
@@ -1251,6 +1252,7 @@ sub run_shrimp{
 		# init shrimp handler
 		my $shrimp = Shrimp->new( 
 			%{$p->{shrimp}},
+                        bin => cfg('shrimp-path').'gmapper-ls',
 			'ref' => undef,
 			($p->{sr_sampling}
 				? (
