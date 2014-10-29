@@ -1,9 +1,6 @@
 [submodule "util/SeqFilter"]
 	path = util/SeqFilter
 	url = https://github.com/BioInf-Wuerzburg/SeqFilter.git
-[submodule "util/SeqChunker"]
-	path = util/SeqChunker
-	url = https://github.com/BioInf-Wuerzburg/SeqChunker.git
 [submodule "util/bwa"]
 	path = util/bwa
 	url = https://github.com/lh3/bwa.git
