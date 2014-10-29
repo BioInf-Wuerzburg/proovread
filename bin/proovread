@@ -1462,7 +1462,7 @@ sub run_blasr{
             push @blasr_opts, $k, $v if $k =~ /^-/;
         }
 
-        my $blasr_cmd = "blasr $or_file $p->{blasr}{ref} @blasr_opts -sam 2>$p->{blasr}{log}";
+        my $blasr_cmd = cfg('blasr-path')."blasr $or_file $p->{blasr}{ref} @blasr_opts -sam 2>$p->{blasr}{log}";
 
         $VB->hline();
         $VB->verbose($blasr_cmd);
