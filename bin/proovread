@@ -675,9 +675,10 @@ my $lr_bps_total;
 my $sam_chunk_offsets;
 my $estimated_coverage;
 
-foreach my $task (@TASKS){
-	$TASK = $task;
+while($TC < $#TASKS){
 	$TC++;
+        my $task = $TASK = $TASKS[$TC];
+
 	if($TASK eq 'read-sam'){
 		# configure Sam::Seq
 		my $xf=1;
