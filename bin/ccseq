@@ -95,6 +95,7 @@ my %def = (
            pre => '',
            threads => 1,
            bwa_opt => [qw(-a -e -k 9 -W 18 -w 300 -A 5 -B 11 -O 2,1 -E 4,3 -Y)],
+           bwa_path => '',
            #bwa_opt => [qw(-a -e -k 17 -W30 -w 300 -A 5 -B 11 -O 2,1 -E 4,3 -L 30)],
           );
 
@@ -108,6 +109,7 @@ GetOptions(                     # use %opt (Cfg) as defaults
                         threads=i
                         chunk_seqs=i
                         config|c=s{,}
+                        bwa_path|bwa-path=s
                         version|V!
                         debug|D!
                         help|h!
@@ -342,12 +344,12 @@ sub ccs_chunk{
     
     # index chunk
     $L->debug("Indexing chunk $srf");
-    my $bwa_index_cmd = "bwa index $srf $srf 2>$srf.idx.log";
+    my $bwa_index_cmd = ($opt{bwa_path} ? $opt{bwa_path}."/" : '')."bwa index $srf $srf 2>$srf.idx.log";
     $L->debug($bwa_index_cmd);
     qx($bwa_index_cmd);
     $L->logdie("bwa failed: $?\n", do { local $/; local @ARGV = ("$srf.idx.log") ; <> }) if $?;
     
-    $sam_cmd = "bwa mem -t $opt{threads} @{$opt{bwa_opt}} $srf $srf 2>$srf.bwa.log";
+    $sam_cmd = ($opt{bwa_path} ? $opt{bwa_path}."/" : '')."bwa mem -t $opt{threads} @{$opt{bwa_opt}} $srf $srf 2>$srf.bwa.log";
     
     $L->debug("Mapping chunk $srf");
     $L->debug($sam_cmd);
