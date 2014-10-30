@@ -300,6 +300,14 @@ Show this help.
 
 $opt{'h|help'} = \(my $opt_help);
 
+=item [-V, --version]
+
+Show this help.
+
+=cut
+
+$opt{'V|version'} = \(my $opt_version);
+
 =back
 
 =cut
@@ -313,6 +321,10 @@ $opt{'h|help'} = \(my $opt_help);
 # parse options, test files
 GetOptions(%opt) or pod2usage(1);
 $opt_help && pod2usage(1);
+if($opt_version){
+    print "proovread-", $VERSION,"\n";
+    exit(0);
+}
 
 if(defined $opt_sample){
     if($opt_sample =~ /^ec/i){
