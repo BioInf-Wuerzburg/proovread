@@ -85,14 +85,8 @@ my $VB = Verbose->new(
 
 
 
-
-=head1 OPTIONS
-
-=cut
-
-=over
-
-=cut
+##------------------------------------------------------------------------##
+## Config
 
 # load core defaults
 $VS->verbose("Reading core config");
@@ -100,21 +94,6 @@ my $cfg_core_file = "$RealBin/../proovread.cfg";
 my %cfg = do $cfg_core_file;
 $V->exit("An error ocuured while processing the config file: $@") if $@; # capture do errors on cfg
 
-=item [--create-cfg=<CFGFILENAME>] [<CWD>/proovread_cfg.pm]
-
-Create a custom config file. Unless you provide a PATHNAME, defaults to
- CWD/proovread.cfg. Does not run the pipeline. The custom config file can be
- modified/renamed and supplied to the pipeline using -c/--cfg. The config file
- is optional, supercedes default parameters, but has lower priority than command
- line options. The config fall also allows control of advanced options, not
- available via command line. For details, create a config file and have a look
- at its header section.
-
-=item [-c, --cfg]
-
-Custom config file.
-
-=cut
 
 # load user defaults and overwrite core
 my $cfg;
@@ -131,6 +110,7 @@ for(my $i=0; $i<@ARGV; $i++){
 	}
 }
 
+
 if($cfg){
 	unless(-e $cfg){
 		$VS->exit("Cannot find config file `$cfg`");
@@ -140,12 +120,20 @@ if($cfg){
 	$V->exit("An error ocuured while processing the config file: $@") if $@; # capture do errors on cfg
 }
 
+
+##----------------------------------------------------------------------------##
+## Options
+
 $VS->verbose("Reading command line options");
 
 # load cmd options and overwrite defaults
 my %opt;
 
-$opt{'c|cfg=s'} = \$cfg;
+=head1 OPTIONS
+
+=cut
+
+=over
 
 =item -l, --long-reads=<PATHNAME>
 
@@ -170,7 +158,6 @@ NOTE: If multiple libraries are provided, they need to be of the same format
   -s lib1 -s lib2 # use reads from to libraries for correction
 
 =cut
-
 
 
 $opt{'s|short-reads=s@'} = \(my $opt_sr_file = cfg('short-reads') || []);
@@ -199,10 +186,9 @@ Coverage cutoff for highest scoring mappings at each location.
 
 $opt{'coverage=s'} = \(my $opt_cov = cfg('coverage'));
 
-=item [-t, --threads] [8]
+=item [-t, --threads] [4]
 
-Number of threads to use for mapping. Defaults to 8 (or maximum available number
- of processors, if kess than 8 availabe).
+Number of threads to use for mapping.
 
 =cut
 
@@ -210,23 +196,38 @@ $opt{'t|threads=i'} = \(my $opt_threads = cfg('threads'));
 
 =item [-m, --mode] [auto]
 
-Running mode of the pipeline, accepted values are 'pacbio-iterative',
- 'pacbio-ccs', 'external-sam'. By default, the most appropriate mode is choosen
- based on the provided input data.  See manual for further information.
+Running mode of the pipeline, see README for details.
 
 =cut
 
 $opt{'m|mode=s'} = \(my $opt_mode= cfg('mode'));
 
-=item [--sam] [8]
+=item [--sam]
 
 External SAM file to compute corrected consensus sequences from. Provide as
- input instead of --long-reads/--short-reads. Automatically sets --mode to
- 'external-sam'.
+ input instead of --long-reads/--short-reads. Automatically sets --mode='sam'.
 
 =cut
 
 $opt{'sam=s'} = \(my $opt_sam_file = cfg('sam'));
+
+=item [--create-cfg=<CFGFILENAME>] [<CWD>/proovread_cfg.pm]
+
+Create a custom config file. Unless you provide a PATHNAME, defaults to
+ CWD/proovread.cfg. Does not run the pipeline. The custom config file can be
+ modified/renamed and supplied to the pipeline using -c/--cfg. The config file
+ is optional, supercedes default parameters, but has lower priority than command
+ line options. The config file allows control of advanced options, not available
+ via command line. For details, create a config file and have a look at its
+ header section.
+
+=item [-c, --cfg]
+
+Custom config file.
+
+=cut
+
+$opt{'c|cfg=s'} = \$cfg;
 
 =item [--lr-qv-offset=<INT>]
 
@@ -245,7 +246,6 @@ file.
 =cut
 
 $opt{'sr-qv-offset=i'} = \(my $opt_sr_qv_offset = cfg('sr-qv-offset'));
-
 
 =item [--sort-sam-by-coordinates] [OFF]
 
