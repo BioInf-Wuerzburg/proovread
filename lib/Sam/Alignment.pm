@@ -594,9 +594,9 @@ sub opt{
 		return $self->{opt} unless $tag;
 		return undef unless $self->{opt};
 		unless ($self->{_opt}){
-			while($self->{opt} =~ /(\w\w):(\w):([^\t]+)/g){
-				$self->{_opt}{$1} = [$2, $3];
-			};
+                    foreach(split("\t", $self->{opt})){
+                        $self->{_opt}{substr($_, 0, 2)} = [substr($_, 3, 1), substr($_, 5)];
+                    };
 		}
 	}
 	return undef unless exists $self->{_opt}{$tag};
