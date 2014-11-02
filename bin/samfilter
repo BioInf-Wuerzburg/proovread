@@ -1,0 +1,72 @@
+#!/usr/bin/env perl
+use warnings;
+use strict;
+
+use Log::Log4perl qw(:no_extra_logdie_message);
+use Log::Log4perl::Level;
+
+use FindBin qw($RealBin $Script);
+
+use Sam::Parser;
+use Sam::Alignment ':flags';
+
+use Fasta::Seq;
+
+##----------------------------------------------------------------------------##
+# Globals
+
+our $VERSION = 0.01;
+
+Log::Log4perl->init( \(q(
+        log4perl.rootLogger                     = INFO, Screen
+        log4perl.appender.Screen                = Log::Log4perl::Appender::Screen
+        log4perl.appender.Screen.stderr         = 1
+        log4perl.appender.Screen.layout         = PatternLayout
+        log4perl.appender.Screen.layout.ConversionPattern = [%d{yy-MM-dd HH:mm:ss}] [).$Script.q(] %m%n
+)));
+
+my $L = Log::Log4perl->get_logger();
+
+##----------------------------------------------------------------------------##
+# Main
+
+my $sp = Sam::Parser->new();
+
+my $qual_default = "?"; # use this quality if now quality is available
+
+my $primary_aln;
+
+while(my $h = $sp->next_header_line){ print $h };
+
+while (my $aln = $sp->next_aln()) {
+    # bwa outputs unmapped reads - ignore them
+    next if ($aln->{flag} & UNMAPPED);
+
+    # bwa does not report seq/qual for secondary alignments
+    # cache the primary aln, to restore seq/qual for secondaries if necessary
+    if (! ($aln->{flag} & SECONDARY_ALIGNMENT)) {
+        $primary_aln = $aln;
+    } else {
+        if ($aln->seq eq "*") { # restore secondary aln seq/qual
+            $L->logdie("SAM started with secondary alignment without seq/qual and without preceding primary alignment\n")
+                unless defined $primary_aln;
+                    
+            $L->logdie("Secondary alignment without seq/qual and without primary alignment\n$aln")
+                unless($aln->qname eq $primary_aln->qname);
+
+            if (($aln->{flag} & REVERSE_COMPLEMENT) !=  ($primary_aln->{flag} & REVERSE_COMPLEMENT)) {
+                $aln->seq(Fasta::Seq->Reverse_complement($primary_aln->seq));
+                $aln->qual(reverse $primary_aln->qual);
+            } else {
+                $aln->seq($primary_aln->seq);
+                $aln->qual($primary_aln->qual);
+            }
+        }
+    }
+
+    if ($aln->qual eq "*") {
+        $aln->qual($qual_default x length($aln->seq));
+    }
+
+    print "$aln";
+}
