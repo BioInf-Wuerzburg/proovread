@@ -674,7 +674,6 @@ make_path(@tmp_dirs);
 =cut
 
 
-my $LR;
 my @LR_IDS;
 my @LR_IDS_IGNORED;
 my $lr_chunk_offsets;
@@ -683,7 +682,6 @@ my @lr_length;
 my @lr_bps;
 my $sr_bps_total;
 my $lr_bps_total;
-my $sam_chunk_offsets;
 my $estimated_coverage;
 
 while($TC < $#TASKS){
@@ -718,21 +716,9 @@ $xf=1;
 
 	}elsif($TASK =~ m/^shrimp-.*\d$/){
 
-		# configure Sam::Seq
-		my $xf=1;
-		if(my $x = cfg('sr-sampling',$TASK)){ # adjust if sampling
-			$xf = exists ${$x}{'--chunks-per-step'} 
-				? ${$x}{'--chunks-per-step'} / ${$x}{'--chunk-step'}
-				: 1 / ${$x}{'--chunk-step'};
-		}
-
 		run_shrimp(
 			sr_files => $opt_sr_file,
 			sr_sampling => cfg('sr-sampling', $TASK),
-#			($sr_count_total > 1_000_000
-#				? (stop_after => $sr_count_total * cfg('sr-sampling', $TASK))
-#				: ()
-#			),
 			shrimp => {
 				cfg($TASK), # basic shrimp params from cfg
 				'verbose' => 1,
@@ -745,28 +731,12 @@ $xf=1;
 		);
 
 	        create_sorted_bam();
-                $sam_chunk_offsets = undef;
                 
                 my $masked_frac;
-		($lr_chunk_offsets, $masked_frac) = correct_sr_mt($sam_chunk_offsets, $lr_chunk_offsets);
+		($lr_chunk_offsets, $masked_frac) = correct_sr_mt($lr_chunk_offsets);
                 mask_shortcut_frac($masked_frac);
-                
-		$LR = undef;
-
-############################################################################		
-		
 		
 	}elsif($TASK eq 'shrimp-finish'){
-
-		# configure Sam::Seq
-		my $xf=1;
-		if(my $x = cfg('sr-sampling',$TASK)){ # adjust if sampling
-			$xf = exists ${$x}{'--chunks-per-step'} 
-				? ${$x}{'--chunks-per-step'} / ${$x}{'--chunk-step'}
-				: 1 / ${$x}{'--chunk-step'};
-		}
-$xf=1;
-
 		my $sr_finish_files;
 
 		$sr_finish_files = $opt_sr_file;
@@ -793,13 +763,9 @@ $xf=1;
 		
 		create_sorted_bam();
 
-		$lr_chunk_offsets = correct_sr_mt(undef, $lr_chunk_offsets);
-		
-		$LR = undef;
+		$lr_chunk_offsets = correct_sr_mt($lr_chunk_offsets);
 		
 	}elsif($TASK eq 'blasr-utg'){
-
-                # unitigs means no sampling, coverage=1 and should be run on large bin size
 
                 run_blasr(			
 			or_files => $opt_utg_file,
@@ -815,16 +781,9 @@ $xf=1;
                 
 		create_sorted_bam();
 
-		$lr_chunk_offsets = correct_sr_mt(undef, $lr_chunk_offsets);
-		
-		$LR = undef;
+		$lr_chunk_offsets = correct_sr_mt($lr_chunk_offsets);
 		
 	}elsif($TASK eq 'bwa-utg'){
-
-                # unitigs means no sampling, coverage=1 and should be run on large bin size
-
-                Sam::Seq->MaxCoverage(1);
-		Sam::Seq->BinSize(cfg('utg-bin-size'));
 
                 run_bwa(			
 			or_files => $opt_utg_file,
@@ -838,24 +797,11 @@ $xf=1;
 			}
 		);
                 
-		$sam_chunk_offsets = create_sorted_sam();
+		create_sorted_bam();
 
-		$lr_chunk_offsets = correct_sr_mt($sam_chunk_offsets, $lr_chunk_offsets);
-		
-		$LR = undef;
+		$lr_chunk_offsets = correct_sr_mt($lr_chunk_offsets);
 		
 	}elsif($TASK =~ m/^bwa-/){
-
-		# configure Sam::Seq
-		my $xf=1;
-		if(my $x = cfg('sr-sampling',$TASK)){ # adjust if sampling
-			$xf = exists ${$x}{'--chunks-per-step'} 
-				? ${$x}{'--chunks-per-step'} / ${$x}{'--chunk-step'}
-				: 1 / ${$x}{'--chunk-step'};
-		}
-
-		Sam::Seq->MaxCoverage($opt_cov * $xf * 0.7);
-		Sam::Seq->BinSize(cfg('bin-size'));
 
 		# cerate a unmasked reference for finish run
 		my $ref_file;
@@ -884,16 +830,12 @@ $xf=1;
 			}
 		);
 		
-		#$sam_chunk_offsets = create_sorted_sam();
+
                 create_sorted_bam();
 
-                $sam_chunk_offsets = undef;
-                
                 my $masked_frac;
-		($lr_chunk_offsets, $masked_frac) = correct_sr_mt($sam_chunk_offsets, $lr_chunk_offsets);
+		($lr_chunk_offsets, $masked_frac) = correct_sr_mt($lr_chunk_offsets);
                 mask_shortcut_frac($masked_frac);
-                
-		$LR = undef;
                 
         }elsif($TASK =~ m/^ccs-\d+/){
             my $fqi = task_file_name('.fq', task => $TASKS[$TC-1]);
@@ -1179,6 +1121,8 @@ sub run_shrimp{
                 $VB->hline();
                 qx($shrimp_cmd);
                 
+                $V->exit("shrimp failed: $?\n", do { local $/; local @ARGV = ("$shrimp_log") ; <> }) if $?;
+
 		$sr_file_c++;
 	}
 }
@@ -1332,62 +1276,6 @@ sub create_sorted_bam{
     $V->exit("samtools index failed: $?\n") if $?;
 
 }
-
-
-=head2 create_sorted_sam
-
-=cut
-
-sub create_sorted_sam{
-	my $opt_sam_out = task_file_name(".sam");
-	
-	$V->nline;
-	$VS->verbose("Creating filtered sam `$opt_sam_out`");
-	
-	open(OUT, '>',$opt_sam_out) or $VB->exit($!);
-	
-	my @lr_ids;
-	# header section
-	printf OUT ("\@HD\tVN:%s\tSO:%s\n", "unknown", "unknown");
-	foreach my $pb_id (@LR_IDS){
-		if (defined $LR->{$pb_id}){
-			push @lr_ids, $pb_id;
-			printf OUT ("\@SQ\tSN:%s\tLN:%s\n", $pb_id, $LR->{$pb_id}->len);
-		}else{
-			push @LR_IDS_IGNORED, $pb_id;
-			# $V->exit("Lost read $pb_id");
-		}
-	}
-	
-	@LR_IDS = @lr_ids;
-	
-	# header @PG
-	print OUT $PG_line;
-	
-	# init input stream parser progess bar	
-	my $pgb = Verbose::ProgressBar->new(size => scalar @LR_IDS);
-	
-	my @chunk_idxs;
-	# alignment section
-	my $pb_c = 0;
-	foreach my $pb_id (@LR_IDS){
-		push @chunk_idxs, tell(OUT) unless $pb_c % cfg('chunk-size');
-
-		foreach my $aln($LR->{$pb_id}->alns($opt_sort_sam_by_coords)){
-			# write to sam
-			print OUT "$aln";
-			# write to LR wise FASTQ
-		}
-		$pgb->update($pb_c);
-		$pb_c++;
-	}
-	$pgb->finish($pb_c);
-	
-	close OUT;
-	
-	return \@chunk_idxs;
-}
-
 
 
 
@@ -1549,23 +1437,32 @@ sub read_long{
 =cut
 
 sub correct_sr_mt{
-	my ($sam_chunk_offsets, $lr_chunk_offsets) = @_;
+	my ($lr_chunk_offsets) = @_;
 	
 	$V->nline;
 	$VS->verbose("Correcting Sequences (".@$lr_chunk_offsets." batches)");
 
-        # TODO: sam_chunk_offsets is obsolete when using BAM
-        
+        # TODO: no ref -> no lr_chunk_offsets;
+
         # TODO: --coverage needs to be adjusted coverage if there is no more tmp_sam
         # $opt_cov * $xf (sampling factor) * $cov_margin_factor
+
+		# # configure Sam::Seq
+		# my $xf=1;
+		# if(my $x = cfg('sr-sampling',$TASK)){ # adjust if sampling
+		# 	$xf = exists ${$x}{'--chunks-per-step'} 
+		# 		? ${$x}{'--chunks-per-step'} / ${$x}{'--chunk-step'}
+		# 		: 1 / ${$x}{'--chunk-step'};
+		# }
+
+		# Sam::Seq->MaxCoverage($opt_cov * $xf * 0.7);
+		# Sam::Seq->BinSize(cfg('bin-size'));
 
         # TODO: bin-size / utg-bin-size
         
 	# sam2cns
 	my %pbc_default = (
-		defined($sam_chunk_offsets)
-                           ? ('--sam' => task_file_name(".sam"))
-                           : ('--bam' => task_file_name(".bam")),
+                '--bam' => task_file_name(".bam"),
 		'--max-reads' => cfg('chunk-size'),
 		'--coverage' => $opt_cov,
 		'--append' => 1,
@@ -1604,9 +1501,6 @@ sub correct_sr_mt{
 		my %pbc_config = (
 			%pbc_default,
 			'--prefix'		=> task_file_name(".".$ci),
-			defined($sam_chunk_offsets) ?
-                                  ('--sam-offset' => $sam_chunk_offsets->[$ci])
-                                  : (), 
 			'--ref-offset' => $lr_chunk_offsets->[$ci],
 			'--qv-offset' => 33,
 		);
@@ -1623,7 +1517,7 @@ sub correct_sr_mt{
 	close CFG;
 	
 	# xarg cmds, capture stderr;
-        my $cns_bin = defined($sam_chunk_offsets) ? "sam2cns" : "bam2cns";
+        my $cns_bin = "bam2cns";
 
 	my $xgr;
 	open($xgr, "(cat $cfg_file | xargs -P $opt_threads -L 1 -t $RealPerl/$cns_bin) 2>&1 |")
