@@ -973,8 +973,11 @@ $xf=1;
 			}
 		);
 		
-		$sam_chunk_offsets = create_sorted_sam();
+		#$sam_chunk_offsets = create_sorted_sam();
+                create_sorted_bam();
 
+                $sam_chunk_offsets = undef;
+                
                 my $masked_frac;
 		($lr_chunk_offsets, $masked_frac) = correct_sr_mt($sam_chunk_offsets, $lr_chunk_offsets);
                 mask_shortcut_frac($masked_frac);
@@ -1561,7 +1564,7 @@ sub run_bwa{
              or_files => [],
              sr_sampling => 0,
              bwa => {},
-             tmp_sam => task_file_name("_tmp.sam"),
+             tmp_bam => task_file_name("_tmp.bam"),
              @_
             };
 	
@@ -1581,12 +1584,6 @@ sub run_bwa{
     qx($bwa_index_cmd);
     $V->exit("bwa failed: $?\n", do { local $/; local @ARGV = ("$p->{bwa}{log}") ; <> }) if $?;
     
-    # init temporary sam writer
-    my $tsp = Sam::Parser->new(
-                               file => $p->{tmp_sam},
-                               mode => '+>',
-                              );
-
     my $or_file_c = 0;
     my $pg_rsp;
     my $pg_step;
@@ -1618,79 +1615,13 @@ sub run_bwa{
             $reads = $or_file
         }
         
-        my $bwa_cmd = $pre_command.cfg('bwa-path')."bwa mem @bwa_opts $p->{bwa}{ref} $reads 2>$p->{bwa}{log}";
+        my $bwa_cmd = $pre_command.cfg('bwa-path')."bwa mem @bwa_opts $p->{bwa}{ref} $reads 2>$p->{bwa}{log} | $RealBin/samfilter | ".cfg('samtools-path')."samtools view -bS /dev/fd/0 >$p->{tmp_bam}" ;
 
         $VB->hline();
         $VB->verbose($bwa_cmd);
         $VB->hline();
+        qx($bwa_cmd);
 
-        open(my $bwa_oh, "-|", $bwa_cmd) or $VS->exit($!);                
-		
-        # init input stream parser
-        my $rsp = Sam::Parser->new(fh => $bwa_oh);
-		
-        # read the header and create $LR only on first short read file
-        if ($or_file_c == 0) {
-            # read SAM header
-            while (my %h = $rsp->next_header_line('SQ|PG')) {
-				# @PG
-                if ($h{tag} eq '@PG') {
-                    $PG_line = $h{raw};
-                    next;
-                }
-                $LR->{$h{'SN'}} = Sam::Seq->new(
-                                                id => $h{SN}, 
-                                                len => $h{LN},
-                                                sam => $tsp, # indexed sam file, containing aln data
-                                               );
-            }
-        }
-	
-        # read SAM alignment section
-        my $add_c = 0;
-        my $src_lib_sum = 0;
-        my $src = 0;
-        my $primary_aln;
-                                                
-        # create tmp sam
-        while (my $aln = $rsp->next_aln()) {
-            # bwa outputs unmapped reads - ignore them
-	    next if $aln->is_unmapped();
-
-            # bwa does not report seq/qual for secondary alignments
-            # cache the primary aln, to restore seq/qual for secondaries if necessary
-            if (! $aln->is_secondary_alignment) {
-                $primary_aln = $aln;
-            } else {
-                if ($aln->seq eq "*") { # restore secondary aln seq/qual
-                    $VS->exit("SAM started with secondary alignment without seq/qual and without preceding primary alignment\n")
-                        unless defined $primary_aln;
-                    
-                    $VS->exit("Secondary alignment without seq/qual and without primary alignment\n$aln")
-                        unless($aln->qname eq $primary_aln->qname);
-
-                    if($aln->is_reverse_complement !=  $primary_aln->is_reverse_complement){
-                        $aln->seq(Fasta::Seq->Reverse_complement($primary_aln->seq));
-                        $aln->qual(reverse $primary_aln->qual);
-                    }else{
-                        $aln->seq($primary_aln->seq);
-                        $aln->qual($primary_aln->qual);
-                    }
-                }
-            }
-
-            if($aln->qual eq "*" && $TASK =~ /utg$/){
-                $aln->qual("?" x length($aln->seq));
-            }
-
-            # try to add aln, if sufficient score, add to temporary sam file
-            if ($LR->{$aln->rname}->add_aln_by_score($aln)) {
-                $add_c++; 
-                $tsp->append_aln($aln);
-            }
-        }
-
-        close $bwa_oh;
         $V->exit("bwa failed: $?\n", do { local $/; local @ARGV = ("$p->{bwa}{log}") ; <> }) if $?;
 
         $or_file_c++;
@@ -1843,6 +1774,37 @@ sub run_bowtie2{
 		$bowtie2->finish;
 		$sr_file_c++;
 	}
+}
+
+
+=head2 create_sorted_bam
+
+=cut
+
+sub create_sorted_bam{
+    my $opt_bam = task_file_name("_tmp.bam");
+    my $opt_bam_out = task_file_name("");
+
+    $VS->nline;
+    $VS->verbose("Sorting BAM `$opt_bam_out.bam`");
+    
+    my $sam_sort_cmd = cfg('samtools-path')."samtools sort $opt_bam $opt_bam_out";
+    $VB->hline();
+    $VB->verbose($sam_sort_cmd);
+    $VB->hline();
+    qx($sam_sort_cmd);
+    $V->exit("samtools sort failed: $?\n") if $?;
+
+    $VS->nline;
+    $VS->verbose("Indexing BAM `$opt_bam_out`");
+
+    my $sam_index_cmd = cfg('samtools-path')."samtools index $opt_bam_out.bam";
+    $VB->hline();
+    $VB->verbose($sam_index_cmd);
+    $VB->hline();
+    qx($sam_index_cmd);
+    $V->exit("samtools index failed: $?\n") if $?;
+
 }
 
 
@@ -2064,11 +2026,13 @@ sub correct_sr_mt{
 	my ($sam_chunk_offsets, $lr_chunk_offsets) = @_;
 	
 	$V->nline;
-	$VS->verbose("Correcting Sequences (".@$sam_chunk_offsets." batches)");
+	$VS->verbose("Correcting Sequences (".@$lr_chunk_offsets." batches)");
 	
 	# sam2cns
 	my %pbc_default = (
-		'--sam' => task_file_name(".sam"),
+		defined($sam_chunk_offsets)
+                           ? ('--sam' => task_file_name(".sam"))
+                           : ('--bam' => task_file_name(".bam")),
 		'--max-reads' => cfg('chunk-size'),
 		'--coverage' => $opt_cov,
 		'--append' => 1,
@@ -2103,11 +2067,13 @@ sub correct_sr_mt{
 	my $pbc_cmds = '';
 	
 	# generate xargs statements foreach chunk
-	for(my $ci=0; $ci<@$sam_chunk_offsets; $ci++){
+	for(my $ci=0; $ci<@$lr_chunk_offsets; $ci++){
 		my %pbc_config = (
 			%pbc_default,
 			'--prefix'		=> task_file_name(".".$ci),
-			'--sam-offset' => $sam_chunk_offsets->[$ci], 
+			defined($sam_chunk_offsets) ?
+                                  ('--sam-offset' => $sam_chunk_offsets->[$ci])
+                                  : (), 
 			'--ref-offset' => $lr_chunk_offsets->[$ci],
 			'--qv-offset' => 33,
 		);
@@ -2124,14 +2090,16 @@ sub correct_sr_mt{
 	close CFG;
 	
 	# xarg cmds, capture stderr;
+        my $cns_bin = defined($sam_chunk_offsets) ? "sam2cns" : "bam2cns";
+
 	my $xgr;
-	open($xgr, "(cat $cfg_file | xargs -P $opt_threads -L 1 -t $RealPerl/sam2cns) 2>&1 |")
+	open($xgr, "(cat $cfg_file | xargs -P $opt_threads -L 1 -t $RealPerl/$cns_bin) 2>&1 |")
 		or $VS->exit($!);
 	
 	$VB->hline();
 	# 
 	my $bc;
-	my $bs = "Batch %d/".@$sam_chunk_offsets;
+	my $bs = "Batch %d/".@$lr_chunk_offsets;
 	while(<$xgr>){
 		chomp();
 		if ($_ =~ /^perl /){
