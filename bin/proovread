@@ -28,7 +28,6 @@ use Sam::Alignment 0.0 ':flags';
 use Sam::Seq 0.10;
 
 use Shrimp 0.08;
-use Bowtie2 0.01;
 
 use threads;
 use Thread::Queue;
@@ -845,54 +844,6 @@ $xf=1;
 		
 		$LR = undef;
 		
-	}elsif($TASK =~ m/^bowtie2-/){
-
-		# configure Sam::Seq
-		my $xf=1;
-		if(my $x = cfg('sr-sampling',$TASK)){ # adjust if sampling
-			$xf = exists ${$x}{'--chunks-per-step'} 
-				? ${$x}{'--chunks-per-step'} / ${$x}{'--chunk-step'}
-				: 1 / ${$x}{'--chunk-step'};
-		}
-
-		Sam::Seq->MaxCoverage($opt_cov * $xf * 0.7);
-		Sam::Seq->BinSize(cfg('bin-size'));
-
-
-		# cerate a unmasked reference for finish run
-		my $ref_file;
-		if($TASK =~ m/-finish$/){
-			$ref_file = task_file_name('.unmasked.fa', task => $TASKS[$TC-1] );
-
-                        seq_filter(
-                                   '--in' => task_file_name('.fq', task => $TASKS[$TC-1] ),
-                                   '--out' => task_file_name('.unmasked.fa', task => $TASKS[$TC-1] ),
-                                   '--fasta' => '',
-                                   '--quiet' => '',
-                                   '--phred-offset' => 33,
-                                  );
-		}else{
-			$ref_file = task_file_name('.masked.fa', task => $TASKS[$TC-1] )
-		}
-
-		run_bowtie2(
-			sr_files => $opt_sr_file,
-			bowtie2 => {
-				cfg($TASK), # basic task params from cfg
-				'ref' => $ref_file,
-				'--threads' => $opt_threads,
-				$sr_qv_offset_total == 64 
-					? ('--phred64' => '') 
-					: (),
-			}
-		);
-		
-		$sam_chunk_offsets = create_sorted_sam();
-
-		$lr_chunk_offsets = correct_sr_mt($sam_chunk_offsets, $lr_chunk_offsets);
-		
-		$LR = undef;
-
 	}elsif($TASK =~ m/^bwa-/){
 
 		# configure Sam::Seq
@@ -1350,153 +1301,6 @@ sub run_bwa{
     }
 }
 
-
-=head2 run_bowtie2
-
-=cut
-
-sub run_bowtie2{
-		my $p = {
-		sr_files => [],
-		bowtie2 => {},
-		tmp_sam => task_file_name("_tmp.sam"),
-		stop_after => 0,
-		@_
-	};
-	
-	$V->nline;
-	$VS->verbose("Running task ".$TASKS[$TC]);
-	
-	# Index genome file first and save projection for multiple short read
-	#  files
-	$VS->verbose("Indexing Long reads");
-	
-	# init bowtie2 handler
-	my $bowtie2 = Bowtie2->new( 
-		%{$p->{bowtie2}},
-		'log' => task_file_name(suffix => "_bowtie2_idx.log"),
-		'pre' => task_file_name("_bowtie2_idx"),
-	);
-
-	$bowtie2->bowtie2_build();
-
-	$VB->hline();
-	$VB->verbose($bowtie2->status());
-	my $stdout = $bowtie2->stdout();
-	$VB->verbose(join("", <$stdout>));
-	my $stderr = $bowtie2->stderr();
-	$VB->verbose(join("", <$stderr>));
-	$VB->hline();
-
-	$bowtie2->finish();
-
-	
-	# run bowtie2
-
-	# init temporary sam writer
-	my $tsp = $p->{ram_sam} ? undef : Sam::Parser->new(
-		file => $p->{tmp_sam},
-		mode => '+>',
-	);
-
-
-	my $sr_file_c = 0;
-	my $pg_rsp;
-	my $pg_step;
-	
-	### foreach sr file read mappings	
-	foreach my $sr_file (@{$p->{sr_files}}){
-
-		$pg_rsp = Verbose::ProgressBar->new(size => $sr_count[$sr_file_c]);
-		$pg_step = int(($sr_count[$sr_file_c]/10000)+0.5) || 1; # never be zero
-		
-		$VS->verbose("Mapping short reads `$sr_file`");
-
-		# init shrimp handler
-		$bowtie2->bowtie2( 
-			%{$p->{bowtie2}},
-			'ref' => undef,
-			'-x' => task_file_name("_bowtie2_idx"),
-			'-U' => $sr_file,
-		);
-
-		$VB->verbose($bowtie2->status); 
-
-		# init input stream parser
-		my $rsp = Sam::Parser->new(
-			fh => $bowtie2->stdout,
-		#	is => sub{! $_[0]->is(UNMAPPED)}
-		);
-		
-		# read the header and create $LR only on first short read file
-		if($sr_file_c == 0){
-			# read SAM header
-			while(my %h = $rsp->next_header_line('SQ|PG')){
-				# @PG
-				if($h{tag} eq '@PG'){
-					$PG_line = $h{raw};
-					next;
-				}
-				$LR->{$h{'SN'}} = Sam::Seq->new(
-					id => $h{SN}, 
-					len => $h{LN},
-					sam => $tsp,	# indexed sam file, containing aln data
-				);
-			}
-		}
-		
-		# read SAM alignment section
-		my $rsp_c = 0;
-		my $add_c = 0;
-		my $src_lib_sum = 0;
-		my $src = 0;
-		# shrimp log
-		my $slh = $bowtie2->stderr;
-		my $primary_aln;
-                
-		while(my $aln = $rsp->next_aln()){
-			next if $aln->rname() eq '*';
-
-                        # bwa does not report seq/qual for secondary alignments
-                        # cache the primary aln, to restore seq/qual for secondaries if necessary
-                        if (! $aln->is_secondary_alignment) {
-                            $primary_aln = $aln;
-                        } else {
-                            if ($aln->seq eq "*") { # restore secondary aln seq/qual
-                                $VS->exit("SAM started with secondary alignment without seq/qual and without preceding primary alignment\n")
-                                    unless defined $primary_aln;
-                                
-                                $VS->exit("Secondary alignment without seq/qual and without primary alignment\n$aln")
-                                    unless($aln->qname eq $primary_aln->qname);
-
-                                if($aln->is_reverse_complement !=  $primary_aln->is_reverse_complement){
-                                    $aln->seq(Fasta::Seq->Reverse_complement($primary_aln->seq));
-                                    $aln->qual(reverse $primary_aln->qual);
-                                }else{
-                                    $aln->seq($primary_aln->seq);
-                                    $aln->qual($primary_aln->qual);
-                                }
-                            }
-                        }
-
-                        # try to add aln, if sufficient score, add to temporary sam file
-			if($LR->{$aln->rname}->add_aln_by_score($aln)){
-				$add_c++; 
-				$tsp->append_aln($aln);
-			};
-			$rsp_c++;
-		}
-
-		$VB->hline();
-		my $stderr = $bowtie2->stderr();
-		$VB->verbose(join("", <$stderr>));
-		$VB->hline();
-
-		# finish shrimp run
-		$bowtie2->finish;
-		$sr_file_c++;
-	}
-}
 
 
 =head2 create_sorted_bam
@@ -2283,62 +2087,6 @@ sub correct_sr_st{
 	open($xgr, $pbc_cmds)
 		or $VB->exit($!);
 	
-}
-
-
-
-#=head2 coverage_tables
-#
-#=cut
-
-sub coverage_tables{
-	my $opt_fq_out = task_file_name("fq");
-	
-	# progess bar	
-	my $pgp = Verbose::ProgressBar->new(
-		size => scalar keys %$LR
-	);
-
-	$VB->verbose("Calculating exact coverage by score tables ".$opt_fq_out);
-
-	my $i=1;
-	while(my ($pb_id, $pb) = each %$LR){
-		my @COV;
-		my $ofh;
-		if($opt_fq_out eq '-'){
-			$ofh = \*STDOUT;
-		}else{
-			open($ofh, '>', task_file_name('_'.$i.'.tsv')) or $VB->exit($!);
-		}
-		foreach my $score_co(1..1000){
-			$pb->is(sub{ 
-				my $score = $_[0]->opt('AS');
-				return $score == $score_co
-			});
-			# add to previous cov
-			push @COV, [$pb->coverage];
-		}
-		print $ofh join("\t", @$_)."\n" for @COV;
-		close $ofh if $opt_fq_out ne '-';
-		
-		$pgp->update($i++);
-	}
-	$pgp->finish($i);
-
-
-	#printf $ofh ("\@%s\n%s\n+\n%s\n", $pb->consensus);
-	#my @cov = $pb->coverage;
-	#my @cov1 = grep{defined($_) && $_>0}@cov;
-	#
-	#print "#"x30, "\n";
-	#printf "%-8s %6.1f\n", 'Score:', $score_co; 
-	#next unless @cov;
-	##printf join(" ", @cov), "\n";
-	#printf "%-8s %6.1f%%\n", 'Covered:', (@cov1/$pb->len)*100,
-	#printf "%-8s %6.1f\n", 'Mean:', sum(@cov)/@cov;
-	#printf "%-8s %6.1f\n", 'Max:', max(@cov);
-	#printf "%-8s %6.1f\n", 'Cols:', scalar @cov;
-
 }
 
 
