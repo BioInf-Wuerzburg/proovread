@@ -802,9 +802,6 @@ $xf=1;
 
                 # unitigs means no sampling, coverage=1 and should be run on large bin size
 
-                Sam::Seq->MaxCoverage(1);
-		Sam::Seq->BinSize(cfg('utg-bin-size'));
-
                 run_blasr(			
 			or_files => $opt_utg_file,
                         blasr => {
@@ -817,9 +814,9 @@ $xf=1;
 			}
 		);
                 
-		$sam_chunk_offsets = create_sorted_sam();
+		create_sorted_bam();
 
-		$lr_chunk_offsets = correct_sr_mt($sam_chunk_offsets, $lr_chunk_offsets);
+		$lr_chunk_offsets = correct_sr_mt(undef, $lr_chunk_offsets);
 		
 		$LR = undef;
 		
@@ -1245,29 +1242,17 @@ sub run_blasr{
     my $p = {
              or_files => [],
              blasr => {},
-             tmp_sam => task_file_name("_tmp.sam"),
+             tmp_bam => task_file_name("_tmp.bam"),
              @_
             };
 	
     $V->nline;
     $VS->verbose("Running task ".$TASK);
 	
-
-    # init temporary sam writer
-    my $tsp = Sam::Parser->new(
-                               file => $p->{tmp_sam},
-                               mode => '+>',
-                              );
-
-
     my $or_file_c = 0;
-    my $pg_rsp;
-    my $pg_step;
 	
     ### foreach sr file read mappings	
     foreach my $or_file (@{$p->{or_files}}) {
-		
-        my $or_count_netto = $or_count[$or_file_c];
 		
         $VS->verbose("Mapping reads `$or_file`");
 
@@ -1276,77 +1261,15 @@ sub run_blasr{
             push @blasr_opts, $k, $v if $k =~ /^-/;
         }
 
-        my $blasr_cmd = cfg('blasr-path')."blasr $or_file $p->{blasr}{ref} @blasr_opts -sam 2>$p->{blasr}{log}";
+        my $blasr_cmd = cfg('blasr-path')."blasr $or_file $p->{blasr}{ref} @blasr_opts -sam 2>$p->{blasr}{log} | $RealBin/samfilter | ".cfg('samtools-path')."samtools view -bS /dev/fd/0 >$p->{tmp_bam}";
 
         $VB->hline();
         $VB->verbose($blasr_cmd);
         $VB->hline();
+        qx($blasr_cmd);
 
-        open(my $blasr_oh, "-|", $blasr_cmd) or $VS->exit($!);                
-		
-        # init input stream parser
-        my $rsp = Sam::Parser->new(fh => $blasr_oh);
-		
-        # read the header and create $LR only on first short read file
-        if ($or_file_c == 0) {
-            # read SAM header
-            while (my %h = $rsp->next_header_line('SQ|PG')) {
-				# @PG
-                if ($h{tag} eq '@PG') {
-                    $PG_line = $h{raw};
-                    next;
-                }
-                $LR->{$h{'SN'}} = Sam::Seq->new(
-                                                id => $h{SN}, 
-                                                len => $h{LN},
-                                                sam => $tsp, # indexed sam file, containing aln data
-                                               );
-            }
-        }
-	
-        # read SAM alignment section
-        my $add_c = 0;
-        my $src_lib_sum = 0;
-        my $src = 0;
-        my $primary_aln;
-        
-        # create tmp sam
-        while (my $aln = $rsp->next_aln()) {
-            # try to add aln, if sufficient score, add to temporary sam file
+        $V->exit("blasr failed: $?\n", do { local $/; local @ARGV = ("$p->{blasr}{log}") ; <> }) if $?;
 
-            # bwa does not report seq/qual for secondary alignments
-            # cache the primary aln, to restore seq/qual for secondaries if necessary
-            if (! $aln->is_secondary_alignment) {
-                $primary_aln = $aln;
-            } else {
-                if ($aln->seq eq "*") { # restore secondary aln seq/qual
-                    $VS->exit("SAM started with secondary alignment without seq/qual and without preceding primary alignment\n")
-                        unless defined $primary_aln;
-                                    
-                    $VS->exit("Secondary alignment without seq/qual and without primary alignment\n$aln")
-                        unless($aln->qname eq $primary_aln->qname);
-
-                    if($aln->is_reverse_complement !=  $primary_aln->is_reverse_complement){
-                        $aln->seq(Fasta::Seq->Reverse_complement($primary_aln->seq));
-                        $aln->qual(reverse $primary_aln->qual);
-                    }else{
-                        $aln->seq($primary_aln->seq);
-                        $aln->qual($primary_aln->qual);
-                    }
-                }
-            }
-                            
-            if($aln->qual eq "*"){
-                $aln->qual("?" x length($aln->seq));
-            }
-            
-            if ($LR->{$aln->rname}->add_aln_by_score($aln)) {
-                $add_c++; 
-                $tsp->append_aln($aln);
-            }
-        }
-
-        close $blasr_oh;
         $or_file_c++;
     }
 }
@@ -1832,6 +1755,7 @@ sub correct_sr_mt{
         # TODO: --coverage needs to be adjusted coverage if there is no more tmp_sam
         # $opt_cov * $xf (sampling factor) * $cov_margin_factor
 
+        # TODO: bin-size / utg-bin-size
         
 	# sam2cns
 	my %pbc_default = (
