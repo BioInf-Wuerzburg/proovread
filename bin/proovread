@@ -727,11 +727,6 @@ $xf=1;
 				: 1 / ${$x}{'--chunk-step'};
 		}
 
-		Sam::Seq->MaxCoverage($opt_cov * $xf * 0.7);
-		Sam::Seq->BinSize(cfg('bin-size'));
-                    ##my $maco = $opt_cov * $xf;                   # for compare parameters with old versions
-                    ##$VS->verbose( "--XF is $xf and $maco" ); 
-
 		run_shrimp(
 			sr_files => $opt_sr_file,
 			sr_sampling => cfg('sr-sampling', $TASK),
@@ -750,7 +745,9 @@ $xf=1;
 			}
 		);
 
-		$sam_chunk_offsets = create_sorted_sam();
+	        create_sorted_bam();
+                $sam_chunk_offsets = undef;
+                
                 my $masked_frac;
 		($lr_chunk_offsets, $masked_frac) = correct_sr_mt($sam_chunk_offsets, $lr_chunk_offsets);
                 mask_shortcut_frac($masked_frac);
@@ -759,37 +756,6 @@ $xf=1;
 
 ############################################################################		
 		
-		
-	}elsif($TASK eq 'shrimp-ccs'){
-
-		# configure Sam::Seq
-		my $xf=1;
-		if(my $x = cfg('sr-sampling',$TASK)){ # adjust if sampling
-			$xf = exists ${$x}{'--chunks-per-step'} 
-				? ${$x}{'--chunks-per-step'} / ${$x}{'--chunk-step'}
-				: 1 / ${$x}{'--chunk-step'};
-		}
-$xf=1;
-		Sam::Seq->MaxCoverage($opt_cov * $xf * 0.7);
-		Sam::Seq->BinSize(cfg('bin-size'));
-
-		run_shrimp(			
-			sr_files => $opt_sr_file,
-			shrimp => {
-				cfg($TASK), # basic shrimp params from cfg
-				'verbose' => 1,
-				'log' => task_file_name(suffix => "_shrimp.log"),
-				'ref' => task_file_name('.fa', task => $TASKS[$TC-1] ),
-				'--threads' => $opt_threads,
-				'--qv-offset' => $sr_qv_offset_total,
-			}
-		);
-		
-		$sam_chunk_offsets = create_sorted_sam();
-
-		$lr_chunk_offsets = correct_sr_mt($sam_chunk_offsets, $lr_chunk_offsets);
-		
-		$LR = undef;
 		
 	}elsif($TASK eq 'shrimp-finish'){
 
@@ -801,15 +767,12 @@ $xf=1;
 				: 1 / ${$x}{'--chunk-step'};
 		}
 $xf=1;
-		Sam::Seq->MaxCoverage($opt_cov * $xf * 0.7);
-		Sam::Seq->BinSize(cfg('bin-size'));
-
 
 		my $sr_finish_files;
 
 		$sr_finish_files = $opt_sr_file;
 	
-		# cerate a unmasked reference for finish run
+		# create a unmasked reference for finish run
 		seq_filter(
                            '--in' => task_file_name('.fq', task => $TASKS[$TC-1] ),
                            '--out' => task_file_name('.unmasked.fa', task => $TASKS[$TC-1] ),
@@ -829,9 +792,9 @@ $xf=1;
 			}
 		);
 		
-		$sam_chunk_offsets = create_sorted_sam();
+		create_sorted_bam();
 
-		$lr_chunk_offsets = correct_sr_mt($sam_chunk_offsets, $lr_chunk_offsets);
+		$lr_chunk_offsets = correct_sr_mt(undef, $lr_chunk_offsets);
 		
 		$LR = undef;
 		
@@ -1207,9 +1170,7 @@ sub run_shrimp{
 		sr_files => [],
 		sr_sampling => 0,
 		shrimp => {},
-		tmp_sam => task_file_name("_tmp.sam"),
-		# DEPRECATED: pre-SeqChunker
-		#stop_after => 0,
+		tmp_bam => task_file_name("_tmp.bam"),
 		@_
 	};
 	
@@ -1235,33 +1196,11 @@ sub run_shrimp{
 	# run shrimp
 	$shrimp_ldx->run->finish;
 
-	# init temporary sam writer
-	my $tsp = $p->{ram_sam} ? undef : Sam::Parser->new(
-		file => $p->{tmp_sam},
-		mode => '+>',
-	);
-
-
 	my $sr_file_c = 0;
-	my $pg_rsp;
-	my $pg_step;
 	
 	### foreach sr file read mappings	
 	foreach my $sr_file (@{$p->{sr_files}}){
 		
-		my $xf=1;
-		if(my $x=$p->{sr_sampling}){ # adjust if sampling
-			$xf = exists ${$x}{'--chunks-per-step'} 
-				? ${$x}{'--chunks-per-step'} / ${$x}{'--chunk-step'}
-				: 1 / ${$x}{'--chunk-step'};
-		}
-		my $sr_count_netto = int(($sr_count[$sr_file_c] * $xf)+0.5);
-		
-		# init input stream parser progess bar	
-		$pg_rsp = Verbose::ProgressBar->new(size => $sr_count_netto);
-		$pg_step = int(($sr_count_netto/10000)+0.5) || 1; # never be zero
-		
-	##	$VS->verbose("##MY COUNT IS $sr_count_netto $xf"); for comparison with older Versions
 		$VS->verbose("Mapping short reads `$sr_file`");
 
 		# init shrimp handler
@@ -1280,160 +1219,20 @@ sub run_shrimp{
 				)
 				: ('reads' => $sr_file)
 			),
-				
-			'log' => task_file_name("_shrimp_sr".$sr_file_c.".log"),
-			'--progress' => $pg_step,
 			'--load' => task_file_name("_shrimp_idx"),
 			'-s' => undef, # cannot specify seeds when loading genome
 		);
-	
-		$VB->hline();
-		$VB->verbose($shrimp->command());
-		$VB->hline();
-		
-		# run shrimp
-		$shrimp->run;
-	
-		# init input stream parser
-		my $rsp = Sam::Parser->new(
-			fh => $shrimp->oh
-		);
-		
-		# read the header and create $LR only on first short read file
-		if($sr_file_c == 0){
-			# read SAM header
-			while(my %h = $rsp->next_header_line('SQ|PG')){
-				# @PG
-				if($h{tag} eq '@PG'){
-					$PG_line = $h{raw};
-					next;
-				}
-				$LR->{$h{'SN'}} = Sam::Seq->new(
-					id => $h{SN}, 
-					len => $h{LN},
-					sam => $tsp,	# indexed sam file, containing aln data
-				);
-			}
-		}
-	
-		# read SAM alignment section
-		my $rsp_c = 0;
-		my $add_c = 0;
-		my $src_lib_sum = 0;
-		my $src = 0;
-		# shrimp log
-		my $slh = $shrimp->logh;
-                my $primary_aln;
+
+                my $shrimp_log = task_file_name("_shrimp_sr".$sr_file_c.".log");
+                my $shrimp_cmd = $shrimp->command()." 2>$shrimp_log | $RealBin/samfilter | ".cfg('samtools-path')."samtools view -bS /dev/fd/0 >$p->{tmp_bam}" ;
+
+                $VB->hline();
+                $VB->verbose($shrimp_cmd);
+                $VB->hline();
+                qx($shrimp_cmd);
                 
-		if($p->{ram_sam}){
-			while(my $aln = $rsp->next_aln()){
-
-                            # bwa does not report seq/qual for secondary alignments
-                            # cache the primary aln, to restore seq/qual for secondaries if necessary
-                            if (! $aln->is_secondary_alignment) {
-                                $primary_aln = $aln;
-                            } else {
-                                if ($aln->seq eq "*") { # restore secondary aln seq/qual
-                                    $VS->exit("SAM started with secondary alignment without seq/qual and without preceding primary alignment\n")
-                                        unless defined $primary_aln;
-                                    
-                                    $VS->exit("Secondary alignment without seq/qual and without primary alignment\n$aln")
-                                        unless($aln->qname eq $primary_aln->qname);
-
-                                    if($aln->is_reverse_complement !=  $primary_aln->is_reverse_complement){
-                                        $aln->seq(Fasta::Seq->Reverse_complement($primary_aln->seq));
-                                        $aln->qual(reverse $primary_aln->qual);
-                                    }else{
-                                        $aln->seq($primary_aln->seq);
-                                        $aln->qual($primary_aln->qual);
-                                    }
-                                }
-                            }
-
-				# try to add aln
-				$add_c++ if($LR->{$aln->rname}->add_aln_by_score($aln));
-				# monitor shrimp progress
-				unless($rsp_c% $pg_step){
-					seek($slh, -50, 2); # get, ..
-					read($slh, my $tail, 50); # .. read, .. 
-					# .. and parse last 50 chars of shrimp log for number of processed reads
-					($src) = $tail =~ /(\d+)\s+\S+\s+\S+\s*$/;
-					$pg_rsp->update($src) if defined $src; 
-				}
-				$rsp_c++;
-			}
-			
-			seek($slh, -1500, 2); # get, ..
-			read($slh, my $tail, 1500); # .. read, .. 
-			# .. and parse last 1500 chars of shrimp log for number of processed reads
-			my ($reads_matched) = $tail =~ /Reads Matched:\s+(\S+)/;
-			$reads_matched =~ tr/,//d;
-			push @sr_matched, $reads_matched;
-
-		}else{ # create tmp sam
-                        my $primary_aln;
-
-			while(my $aln = $rsp->next_aln()){
-                            # bwa does not report seq/qual for secondary alignments
-                            # cache the primary aln, to restore seq/qual for secondaries if necessary
-                            if (! $aln->is_secondary_alignment) {
-                                $primary_aln = $aln;
-                            } else {
-                                if ($aln->seq eq "*") { # restore secondary aln seq/qual
-                                    $VS->exit("SAM started with secondary alignment without seq/qual and without preceding primary alignment\n")
-                                        unless defined $primary_aln;
-                                    
-                                    $VS->exit("Secondary alignment without seq/qual and without primary alignment\n$aln")
-                                        unless($aln->qname eq $primary_aln->qname);
-
-                                    if($aln->is_reverse_complement !=  $primary_aln->is_reverse_complement){
-                                        $aln->seq(Fasta::Seq->Reverse_complement($primary_aln->seq));
-                                        $aln->qual(reverse $primary_aln->qual);
-                                    }else{
-                                        $aln->seq($primary_aln->seq);
-                                        $aln->qual($primary_aln->qual);
-                                    }
-                                }
-                            }
-                            
-                            
-                            # try to add aln, if sufficient score, add to temporary sam file
-                            if($LR->{$aln->rname}->add_aln_by_score($aln)){
-                                $add_c++; 
-                                $tsp->append_aln($aln);
-                            };
-                            # monitor shrimp progress
-                            unless($rsp_c% $pg_step){
-                                seek($slh, -50, 2); # get, ..
-                                read($slh, my $tail, 50); # .. read, .. 
-                                # .. and parse last 50 chars of shrimp log for number of processed reads
-                                ($src) = $tail =~ /(\d+)\s+\S+\s+\S+\s*$/;
-                                $pg_rsp->update($src) if defined $src; 
-                            }
-                            
-                            $rsp_c++;
-			}
-
-			seek($slh, -1500, 2); # get, ..
-			read($slh, my $tail, 1500); # .. read, .. 
-			# .. and parse last 1500 chars of shrimp log for number of processed reads
-			my ($reads_matched) = $tail =~ /Reads Matched:\s+(\S+)/ || 'NA';
-			$reads_matched =~ tr/,//d;
-			push @sr_matched, $reads_matched;
-			
-		}
-
-
-		# get final short read count of this file
-		$pg_rsp->finish($sr_count_netto);
-
-		# finish shrimp run
-		$shrimp->finish;
 		$sr_file_c++;
 	}
-
-#	$pg_rsp->finish($sr_count_total);
-	
 }
 
 =head2 run_blasr
@@ -2027,7 +1826,13 @@ sub correct_sr_mt{
 	
 	$V->nline;
 	$VS->verbose("Correcting Sequences (".@$lr_chunk_offsets." batches)");
-	
+
+        # TODO: sam_chunk_offsets is obsolete when using BAM
+        
+        # TODO: --coverage needs to be adjusted coverage if there is no more tmp_sam
+        # $opt_cov * $xf (sampling factor) * $cov_margin_factor
+
+        
 	# sam2cns
 	my %pbc_default = (
 		defined($sam_chunk_offsets)
