@@ -1461,19 +1461,18 @@ sub correct_sr_mt{
         # TODO: bin-size / utg-bin-size
         
 	# sam2cns
-	my %pbc_default = (
+	my %bam2cns_default = (
                 '--bam' => task_file_name(".bam"),
-		'--max-reads' => cfg('chunk-size'),
+		'--max-ref-seqs' => cfg('chunk-size'),
 		'--coverage' => $opt_cov,
 		'--append' => 1,
 		'--cfg'	=> $cfg || undef,		
 		'--mask-weak-reads' => cfg('mask-weak-reads', $TASK),
 		'--ignore-weak-reads' => cfg('ignore-weak-reads', $TASK), 
-                '--sr-min-length' => $min_sr_length,
                 '--max-ins-length' => cfg('max-ins-length', $TASK),
                            
 		cfg('detect-chimera', $TASK) ? ('--detect-chimera' => '') : (), 
-		cfg('hcr-ignore', $TASK) ? ('--ignore-hcr' => '') : (),
+		cfg('mcr-ignore', $TASK) ? ('--ignore-hcr' => '') : (),
 		 
 		@$opt_lr_file
 			? ('--ref' => task_file_name(".fq", task => $TASKS[$TC-1] )) : (),
@@ -1494,26 +1493,26 @@ sub correct_sr_mt{
 		
 	);
 	
-	my $pbc_cmds = '';
+	my $bam2cns_cmds = '';
 	
 	# generate xargs statements foreach chunk
 	for(my $ci=0; $ci<@$lr_chunk_offsets; $ci++){
-		my %pbc_config = (
-			%pbc_default,
+		my %bam2cns_config = (
+			%bam2cns_default,
 			'--prefix'		=> task_file_name(".".$ci),
 			'--ref-offset' => $lr_chunk_offsets->[$ci],
 			'--qv-offset' => 33,
 		);
 		
 		# params
-		$pbc_cmds.= param_join(\%pbc_config)."\n";
+		$bam2cns_cmds.= param_join(\%bam2cns_config)."\n";
 	}
 	
 	# write cmd file
 	
 	my $cfg_file = task_file_name(".cmds");
 	open(CFG, '>', $cfg_file) or $VS->exit($!);
-	print CFG $pbc_cmds;
+	print CFG $bam2cns_cmds;
 	close CFG;
 	
 	# xarg cmds, capture stderr;
@@ -1927,66 +1926,6 @@ sub mask_shortcut_frac{
         $V->nline;
     }
 }
-
-################
-## DEPRECATED ##
-################
-
-=pod
-
-#=head2 correct_sr_st
-#=cut
-#
-
-sub correct_sr_st{
-	my ($ref, $sam_out) = @_;
-	
-	# pbc_correct.pl 
-	my %pbc_default = (
-		'--sam' 		=> $sam_out,
-		'--coverage'	=> $opt_cov,
-		'--ref' 		=> undef,
-		'--prefix'		=> undef,
-		'--ignore-hcr'	=> 1,
-		'--append'		=> 1,
-		$cfg
-		 	? ('--cfg'	=> $cfg) 
-		 	: (),
-	);
-	
-	my @pbc_keys = sort keys %pbc_default;
-	
-	my $pbc_cmds = '';
-	
-	# generate cmd foreach chunk
-	my %pbc_config = (
-		%pbc_default,
-		'--prefix'		=> task_file_name(".".threads->tid()),
-		'--ref' 		=> $ref,
-	);
-	
-	# params
-	my @pbc_cmd;
-	foreach my $k (@pbc_keys){
-		my $v = $pbc_config{$k};
-		# flag only is undef or '', NOT '0' !!!
-		push @pbc_cmd, (defined($v) && $v ne '') ? ($k, $v) : $k;
-	}
-	$pbc_cmds = sprintf("perl $RealBin/sam2cns %s |",  join(" ", @pbc_cmd));
-	
-	$VB->hline;
-	$VB->verbose($pbc_cmds);
-	
-	my $xgr;
-	open($xgr, $pbc_cmds)
-		or $VB->exit($!);
-	
-}
-
-
-=cut
-
-
 
 
 
