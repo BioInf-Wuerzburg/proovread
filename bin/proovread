@@ -13,6 +13,7 @@ use lib "$RealBin/../lib/";
 use File::Basename;
 use File::Path qw(make_path remove_tree);
 use File::Copy;
+use File::Spec;
 
 use Verbose;
 use Verbose::ProgressBar;
@@ -204,11 +205,20 @@ $opt{'m|mode=s'} = \(my $opt_mode= cfg('mode'));
 =item [--sam]
 
 External SAM file to compute corrected consensus sequences from. Provide as
- input instead of --long-reads/--short-reads. Automatically sets --mode='sam'.
+ input instead of --short-reads. Automatically sets --mode=sam.
 
 =cut
 
 $opt{'sam=s'} = \(my $opt_sam_file = cfg('sam'));
+
+=item [--bam]
+
+External sorted BAM file to compute corrected consensus sequences from. Provide
+ as input instead of --short-reads. Automatically sets --mode=bam.
+
+=cut
+
+$opt{'bam=s'} = \(my $opt_bam_file = cfg('bam'));
 
 =item [--create-cfg=<CFGFILENAME>] [<CWD>/proovread_cfg.pm]
 
@@ -344,8 +354,11 @@ if(defined $opt_sample){
     }
 } 
 
-$opt_sam_file || (@$opt_lr_file && @$opt_sr_file) || (@$opt_lr_file && @$opt_utg_file) || pod2usage("Either --long-reads and --short-reads/--unitigs or --sam required");
-$opt_sam_file && ! -f $opt_sam_file && pod2usage("Cannot find sam file `$opt_sam_file`");
+@$opt_lr_file || pod2usage("--long-read file required");
+@$opt_sr_file || @$opt_utg_file || $opt_sam_file || $opt_bam_file ||
+  pod2usage("Either --short-reads, --unitigs or --sam/--bam  required");
+$opt_sam_file && ! -f $opt_sam_file && pod2usage("Cannot find SAM file `$opt_sam_file`");
+$opt_bam_file && ! -f $opt_bam_file && pod2usage("Cannot find BAM file `$opt_bam_file`");
 
 
 ##------------------------------------------------------------------------##
@@ -622,7 +635,9 @@ my @TASKS;
 my $TC = -1;
 my $TASK; # current task
 
-if($opt_sam_file){
+if($opt_bam_file){
+    $opt_mode = 'bam';
+}elsif($opt_sam_file){
     $opt_mode = 'sam';
 }else{
     if(! $opt_mode or $opt_mode eq "auto"){
@@ -688,24 +703,7 @@ while($TC < $#TASKS){
 	$TC++;
         my $task = $TASK = $TASKS[$TC];
 
-	if($TASK eq 'read-sam'){
-		# configure Sam::Seq
-		my $xf=1;
-		if(my $x = cfg('sr-sampling',$TASK)){ # adjust if sampling
-			$xf = exists ${$x}{'--chunks-per-step'} 
-				? ${$x}{'--chunks-per-step'} / ${$x}{'--chunk-step'}
-				: 1 / ${$x}{'--chunk-step'};
-		}
-$xf=1;
-		Sam::Seq->MaxCoverage($opt_cov * $xf * 0.7);
-		Sam::Seq->BinSize(cfg('bin-size'));
-                
-
-		$LR = read_sam();
-		$sam_chunk_offsets = create_sorted_sam();
-		$lr_chunk_offsets = correct_sr_mt($sam_chunk_offsets, $lr_chunk_offsets);
-		
-	}elsif($TASK eq 'read-long'){
+	if($TASK eq 'read-long'){
 		
 		# long read files
 		foreach(@$opt_lr_file){
@@ -714,7 +712,27 @@ $xf=1;
 		
 		$lr_chunk_offsets = read_long() if @$opt_lr_file; # 'external-sam does not require LR
 
-	}elsif($TASK =~ m/^shrimp-.*\d$/){
+        }elsif($TASK eq 'read-sam'){
+		read_sam();
+		create_sorted_bam();
+		$lr_chunk_offsets = correct_sr_mt($lr_chunk_offsets);
+
+        }elsif($TASK eq 'read-bam'){
+          	my $bam_file = task_file_name(".bam");
+                $opt_bam_file = File::Spec->rel2abs($opt_bam_file);
+          	qx(ln -s  $opt_bam_file $bam_file);
+                $? && $VS->exit("Failed to link $opt_bam_file");
+
+                my $sam_index_cmd = cfg('samtools-path')."samtools index $bam_file";
+                $VB->hline();
+                $VB->verbose($sam_index_cmd);
+                $VB->hline();
+                qx($sam_index_cmd);
+                $V->exit("samtools index failed: $?\n") if $?;
+
+		$lr_chunk_offsets = correct_sr_mt($lr_chunk_offsets);
+
+        }elsif($TASK =~ m/^shrimp-.*\d$/){
 
 		run_shrimp(
 			sr_files => $opt_sr_file,
@@ -968,83 +986,28 @@ sub read_sam{
 		file => $opt_sam_file
 	);
 	
-	# init input stream parser progess bar	
-	my $pg_rsp = Verbose::ProgressBar->new(
-		size => $rsp->fh
-	);
-	
-	my $tsp = Sam::Parser->new(
-		file => task_file_name(suffix => '_tmp.sam'),
-		mode => '+>',
-	);
-	
-	$VS->verbose("Reading sam file `$opt_sam_file`");
+	$VS->verbose("Reading SAM file `$opt_sam_file`");
 	
 	# read sam header
-	
 	while(my %h = $rsp->next_header_line('SQ|PG')){
-		$pg_rsp->update();
-		# @PG
-		if($h{tag} eq '@PG'){
-			$PG_line = $h{raw};
-			next;
-		}
-		$LR{$h{'SN'}} = Sam::Seq->new(
-			id => $h{SN}, 
-			len => $h{LN},
-			sam => $tsp,	# indexed sam file, containing aln data
-		);
-	}
-	
-	# make sure SAM had header with Ref names
-	$VS->exit('The SAM file needs to have a header with an reference sequence entry @SQ foreach reference sequence') 
-		unless keys %LR;
-	
-	# read sam file
-	my $rsp_c = 0;
-        my $primary_aln;
-
-	while(my $aln = $rsp->next_aln()){
-	    next if $aln->is_unmapped();
-            # make sure Ref Seq entry exists
-            $VS->exit('The SAM file needs to have a header with an reference sequence entry @SQ foreach reference sequence')
-                unless exists $LR{$aln->rname};
-
-            # bwa does not report seq/qual for secondary alignments
-            # cache the primary aln, to restore seq/qual for secondaries if necessary
-            if(! $aln->is_secondary_alignment){
-                $primary_aln = $aln;
-            }else{
-                if($aln->seq eq "*"){ # restore secondary aln seq/qual
-                    $VS->exit("SAM stxarted with secondary alignment without seq/qual and without preceding primary alignment\n")
-                        unless defined $primary_aln;
-                    
-                    $VS->exit("Secondary alignment without seq/qual and without primary alignment\n$aln")
-                        unless($aln->qname eq $primary_aln->qname);
-                    
-                    if($aln->is_reverse_complement !=  $primary_aln->is_reverse_complement){
-                        $aln->seq(Fasta::Seq->Reverse_complement($primary_aln->seq));
-                        $aln->qual(reverse $primary_aln->qual);
-                    }else{
-                        $aln->seq($primary_aln->seq);
-                        $aln->qual($primary_aln->qual);
-                    }
-                }
-            }
-
-            # try to add aln, if sufficient score, add to temporary sam file
-            if($LR{$aln->rname}->add_aln_by_score($aln)){
-                $rsp_c++;
-                $tsp->append_aln($aln);
-            };
-            $pg_rsp->update() unless $rsp_c%10000;
-	}
-	$pg_rsp->finish();
+            push @LR_IDS, $h{'SN'};
+        }
 	
 	@LR_IDS = sort byfile keys %LR;
+
+        my $bam_file = task_file_name("_tmp.bam");
+	$VS->verbose("Converting to BAM file `$bam_file`");
 	
-	return \%LR;
-	
+        my $bam_cmd = cfg('samtools-path')."samtools view -bS $opt_sam_file >".$bam_file;
+
+        $VB->hline();
+        $VB->verbose($bam_cmd);
+        $VB->hline();
+        qx($bam_cmd);
+
+        $V->exit("samtools failed: $?\n") if $?;
+
+        return \%LR;
 }
 
 
@@ -1339,7 +1302,7 @@ sub read_long{
 
 				$lr{$lr->id} = Fastq::Seq->new(
                                                                '@'.substr($lr->seq_head,1),
-                                                               $lr->seq,
+                                                               uc($lr->seq),
                                                                "+",
                                                                '$'x length($lr->seq)
                                                               );
@@ -1348,7 +1311,7 @@ sub read_long{
 			$V->verbose("Skipped $stubby_count stubby reads with length <".2*$min_sr_length) if $stubby_count;
 			
 		}else{ # FASTQ ref
-			if($opt_mode eq 'external-sam'){
+			if($opt_mode eq 'sam' or $opt_mode eq 'bam' ){
 				my $po = $lrpr->guess_phred_offset || $opt_lr_qv_offset;
 				$V->exit("Cannot guess phred offset from provided reference file, please specify --lr-qv-offset")
 					unless $po;
@@ -1388,7 +1351,8 @@ sub read_long{
 					if(exists $lr{$lr->id}){
 						$VS->exit('Non-unique long read id ('. $lr->id .') in '. $_);
 					}
-					# convert FASTQ to FASTA
+
+                                        $lr->seq(uc($lr->seq()));
 					$lr{$lr->id} = $lr;
 				}
 				close IGNORE;
