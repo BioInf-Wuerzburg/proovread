@@ -1,9 +1,9 @@
 ** Installation
 
 #+BEGIN_EXAMPLE
-git clone --recursive https://github.com/BioInf-Wuerzburg/proovread
-cd proovread/util/bwa
-make
+  git clone --recursive https://github.com/BioInf-Wuerzburg/proovread
+  cd proovread/util/bwa
+  make
 #+END_EXAMPLE
    
 ** Dependencies
@@ -11,9 +11,9 @@ make
 - Log::Log4perl
 - blastn (NCBI Blast-2.2.24+ or later)
 
-proovread is distributed with binaries of shrimp and blasr as well as bwa source
-code. If you want to employ other installed version of these mappers have a look at
-the /Advanced Configuration/ section.
+proovread is distributed ready with binaries of [[http://compbio.cs.toronto.edu/shrimp/shrimp][SHRiMP2]] and [[https://github.com/PacificBiosciences/blasr][blasr]], as well as [[https://github.com/lh3/bwa][bwa]]
+source code. If you want to employ your own installed version of these mappers,
+have a look at the [[config][Advanced Configuration]] section.
 
 ** Usage
 Test your installation by running proovread on the included sample data set.
@@ -26,23 +26,37 @@ Don't run proovread on entire SMRT cells directly, it will only blast your
 memory and take forever. Split your data in handy chunks of a few Mbp first:
 
 #+BEGIN_EXAMPLE
-# located in /path/to/proovread/bin
-SeqChunker -s 20M -o pb-%03d.fq pb-subreads.fq
+  # located in /path/to/proovread/bin
+  SeqChunker -s 20M -o pb-%03d.fq pb-subreads.fq
 #+END_EXAMPLE
 
 Run proovread on one chunk first.
 
 #+BEGIN_EXAMPLE
-proovread -l pb-001.fq -s reads.fq [-u unitigs.fa] --pre pb-001
+  proovread -l pb-001.fq -s reads.fq [-u unitigs.fa] --pre pb-001
 #+END_EXAMPLE
 
 If things go smoothly, submit the rest.
 
 #+BEGIN_EXAMPLE
-xargs
-qsub
-sbatch
+  xargs
+  qsub
+  sbatch
 #+END_EXAMPLE
+
+** Output
+By default, proovread generates six files in the output folder:
+
+| .trimmed.f[aq] | high accuracy pacbio reads, trimmed for uncorrected/low quality regions |
+| .untrimmed.fq  | complete corrected pacbio reads including un-/ poorly corrected regions |
+| .ignored.tsv   | ids of reads and the reason for excluding them from correction          |
+| .chim.tsv      | annotations of potential chimeric joints clipped during trimming        |
+| .parameter.log | the parameter set used for this run                                     |
+
+If you are interested in mappings (SAM) and other intermediary files from
+iterations have a look at =--keep-temporary=.
+
+Phreds
 
 ** Input
 long reads
@@ -62,21 +76,6 @@ unitigs
 nanopore
 
 custom scenarios
-
-** Output
-By default, proovread generates six files in the output folder:
-
-| =.trimmed.f[aq]= | high accuracy pacbio reads, trimmed for uncorrected/low quality regions |
-| =.untrimmed.fq=  | complete corrected pacbio reads including un-/ poorly corrected regions |
-| =.ignored.tsv=   | ids of reads and the reason for excluding them from correction          |
-| =.chim.tsv=      | annotations of potential chimeric joints clipped during trimming        |
-| =.parameter.log= | the parameter set used for this run                                     |
-
-If you are interested in mappings (SAM) and other intermediary files from
-iterations have a look at =--keep-temporary=.
-
-** Advanced Configuration
-=--create-cfg= 
 ** Hardware and Parallelization
 proovread has been designed with low memory node cluster architectures in
 mind. Peek memory is mainly controlled by the amount of input long reads. With
@@ -85,9 +84,13 @@ chunks of less than 20 Mbp it easily runs on a 8 GB RAM machine.
 Efficient parallelization in most cases is only possible for up to 4 or 8
 threads in one instance.
 
+** Advanced Configuration
+<<config>>
+=--create-cfg= 
+
 ** How proovread work
 file:media/proovread-poster.pdf
-** Assembly
+** Assembly of proovread read data
 ** Citing proovread
 
 proovread: large-scale high accuracy PacBio correction through iterative short
@@ -103,14 +106,16 @@ blasr
 
 ** Contact
 If you have any questions or encounter problems or potential bugs, don't
-hesitate to contact us. Either report issues on github
-(https://github.com/BioInf-Wuerzburg/proovread/issues) or write an email to:
+hesitate to contact us. Either report [[https://github.com/BioInf-Wuerzburg/proovread/issues][issues]] on github or write an email to:
 
-- Thomas Hackl: thomas.hackl@uni.wuerzburg.de
-- Frank Foerster: frank.foerster@biozentrum.uni-wuerzburg.de
+- Thomas Hackl - thomas.hackl@uni.wuerzburg.de
+- Frank Foerster - frank.foerster@biozentrum.uni-wuerzburg.de
 
 
-** org-export                                              :noexport:ARCHIVE:
+
+
+
+
 #+TITLE: proovread manual
 #+AUTHOR: Thomas Hackl
 #+EMAIL: thomas.hackl@uni-wuerzburg.de
