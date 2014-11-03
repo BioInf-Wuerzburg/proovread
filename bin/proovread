@@ -1748,7 +1748,7 @@ sub seq_and_siamaera_filter{
 	my %siam_params = @{$_[1]};
 	my $siam_params = param_join(\%siam_params);
 
-	my $cmd = "$RealPerl/SeqFilter $seq_params --out - | $RealPerl/siamaera $siam_params";
+	my $cmd = "$RealPerl/SeqFilter $seq_params --out - | $RealPerl/siamaera".(cfg('blast-path') ? " --blast-path ".cfg('blast-path') : "")." $siam_params";
 	
 	$VB->hline;
 	$VB->verbose($cmd);

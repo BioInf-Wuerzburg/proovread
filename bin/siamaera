@@ -11,12 +11,12 @@ use FindBin qw($RealBin $Script);
 use File::Basename;
 use File::Temp;
 
-use lib "$RealBin/../lib";
-
 use Fasta::Parser;
 use Fasta::Seq;
 use Fastq::Parser;
 use Fastq::Seq;
+
+use Cfg;
 
 use constant {
     qas => 0,
@@ -81,6 +81,10 @@ Trim this many additional bps at joint to account for slight asymetrics.
 
 Read parameter from config file
 
+=item --blast-path []
+
+PATH to blast binaries. Assumes exported.
+
 =item -D/--debug
 
 Toggle verbose messages.
@@ -125,7 +129,8 @@ my %def = (
            # trim
            trim => 5, # trim this many bp additionally at a joint
                        # just to be safe
-           filter_inconclusive => 1
+           filter_inconclusive => 1,
+           blast_path => '',
           );
 
 my %opt = (
@@ -138,6 +143,7 @@ GetOptions(                     # use %opt (Cfg) as defaults
                         filter_inconclusive|filter-inconclusive!
                         term_ignore_len|term-ignore-len=i
 			trim=i
+                        blast_path|blast-path=s
                         config|c=s{,}
                         version|V!
                         debug|D!
@@ -203,6 +209,11 @@ for (qw()) {
 }
 ;
 
+
+my $blastn = 'blastn';
+$blastn = $opt{blast_path}.'/'.$blastn if $opt{blast_path};
+
+Cfg->Check_binaries($blastn);
 
 # debug level
 $L->level($DEBUG) if $opt{debug};
