@@ -1418,29 +1418,34 @@ sub correct_sr_mt{
 	$V->nline;
 	$VS->verbose("Correcting Sequences (".@$lr_chunk_offsets." batches)");
 
-        # TODO: no ref -> no lr_chunk_offsets;
-
-        # TODO: --coverage needs to be adjusted coverage if there is no more tmp_sam
-        # $opt_cov * $xf (sampling factor) * $cov_margin_factor
-
-		# # configure Sam::Seq
-		# my $xf=1;
-		# if(my $x = cfg('sr-sampling',$TASK)){ # adjust if sampling
-		# 	$xf = exists ${$x}{'--chunks-per-step'} 
-		# 		? ${$x}{'--chunks-per-step'} / ${$x}{'--chunk-step'}
-		# 		: 1 / ${$x}{'--chunk-step'};
-		# }
-
-		# Sam::Seq->MaxCoverage($opt_cov * $xf * 0.7);
-		# Sam::Seq->BinSize(cfg('bin-size'));
 
         # TODO: bin-size / utg-bin-size
+        # TODO: --utg and coverage -> 1
+        # TODO: --coverage needs to be adjusted coverage if there is no more tmp_sam
+        # $opt_cov * $xf (sampling factor) * $cov_scale_factor
+        my $max_cov;
+        my $bin_size;
+        if($TASK =~ /utg/){
+            $max_cov = 1;
+            $bin_size = cfg('utg-bin-size');
+        }else{
+            my $xf=1;
+            if(my $x = cfg('sr-sampling',$TASK)){ # adjust if sampling
+                $xf = exists ${$x}{'--chunks-per-step'} 
+                    ? ${$x}{'--chunks-per-step'} / ${$x}{'--chunk-step'}
+                        : 1 / ${$x}{'--chunk-step'};
+            }
+            $max_cov = $opt_cov * $xf * cfg('coverage-scale-factor');
+            $bin_size = cfg('bin-size');
+        }
+
         
 	# sam2cns
 	my %bam2cns_default = (
                 '--bam' => task_file_name(".bam"),
 		'--max-ref-seqs' => cfg('chunk-size'),
-		'--coverage' => $opt_cov,
+		'--coverage' => $max_cov,
+                '--bin-size' => $bin_size,
 		'--append' => 1,
 		'--cfg'	=> $cfg || undef,		
 		'--mask-weak-reads' => cfg('mask-weak-reads', $TASK),

@@ -132,6 +132,10 @@ Minimum score threshold for chimeras.
 
 Ignore inserts longer than this in alignments (possible artefacts).
 
+=item [--bin-size] [20]
+
+Bin size for local score comparison.
+
 =item [--mask-weak-reads=<INT>] [20]
 
 =item [--ignore-weak-reads=<INT>] [20]
@@ -175,6 +179,7 @@ Toggle debug messages.
         'detect-chimera!' => \(my $opt_detect_chimera),
         'chimera-min-score=f' => \(my $opt_chimera_min_score = 0),
         'max-ins-length=i' => \(my $opt_max_ins_length = 0),
+        'bin-size' => (my $opt_bin_size = 20),
         
         'mask-weak-reads=i' => \(my $opt_mask_weak_reads = 20),
         'ignore-weak-reads=i' => \(my $opt_ignore_weak_reads = 20),
@@ -208,7 +213,7 @@ my $sp = Sam::Parser->new(fh => \*SAM);
 Sam::Seq->Trim($cfg{'sr-trim'});
 Sam::Seq->InDelTaboo($cfg{'sr-indel-taboo'});
 Sam::Seq->MaxCoverage($opt_cov);
-Sam::Seq->BinSize($cfg{'bin-size'});
+Sam::Seq->BinSize($opt_bin_size);
 Sam::Seq->MaxInsLength($opt_max_ins_length);
 
 # use glob, to allow glob pattern instead of full filename (fa/fq is decided by parser)
