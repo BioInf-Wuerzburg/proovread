@@ -38,7 +38,7 @@ use Time::HiRes qw(usleep);
 use Data::Dumper;
 $Data::Dumper::Sortkeys = 1;
 
-our $VERSION = '2.03';
+our $VERSION = '2.04';
 
 my $RealLib = "$RealBin/../lib/";
 my $RealPerl = "perl -I${RealLib} $RealBin";
@@ -136,155 +136,49 @@ my %opt;
 
 =over
 
-=item -l, --long-reads=<PATHNAME>
+=item -l, --long-reads=<FASTA/FASTQ>
 
-Pacbio reads file to correct. FASTA or FASTQ format. To correct mulitple files
- at once, provide parameter mulitple times.
-
-  -l cell1 -l cell2 ... # correct 2 cells at once
+PacBio subreads or other erroneous sequences to be corrected.
 
 =cut
 
 $opt{'l|long-reads=s@'} = \(my $opt_lr_file = cfg('long-reads') || []);
 
-=item -s, --short-reads=<PATHNAME>
+=item [-u, --unitigs=<FASTA/FASTQ>]
 
-High confidence short reads file used for correction in FASTQ or FASTA
- format. To correct with mulitple files at once, provide parameter mulitple
- times.
-
-NOTE: If multiple libraries are provided, they need to be of the same format
- (FASTA or FASTQ) and quality offset (33,64...)  respectively.
-
-  -s lib1 -s lib2 # use reads from to libraries for correction
-
-=cut
-
-
-$opt{'s|short-reads=s@'} = \(my $opt_sr_file = cfg('short-reads') || []);
-
-=item -u, --unitigs=<PATHNAME>
-
-High confidence unitigs to use for correction. Can be specified multiple times.
+High confidence unitigs. Can be specified multiple times.
 
 =cut
 
 $opt{'u|unitigs=s@'} = \(my $opt_utg_file = cfg('unitigs') || []);
 
-=item [-p, --prefix=<STRING>]
+=item -s, --short-reads=<FASTA/FASTQ>
 
-Prefix to output files. Defaults to 'proovread'.
+High confidence short reads. Specify mulitple times for multiple libs, need to
+have same format (FASTA/FASTQ and offset 33,64)
 
-=cut
-
-$opt{'p|prefix=s'} = \(my $opt_prefix = cfg('prefix'));
-
-=item [--coverage=<INT>] [50]
-
-Coverage cutoff for highest scoring mappings at each location.
+  -s lib1.fq -s lib2.fq # use reads from two libs
 
 =cut
 
-$opt{'coverage=s'} = \(my $opt_cov = cfg('coverage'));
+$opt{'s|short-reads=s@'} = \(my $opt_sr_file = cfg('short-reads') || []);
 
-=item [-t, --threads] [4]
+=item [--sam/--bam=<SAM/BAM>]
 
-Number of threads to use for mapping.
-
-=cut
-
-$opt{'t|threads=i'} = \(my $opt_threads = cfg('threads'));
-
-=item [-m, --mode] [auto]
-
-Running mode of the pipeline, see README for details.
-
-=cut
-
-$opt{'m|mode=s'} = \(my $opt_mode= cfg('mode'));
-
-=item [--sam]
-
-External SAM file to compute corrected consensus sequences from. Provide as
- input instead of --short-reads. Automatically sets --mode=sam.
+External SAM or sorted BAM file instead of --short-reads.
 
 =cut
 
 $opt{'sam=s'} = \(my $opt_sam_file = cfg('sam'));
-
-=item [--bam]
-
-External sorted BAM file to compute corrected consensus sequences from. Provide
- as input instead of --short-reads. Automatically sets --mode=bam.
-
-=cut
-
 $opt{'bam=s'} = \(my $opt_bam_file = cfg('bam'));
 
-=item [--create-cfg=<CFGFILENAME>] [<CWD>/proovread_cfg.pm]
+=item [-p, --prefix=<STRING>] [proovread]
 
-Create a custom config file. Unless you provide a PATHNAME, defaults to
- CWD/proovread.cfg. Does not run the pipeline. The custom config file can be
- modified/renamed and supplied to the pipeline using -c/--cfg. The config file
- is optional, supercedes default parameters, but has lower priority than command
- line options. The config file allows control of advanced options, not available
- via command line. For details, create a config file and have a look at its
- header section.
-
-=item [-c, --cfg]
-
-Custom config file.
+Prefix to output files.
 
 =cut
 
-$opt{'c|cfg=s'} = \$cfg;
-
-=item [--lr-qv-offset=<INT>]
-
-Required if you use --sam and --long together and the phred offset cannot be
-determined automatically from --long read file.
-
-=cut
-
-$opt{'lr-qv-offset=i'} = \(my $opt_lr_qv_offset = cfg('lr-qv-offset'));
-
-=item [--sr-qv-offset=<INT>]
-
-Required if phred offset cannot be determined automatically from --short read
-file.
-
-=cut
-
-$opt{'sr-qv-offset=i'} = \(my $opt_sr_qv_offset = cfg('sr-qv-offset'));
-
-=item [--sort-sam-by-coordinates] [OFF]
-
-Sort the filtered SAM files by coordinates in addition to the sorting of
- references. This has no effect on the pipeline, just a convenience if you need
- the files for something else.
-
-=cut
-
-$opt{'sort-sam-by-coordinates'} = \(my $opt_sort_sam_by_coords = cfg('sort-sam-by-coordinates'));
-
-=item [--keep-temporary-files] [OFF]
-
-Specify once, to keep temporary file of each task, twice to also keep the
- individual temporary file of each thread.
-
-=cut
-
-$opt{'keep-temporary-files+'} = \(my $opt_keep = cfg('keep-temporary-files'));
-
-=item [--ignore-sr-length]
-
-Since the pipeline is designed to use short reads for correction, it stops in
- case an average short read length above 700bp has been estimated. Set
- C<--ignore-sr-length> to omit this test.
-
-=cut
-
-$opt{'ignore-sr-length'} = \(my $opt_ignore_sr_length = cfg('ignore-sr-length'));
+$opt{'p|prefix=s'} = \(my $opt_prefix = cfg('prefix'));
 
 =item [--overwrite]
 
@@ -294,27 +188,84 @@ Overwrite output folder if it already exists.
 
 $opt{'overwrite'} = \(my $opt_overwrite = cfg('overwrite'));
 
-=item [--sample]
+=item [-t, --threads] [4]
 
-Run the sample data set.
+Number of threads to use for mapping and consensus.
 
 =cut
 
-$opt{'sample:s'} = \(my $opt_sample);
+$opt{'t|threads=i'} = \(my $opt_threads = cfg('threads'));
+
+=item [--coverage=<INT>] [50]
+
+Estimated short read coverage, 50X recommended.
+
+=cut
+
+$opt{'coverage=s'} = \(my $opt_cov = cfg('coverage'));
+
+=item [-m, --mode] [auto]
+
+Running mode of the pipeline, see README for details.
+
+=cut
+
+$opt{'m|mode=s'} = \(my $opt_mode= cfg('mode'));
+
+=item [--create-cfg=<CFGFILENAME>] [<CWD>/proovread_cfg.pm]
+
+Create a custom config file with advanced options. Does not run the
+pipeline. For details, see config header section and README.
+
+=item [-c, --cfg]
+
+Use custom config file.
+
+=cut
+
+$opt{'c|cfg=s'} = \$cfg;
+
+=item [--lr-qv-offset/--sr-qv-offset=<INT>] [auto]
+
+Long/short read quality offset, required if auto-detect fails.
+
+=cut
+
+$opt{'lr-qv-offset=i'} = \(my $opt_lr_qv_offset = cfg('lr-qv-offset'));
+
+$opt{'sr-qv-offset=i'} = \(my $opt_sr_qv_offset = cfg('sr-qv-offset'));
+
+=item [--ignore-sr-length]
+
+Don't stop if short reads are longer than 700bp.
+
+=cut
+
+$opt{'ignore-sr-length'} = \(my $opt_ignore_sr_length = cfg('ignore-sr-length'));
+
+=item [--keep-temporary-files] [OFF]
+
+Keep temporary files of each task (BAMs, masked FASTQs, etc.)
+
+=cut
+
+$opt{'keep-temporary-files+'} = \(my $opt_keep = cfg('keep-temporary-files'));
+
+=item [--sample-run]
+
+Run the sample data set to test installation.
+
+=cut
+
+$opt{'sample-run:s'} = \(my $opt_sample);
 
 =item [-h, --help]
 
-Show this help.
+=item [-V, --version]
 
 =cut
 
 $opt{'h|help'} = \(my $opt_help);
-
-=item [-V, --version]
-
-Show this help.
-
-=cut
 
 $opt{'V|version'} = \(my $opt_version);
 
