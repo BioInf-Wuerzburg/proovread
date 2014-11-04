@@ -1184,7 +1184,7 @@ sub create_sorted_bam{
     $VS->nline;
     $VS->verbose("Sorting BAM `$opt_bam_out.bam`");
     
-    my $sam_sort_cmd = cfg('samtools-path')."samtools sort $opt_bam $opt_bam_out";
+    my $sam_sort_cmd = cfg('samtools-path')."samtools sort -@ $opt_threads $opt_bam $opt_bam_out";
     $VB->hline();
     $VB->verbose($sam_sort_cmd);
     $VB->hline();
