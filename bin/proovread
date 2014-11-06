@@ -1423,7 +1423,7 @@ sub correct_sr_mt{
 
 		($TASK eq 'read-sam') # calculate hcrs on first iter for second iter
 			? (@$opt_lr_file ? () : ('--ignore-hcr' => 1)) : (),
-		
+
 	);
 	
 	my $bam2cns_cmds = '';
@@ -1467,10 +1467,7 @@ sub correct_sr_mt{
 			$VB->hline() 
 		}else{
 			$VB->verbose($_);
-		}
-		
-		if(/xargs:.*255/){
-			$VS->exit("sam2cns returned with error");
+                        $VS->exit("bam2cns unexpectedly returned");
 		}
 	}
 	
