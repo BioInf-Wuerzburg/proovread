@@ -136,6 +136,10 @@ Ignore inserts longer than this in alignments (possible artefacts).
 
 Bin size for local score comparison.
 
+=item [--fallback-phred]
+
+Use qualities with this phred for sequences w/o quality information.
+
 =item [--mask-weak-reads=<INT>] [20]
 
 =item [--ignore-weak-reads=<INT>] [20]
@@ -180,7 +184,8 @@ Toggle debug messages.
         'chimera-min-score=f' => \(my $opt_chimera_min_score = 0),
         'max-ins-length=i' => \(my $opt_max_ins_length = 0),
         'bin-size' => (my $opt_bin_size = 20),
-        
+        'fallback-phred=i' => \(my $opt_fallback_phred = undef),
+
         'mask-weak-reads=i' => \(my $opt_mask_weak_reads = 20),
         'ignore-weak-reads=i' => \(my $opt_ignore_weak_reads = 20),
         
@@ -215,7 +220,7 @@ Sam::Seq->InDelTaboo($cfg{'sr-indel-taboo'});
 Sam::Seq->MaxCoverage($opt_cov);
 Sam::Seq->BinSize($opt_bin_size);
 Sam::Seq->MaxInsLength($opt_max_ins_length);
-
+Sam::Seq->FallbackPhred($opt_fallback_phred) if defined($opt_fallback_phred);
 # use glob, to allow glob pattern instead of full filename (fa/fq is decided by parser)
 my $opt_ref_file;
 my $rpr;

@@ -245,6 +245,13 @@ Default 0, which deactivates the feature.
 
 our $MaxInsLength = 0;
 
+=head2 $FallbackPhred
+
+Default 1. Used if alignment w/o qual is used in quality context
+
+=cut
+
+our $FallbackPhred = 1;
 
 # DEPRECATED
 #=head2 %Freqs2phreds
@@ -322,7 +329,7 @@ sub Trim{
 	return $Trim;
 }
 
-=head2 Trim
+=head2 MaxInsLength
 
 Get/Set $Sam::Seq::MaxInsLength. Default 0, which deactivates the feature.
 
@@ -334,6 +341,17 @@ sub MaxInsLength{
 	return $MaxInsLength;
 }
 
+=head2 FallbackPhred
+
+Get/Set $Sam::Seq::FallbackPhred. Default 1.
+
+=cut
+
+sub FallbackPhred{
+	my ($class, $fbp) = @_;
+	$FallbackPhred = $fbp if defined $fbp;
+	return $FallbackPhred;
+}
 
 =head2 Freqs2phreds
 
@@ -478,11 +496,15 @@ sub State_matrix{
 		### prepare aln ###
 		# get read seq
 		my $seq = $aln->seq;
-                my $qua = $aln->qual;
 		my $orig_seq_length = length($seq);
-		
 		next unless $orig_seq_length > 50;
 
+                my $qua = $aln->qual;
+
+                if($qua eq "*"){ # replace missing qual with fallback qual
+                    my $q = Fastq::Seq->Phreds2Char( [$FallbackPhred] , $PhredOffset );
+                    $qua = $q x $orig_seq_length;
+                }
 
 		# get read cigar, eg 80M2D3M1IM4
 		my @cigar = split(/(\d+)/,$aln->cigar);

@@ -1083,7 +1083,7 @@ sub run_blasr{
             push @blasr_opts, $k, $v if $k =~ /^-/;
         }
 
-        my $blasr_cmd = cfg('blasr-path')."blasr $or_file $p->{blasr}{ref} @blasr_opts -sam 2>$p->{blasr}{log} | $RealPerl/samfilter | ".cfg('samtools-path')."samtools view -bS /dev/fd/0 >$p->{tmp_bam}";
+        my $blasr_cmd = cfg('blasr-path')."blasr $or_file $p->{blasr}{ref} @blasr_opts -sam 2>$p->{blasr}{log} | ".cfg('samtools-path')."samtools view -bS /dev/fd/0 >$p->{tmp_bam}";
 
         $VB->hline();
         $VB->verbose($blasr_cmd);
@@ -1419,7 +1419,10 @@ sub correct_sr_mt{
 			: (),
 
                 ($TASK =~ /utg/) # calculate hcrs on first iter for second iter
-			? ('--qual-weighted' => '') : (),
+			? (
+                           '--qual-weighted' => '',
+                           '--fallback-phred' => 30, # use phred 30 for high confidence utgs
+                          ) : (),
 
 		($TASK eq 'read-sam') # calculate hcrs on first iter for second iter
 			? (@$opt_lr_file ? () : ('--ignore-hcr' => 1)) : (),
