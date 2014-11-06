@@ -15,6 +15,7 @@ use File::Path qw(make_path remove_tree);
 use File::Copy;
 use File::Spec;
 use File::Which;
+use version;
 
 use Verbose;
 use Verbose::ProgressBar;
@@ -626,11 +627,11 @@ $VS->nline;
 $VS->verbose('Checking required binaries');
 $VS->nline;
 
-check_binaries(cfg('samtools-path')."samtools");
-check_binaries(cfg('shrimp-path')."gmapper-ls") if (grep{/shrimp/}@TASKS);
-check_binaries(cfg('bwa-path')."bwa") if (grep{/bwa/}@TASKS);
-check_binaries(cfg('blasr-path')."blasr") if (grep{/blasr/}@TASKS);
-check_binaries(cfg('blast-path')."blastn") if (defined cfg('siamaera'));
+check_binary(cfg('samtools-path')."samtools", ["--version", "1.1"]);
+check_binary(cfg('shrimp-path')."gmapper-ls") if (grep{/shrimp/}@TASKS);
+check_binary(cfg('bwa-path')."bwa") if (grep{/bwa/}@TASKS);
+check_binary(cfg('blasr-path')."blasr") if (grep{/blasr/}@TASKS);
+check_binary(cfg('blast-path')."blastn", ["-version", "2.2.24" ]) if (defined cfg('siamaera'));
 
 $VS->nline;
 
@@ -1860,19 +1861,38 @@ sub mask_shortcut_frac{
 }
 
 
-sub check_binaries{
-    foreach my $bin (@_){
-        my $fbin;
-        unless(-e $bin && -x $bin){
-            if($fbin = which($bin)){
-                $VS->exit("Binary '$fbin' not executable") unless -e $fbin && -x $fbin;
-            }else{
-                $VS->exit("Binary '$bin' neither in PATH nor executable");
-            }
-        }
-
-        $VB->verbose("  [ok] ".($fbin ? $fbin : $bin));
+sub check_binary{
+    my($bin, $ver) = (@_);
+    my $fbin = $bin;
+    unless(-e $fbin && -x $fbin){
+      if($fbin = which($bin)){
+        $VS->exit("Binary '$fbin' not executable") unless -e $fbin && -x $fbin;
+      }else{
+        $VS->exit("Binary '$bin' neither in PATH nor executable");
+      }
     }
+
+    $bin = basename($fbin);
+
+    my $v;
+    if($ver){
+       $VS->exit("ARRAY ref required") unless ref $ver eq "ARRAY";
+
+       my $vs = qx($fbin $ver->[0]);
+       if($? or ! $vs){
+           $VS->exit("Couldn't determine version of $bin, at least $ver->[1] required");
+       }
+
+       ($v) = $vs =~ /(\S+?)\D*$/m;
+
+       if(version->parse($v) < version->parse($ver->[1])){
+           $VS->exit("Version $v of '$bin' < $v");
+       }
+       
+    }
+
+    $VB->verbose(sprintf("  [ok] %-15s %s", $bin.($v ? "-$v" : ""), dirname($fbin)));
+
 }
 
 
