@@ -962,7 +962,7 @@ sub read_sam{
         my $bam_file = task_file_name("_tmp.bam");
 	$VS->verbose("Converting to BAM file `$bam_file`");
 	
-        my $bam_cmd = cfg('samtools-path')."samtools view -bS $opt_sam_file >".$bam_file;
+        my $bam_cmd = cfg('samtools-path')."samtools view -@ $opt_threads -bS $opt_sam_file >".$bam_file;
 
         $VB->hline();
         $VB->verbose($bam_cmd);
@@ -1041,7 +1041,7 @@ sub run_shrimp{
 		);
 
                 my $shrimp_log = task_file_name("_shrimp_sr".$sr_file_c.".log");
-                my $shrimp_cmd = $shrimp->command()." 2>$shrimp_log | ".cfg('samtools-path')."samtools view -bS /dev/fd/0 >$p->{tmp_bam}" ;
+                my $shrimp_cmd = $shrimp->command()." 2>$shrimp_log | ".cfg('samtools-path')."samtools view -@ $opt_threads -bS /dev/fd/0 >$p->{tmp_bam}" ;
 
                 $VB->hline();
                 $VB->verbose($shrimp_cmd);
@@ -1083,7 +1083,7 @@ sub run_blasr{
             push @blasr_opts, $k, $v if $k =~ /^-/;
         }
 
-        my $blasr_cmd = cfg('blasr-path')."blasr $or_file $p->{blasr}{ref} @blasr_opts -sam 2>$p->{blasr}{log} | ".cfg('samtools-path')."samtools view -bS /dev/fd/0 >$p->{tmp_bam}";
+        my $blasr_cmd = cfg('blasr-path')."blasr $or_file $p->{blasr}{ref} @blasr_opts -sam 2>$p->{blasr}{log} | ".cfg('samtools-path')."samtools view -@ $opt_threads -bS /dev/fd/0 >$p->{tmp_bam}";
 
         $VB->hline();
         $VB->verbose($blasr_cmd);
@@ -1159,7 +1159,7 @@ sub run_bwa{
             $reads = $or_file
         }
         
-        my $bwa_cmd = $pre_command.cfg('bwa-path')."bwa mem @bwa_opts $p->{bwa}{ref} $reads 2>$p->{bwa}{log} | ".cfg('samtools-path')."samtools view -bS /dev/fd/0 >$p->{tmp_bam}" ;
+        my $bwa_cmd = $pre_command.cfg('bwa-path')."bwa mem @bwa_opts $p->{bwa}{ref} $reads 2>$p->{bwa}{log} | ".cfg('samtools-path')."samtools view -@ $opt_threads -bS /dev/fd/0 >$p->{tmp_bam}" ;
 
         $VB->hline();
         $VB->verbose($bwa_cmd);
