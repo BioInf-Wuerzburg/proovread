@@ -1468,7 +1468,9 @@ sub correct_sr_mt{
 			$VS->verbose(sprintf($bs, ++$bc));
 			$VB->verbose($_);
 			$VB->hline() 
-		}else{
+		}elsif(/^samtools: error/){ # stdout close error -1
+                    # do nothing - this is a bug with the latest samtools version
+                }else{
 			$VB->verbose($_);
                         $VS->exit("bam2cns unexpectedly returned");
 		}
