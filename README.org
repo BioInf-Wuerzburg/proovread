@@ -1,5 +1,12 @@
 #+LATEX: \pagebreak
 
+** proovread-2.00 - What's new
+- much faster and more sensitive due to *bwa mem* as default mapper
+- increased speed and contiguity by using *unitigs* in correction
+- optimized for HiSeq & *MiSeq* reads
+- compressed BAM intermediates
+- efficient threading up to 20 cores and more
+- ...
 ** Installation
 
 #+BEGIN_EXAMPLE
@@ -68,7 +75,7 @@ phred accuracies:
 |    10 |    90.00 | +   |
 
 ** Input
-*** =--long-reads=
+*** long-reads
 Primarily proovread has been designed to correct /PacBio subreads/. You get
 these reads either from PacBio's SMRT-Portal or by using =dextract= from Gene
 Myers PacBio assembler [[http://dazzlerblog.wordpress.com/2014/03/22/the-dextractor-module-save-disk-space-for-your-pacbio-projects/][DAZZLER]], which I would recommend.
@@ -85,7 +92,7 @@ mappings has been optimized for PacBio reads and may produce artifacts in other
 scenarios. We are currently working on a version optimized for /Oxford Nanopore/
 data.
 
-*** =--short-reads=
+*** short-reads
 For correction of long reads, proovread needs high coverage short read
 data. Typically these are HiSeq (75-150bp) and MiSeq reads (200-300bp), but also
 454 or PacBio CCS reads can be used. Reads need to have FASTQ/A format and may
@@ -99,7 +106,7 @@ Configuration]] and adjust them accordingly. If you are having trouble with the
 adjustment, just write me a quick email. With lower coverage, decreased
 contiguity is to be expected.
 
-*** =--unitigs=
+*** unitigs
 In addition to short reads, [[http://wgs-assembler.sourceforge.net/wiki/index.php/Celera_Assembler_Terminology][unitigs]] can/should be used for correction in
 particular for large data sets (eukaryotes). Unitigs are high-confidence assembly
 fragments produced by for example ALLPATHS or the Celera Assembler. In contrast
@@ -127,7 +134,7 @@ template file.
 
 ** Hardware and Parallelization
 proovread has been designed with low memory node cluster architectures in
-mind. Peek memory is mainly controlled by the amount of input long
+mind. Peek memory is mainly controlled by the amount of long reads
 provided. With chunks of less than 20 Mbp it easily runs on a 8 GB RAM machine.
 
 In theory, proovread can be simply parallelized by increasing
