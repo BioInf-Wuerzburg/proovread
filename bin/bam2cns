@@ -323,9 +323,10 @@ foreach my $ref_id(@LR_IDS){
         $sso->add_aln_by_score($aln)        
     }
 
-    close SAM;
-    
     generate_consensus($sso);
+
+    close SAM;
+    $sp = undef;
 }
 
 
