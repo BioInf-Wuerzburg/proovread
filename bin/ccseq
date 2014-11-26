@@ -284,7 +284,7 @@ if(@sr_cache > 1){
 #print STDERR Dumper([sort @ids],[sort keys %$R],[sort @ccs_ids]);
 
 
-ccs_chunk($R, \@ccs_ids);
+ccs_chunk($R, \@ccs_ids) if @ccs_ids;
 
 my $sam_tmp;
 foreach (@ids) {
