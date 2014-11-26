@@ -223,6 +223,11 @@ my @sr_cache; # subread cache
 my @ids;
 my @ccs_ids;
 my $fq;
+my %stats = (
+             single => 0,
+             primary => 0,
+             secondary => 0,
+            );
 
 while($fq = $rpr->next_seq){
     unless( ($id,$range) = $fq->id =~ m!^(m[^/]+/\d+)/(\d+_\d+)!){
@@ -232,34 +237,39 @@ while($fq = $rpr->next_seq){
     push @ids, $sr_id;
     $L->logdie("Non-unique ID: $sr_id") if exists $R->{$sr_id};
     $R->{$sr_id} = Sam::Seq->new(
-                              id => $sr_id, 
-                              len => length($fq->seq),
-                              ref => $fq,
+                                 id => $sr_id, 
+                                 len => length($fq->seq),
+                                 ref => $fq,
+                                 CCS => 'secondary',
                              );
     
     if($id eq $cid){
         push @sr_cache, $sr_id;
     }else{
         if(@sr_cache > 1){
-            push @ccs_ids, @sr_cache;
+            push @ccs_ids, [@sr_cache];
 
             if(@ccs_ids > $opt{chunk_seqs}){
 
                 # process chunk
-                ccs_chunk($R, \@ccs_ids);
+                $R = ccs_chunk($R, \@ccs_ids);
 
                 my $sam_tmp;
                 foreach (@ids){
-                    if($R->{$_}{sam}){ # if there are alignments, compute and print ccs
+                    if($R->{$_}{CCS} eq 'primary'){ # if there are alignments, compute and print ccs
+                        $stats{primary}++;
                         $sam_tmp = $R->{$_}{sam}{file};
                         my $con = $R->{$_}->consensus(
                                                       use_ref_qual => 1,
                                                       qual_weighted => 1,
                                                      );
-                        $con->desc_append("CCS");
+                        $con->desc_append("CCS:".$R->{$_}{CCS});
                         print $con;
-                    }else{ # no alignments, output unprocessed
+                    }elsif($R->{$_}{CCS} eq 'single'){ # no alignments, output unprocessed
+                        $stats{single}++;
                         print $R->{$_}->ref;
+                    }else{
+                        $stats{secondary}++;
                     }
                 }
 
@@ -269,6 +279,8 @@ while($fq = $rpr->next_seq){
                 @ids = ($sr_id);
                 $R = {$sr_id => $R->{$sr_id}};
             }
+        }elsif(@sr_cache == 1){
+            $R->{$sr_cache[0]}{CCS} = "single";
         }
         
         $cid = $id;
@@ -278,33 +290,42 @@ while($fq = $rpr->next_seq){
 
 # eof
 if(@sr_cache > 1){
-    push @ccs_ids, @sr_cache;
+    push @ccs_ids, [@sr_cache];
 }
 
 #print STDERR Dumper([sort @ids],[sort keys %$R],[sort @ccs_ids]);
 
 
-ccs_chunk($R, \@ccs_ids) if @ccs_ids;
+$R = ccs_chunk($R, \@ccs_ids) if @ccs_ids;
 
 my $sam_tmp;
 foreach (@ids) {
-    if ($R->{$_}{sam}) { # if there are alignments, compute and print ccs
+#    print STDERR "$_: ".($R->{$_}{CCS}),"\n";
+    if ($R->{$_}{CCS} eq 'primary') { # if there are alignments, compute and print ccs
+        $stats{primary}++;
         $sam_tmp = $R->{$_}{sam}{file};
         my $con = $R->{$_}->consensus(
                                       use_ref_qual => 1,
                                       qual_weighted => 1,
                                      );
-        $con->desc_append("CCS");
+        $con->desc_append("CCS:".$R->{$_}{CCS});
         print $con;
-    } else {                    # no alignments, output unprocessed
+    } elsif($R->{$_}{CCS} eq 'single') { # no alignments, output unprocessed
+        $stats{single}++;
         print $R->{$_}->ref;
+    }else{
+        $stats{secondary}++;
     }
 }
 
 # reset
 unlink $sam_tmp if $sam_tmp && ! $opt{debug};
 
+my $src = $stats{single} + $stats{primary} + $stats{secondary};
+my $rc = $stats{single} + $stats{primary};
 
+$L->info("Processed $src subreads from $rc reads");
+$L->info("  $stats{primary} consensus + $stats{single} bypassed single subreads");
 
 
 
@@ -326,11 +347,27 @@ sub ccs_chunk{
                                $opt{debug} ? (UNLINK => 0) : ()
                           );
 
-    foreach (@$ids){
-        print $srfh $SR->{$_}->ref;
+    my $qrfh = File::Temp->new(
+                               TEMPLATE => $opt{pre}."/ccseq-XXXXX",
+                               SUFFIX => '.fq',
+                               $opt{debug} ? (UNLINK => 0) : ()
+                              );
+
+    foreach my $sr_ids (@$ids){
+        if(@$sr_ids == 2){
+            print $srfh $SR->{$sr_ids->[0]}->len > $SR->{$sr_ids->[1]}->len
+                ? $SR->{$sr_ids->[0]}->ref
+                : $SR->{$sr_ids->[1]}->ref;
+        }elsif(@$sr_ids > 2){
+            print $srfh $SR->{$sr_ids->[1]}->ref;
+        }else{
+            $L->logdie("not enough subread ids to compute ccs: @$sr_ids");
+        }
+        print $qrfh $SR->{$_}->ref for @$sr_ids;
     }
 
     my $srf = $srfh->filename;
+    my $qrf = $qrfh->filename;
     my $srf_base = $srf;
     $srf_base =~ s/.fq$//;
 
@@ -349,7 +386,7 @@ sub ccs_chunk{
     qx($bwa_index_cmd);
     $L->logdie("bwa failed: $?\n", do { local $/; local @ARGV = ("$srf.idx.log") ; <> }) if $?;
     
-    $sam_cmd = ($opt{bwa_path} ? $opt{bwa_path}."/" : '')."bwa mem -t $opt{threads} @{$opt{bwa_opt}} $srf $srf 2>$srf.bwa.log";
+    $sam_cmd = ($opt{bwa_path} ? $opt{bwa_path}."/" : '')."bwa mem -t $opt{threads} @{$opt{bwa_opt}} $srf $qrf 2>$srf.bwa.log";
     
     $L->debug("Mapping chunk $srf");
     $L->debug($sam_cmd);
@@ -365,6 +402,7 @@ sub ccs_chunk{
         next if $h{tag} eq '@PG';
 
         $SR->{$h{'SN'}}{sam} = $tsp; # indexed sam file, containing aln data
+        $SR->{$h{'SN'}}{CCS} = "primary";
     }
 
 	
