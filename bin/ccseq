@@ -92,7 +92,7 @@ my $L = Log::Log4perl->get_logger();
 
 my %def = (
            chunk_seqs => 2000,
-           pre => '',
+           pre => '.',
            threads => 1,
            bwa_opt => [qw(-a -e -k 9 -W 18 -w 300 -A 5 -B 11 -O 2,1 -E 4,3 -Y)],
            bwa_path => '',
