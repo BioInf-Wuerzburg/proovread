@@ -414,7 +414,7 @@ sub ccs_chunk{
     # calc cns
     $L->logdie("bwa failed: $?\n", do { local $/; local @ARGV = ("$srf.bwa.log") ; <> } ) if $?;
 
-    unlink ("$srf.idx.log", "$srf.bwa.log") unless $opt{debug};
+    unlink ("$srf.idx.log", "$srf.bwa.log", glob("$srfh.*")) unless $opt{debug};
 
     return $SR;
 
