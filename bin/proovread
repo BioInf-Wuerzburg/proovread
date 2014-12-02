@@ -608,7 +608,7 @@ if($opt_bam_file){
     }
 
     if($opt_utg_file && @$opt_utg_file){
-        unless($opt_mode =~ /utg$/){
+        unless($opt_mode =~ /utg/){
             $opt_mode.="+utg";
         }
     }
@@ -754,7 +754,7 @@ while($TC < $#TASKS){
                         blasr => {
 				cfg($TASK), # basic shrimp params from cfg
 				'log' => task_file_name(suffix => "_blasr.log"),
-				'ref' => $TC < 2
+				'ref' => $TC > 0
                                   ? task_file_name('.masked.fa', task => $TASKS[$TC-1] )
                                   : task_file_name('.fa', task => $TASKS[$TC-1] ),
 				'-nproc' => $opt_threads,
