@@ -381,12 +381,12 @@ sub ccs_chunk{
     
     # index chunk
     $L->debug("Indexing chunk $srf");
-    my $bwa_index_cmd = ($opt{bwa_path} ? $opt{bwa_path}."/" : '')."bwa index $srf $srf 2>$srf.idx.log";
+    my $bwa_index_cmd = ($opt{bwa_path} ? $opt{bwa_path}."/" : '')."bwa-proovread index $srf $srf 2>$srf.idx.log";
     $L->debug($bwa_index_cmd);
     qx($bwa_index_cmd);
     $L->logdie("bwa failed: $?\n", do { local $/; local @ARGV = ("$srf.idx.log") ; <> }) if $?;
     
-    $sam_cmd = ($opt{bwa_path} ? $opt{bwa_path}."/" : '')."bwa mem -t $opt{threads} @{$opt{bwa_opt}} $srf $qrf 2>$srf.bwa.log";
+    $sam_cmd = ($opt{bwa_path} ? $opt{bwa_path}."/" : '')."bwa-proovread mem  -b 100 -l 1000000 -t $opt{threads} @{$opt{bwa_opt}} $srf $qrf 2>$srf.bwa.log";
     
     $L->debug("Mapping chunk $srf");
     $L->debug($sam_cmd);

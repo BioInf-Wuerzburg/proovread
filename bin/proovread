@@ -629,7 +629,7 @@ $VS->nline;
 
 check_binary(cfg('samtools-path')."samtools", ["--version", "1.1"]);
 check_binary(cfg('shrimp-path')."gmapper-ls") if (grep{/shrimp/}@TASKS);
-check_binary(cfg('bwa-path')."bwa") if (grep{/bwa/}@TASKS);
+check_binary(cfg('bwa-path')."bwa-proovread") if (grep{/bwa/}@TASKS);
 check_binary(cfg('blasr-path')."blasr") if (grep{/blasr/}@TASKS);
 check_binary(cfg('blast-path')."blastn", ["-version", "2.2.24" ]) if (defined cfg('siamaera'));
 
@@ -1119,7 +1119,7 @@ sub run_bwa{
     #  files
     $VS->verbose("Indexing Long reads");
     
-    my $bwa_index_cmd = cfg('bwa-path')."bwa index $p->{bwa}{ref} $p->{bwa}{ref} 2>$p->{bwa}{log}";
+    my $bwa_index_cmd = cfg('bwa-path')."bwa-proovread index $p->{bwa}{ref} $p->{bwa}{ref} 2>$p->{bwa}{log}";
     
     $VB->hline();
     $VB->verbose($bwa_index_cmd);
@@ -1158,8 +1158,17 @@ sub run_bwa{
         }else{
             $reads = $or_file
         }
-        
-        my $bwa_cmd = $pre_command.cfg('bwa-path')."bwa mem @bwa_opts $p->{bwa}{ref} $reads 2>$p->{bwa}{log} | ".cfg('samtools-path')."samtools view -@ $opt_threads -bS /dev/fd/0 >$p->{tmp_bam}" ;
+
+        my ($bin_size, $bin_length);
+        if($TASK =~ /utg/){
+            $bin_size = cfg('utg-bin-size');
+            $bin_length = $bin_size * cfg('utg-bin-coverage');
+        }else{
+            $bin_size = cfg('bin-size', $opt_mode);
+            $bin_length = $bin_size * cfg('bin-coverage');
+        }
+
+        my $bwa_cmd = $pre_command.cfg('bwa-path')."bwa-proovread mem -b $bin_size -l $bin_length @bwa_opts $p->{bwa}{ref} $reads 2>$p->{bwa}{log} | ".cfg('samtools-path')."samtools view -@ $opt_threads -bS /dev/fd/0 >$p->{tmp_bam}" ;
 
         $VB->hline();
         $VB->verbose($bwa_cmd);
@@ -1389,7 +1398,7 @@ sub correct_sr_mt{
                         : 1 / ${$x}{'--chunk-step'};
             }
             $max_cov = $opt_cov * $xf * cfg('coverage-scale-factor');
-            $bin_size = cfg('bin-size');
+            $bin_size = cfg('bin-size', $opt_mode);
         }
 
         
