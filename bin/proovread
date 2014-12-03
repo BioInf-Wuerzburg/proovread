@@ -39,7 +39,7 @@ use Time::HiRes qw(usleep);
 use Data::Dumper;
 $Data::Dumper::Sortkeys = 1;
 
-our $VERSION = '2.07';
+our $VERSION = '2.08';
 
 my $RealLib = "$RealBin/../lib/";
 my $RealPerl = "perl -I${RealLib} $RealBin";
@@ -662,6 +662,7 @@ my @lr_bps;
 my $sr_bps_total;
 my $lr_bps_total;
 my $estimated_coverage;
+my @masked_fracs = ();
 
 while($TC < $#TASKS){
 	$TC++;
@@ -716,7 +717,7 @@ while($TC < $#TASKS){
                 
                 my $masked_frac;
 		($lr_chunk_offsets, $masked_frac) = correct_sr_mt($lr_chunk_offsets);
-                mask_shortcut_frac($masked_frac);
+                mask_shortcut_frac($masked_frac, \@masked_fracs);
 		
 	}elsif($TASK eq 'shrimp-finish'){
 		my $sr_finish_files;
@@ -817,7 +818,7 @@ while($TC < $#TASKS){
 
                 my $masked_frac;
 		($lr_chunk_offsets, $masked_frac) = correct_sr_mt($lr_chunk_offsets);
-                mask_shortcut_frac($masked_frac);
+                mask_shortcut_frac($masked_frac, \@masked_fracs);
                 
         }elsif($TASK =~ m/^ccs-\d+/){
             my $fqi = task_file_name('.fq', task => $TASKS[$TC-1]);
@@ -839,9 +840,9 @@ while($TC < $#TASKS){
             $VB->hline;
         
             $V->exit("ccseq failed: $?\n") if $?;
-            $VB->nline;
-            $VS->verbose(sprintf "Masked: %0.1f%%", $bpN/$bpt*100);
-            $VB->nline;
+            # $VB->nline;
+            # $VS->verbose(sprintf "Masked: %0.1f%%", $bpN/$bpt*100);
+            # $VB->nline;
             
             $lr_chunk_offsets = chunk_index($fqo);
             
@@ -1859,16 +1860,24 @@ sub cfg{
 sub mask_shortcut_frac{
     my $mask_shortcut_frac = cfg('mask-shortcut-frac');
     return if (! $mask_shortcut_frac || $TC >= @TASKS-2); # no need to check in second to last task
-    my ($masked_frac) = @_;
-    
+    my ($masked_frac, $masked_fracs) = @_;
+    my $masked_gain = cfg('mask-min-gain-frac');
+    my $masked_prev = @$masked_fracs ? ${$masked_fracs}[-1] : -$masked_gain ;
+
     if($masked_frac > $mask_shortcut_frac){
-        $VS->verbose("Masked more than ". $mask_shortcut_frac*100 ."% - skipping all but last iteration");
+        $VS->verbose("Masked > ". $mask_shortcut_frac*100 ."% total - skipping all but last iteration");
+        $V->nline;
+        splice(@TASKS, $TC+1, $#TASKS-$TC-1);
+    }elsif($masked_prev && ($masked_frac - $masked_gain) < $masked_prev ){
+        $VS->verbose("Masked < ". $masked_gain*100 ."% new - skipping all but last iteration");
         $V->nline;
         splice(@TASKS, $TC+1, $#TASKS-$TC-1);
     }else{
-        $VS->verbose("Masked less than ". $mask_shortcut_frac*100 ."% - continuing iterations");
+        $VS->verbose("Masked < ". $mask_shortcut_frac*100 ."% total / > ". $masked_gain*100 ."% new - continuing");
         $V->nline;
     }
+
+    push @$masked_fracs, $masked_frac;
 }
 
 
