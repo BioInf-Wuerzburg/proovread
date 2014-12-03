@@ -1353,7 +1353,6 @@ sub read_long{
                    '--in' => $lrpw->{file},
                    '--out' => task_file_name('.masked.fa', task => $TASKS[$TC] ),
                    '--fasta' => '',
-                   '--quiet' => '',
                    '--lower-case' => '',
                    '--phred-offset' => 33,
                   );
