@@ -504,6 +504,7 @@ my @or_bps;
 
 my $min_or_length;
 my $max_or_dev;
+my $first_chunk = 1;
 
 if($opt_utg_file && @$opt_utg_file){
 	$VS->nline;
@@ -701,7 +702,7 @@ while($TC < $#TASKS){
 
 		run_shrimp(
 			sr_files => $opt_sr_file,
-			sr_sampling => cfg('sr-sampling', $TASK),
+			sr_sampling => cov2seqchunker($opt_cov, cfg('sr-coverage', $TASK)),
 			shrimp => {
 				cfg($TASK), # basic shrimp params from cfg
 				'verbose' => 1,
@@ -804,7 +805,7 @@ while($TC < $#TASKS){
 
 		run_bwa(
 			or_files => $opt_sr_file,
-			sr_sampling => cfg('sr-sampling', $TASK),
+			sr_sampling => cov2seqchunker($opt_cov, cfg('sr-coverage', $TASK)),
 			bwa => {
 				cfg($TASK), # basic task params from cfg
 				'ref' => $ref_file,
@@ -1029,7 +1030,7 @@ sub run_shrimp{
                                  'pre_command' => seq_chunker(
                                                               'NO_EXEC',
                                                               $sr_files,
-                                                              %{cfg('sr-sampling', $TASK)},
+                                                              %{cov2seqchunker($opt_cov, cfg('sr-coverage', $TASK))},
                                                              ) . ' | ',
                                 )
                               : ('reads' => $sr_files)
@@ -1147,7 +1148,9 @@ sub run_bwa{
         $bin_length = $bin_size * cfg('utg-bin-coverage');
     } else {
         $bin_size = cfg('bin-size', $opt_mode);
-        $bin_length = $bin_size * cfg('bin-coverage');
+        my $task_cov = cfg('sr-coverage', $TASK);
+        my $bin_cov = ($opt_cov < $task_cov ? $opt_cov : $task_cov);
+        $bin_length = $bin_size * $bin_cov;
     }
 
     my $bwa_cmd = $pre_command.cfg('bwa-path')."bwa-proovread mem -b $bin_size -l $bin_length @bwa_opts $p->{bwa}{ref} /dev/fd/0 2>$p->{bwa}{log} | ".cfg('samtools-path')."samtools view -@ $opt_threads -bS /dev/fd/0 >$p->{tmp_bam}" ;
@@ -1359,24 +1362,14 @@ sub correct_sr_mt{
 	$V->nline;
 	$VS->verbose("Correcting Sequences (".@$lr_chunk_offsets." batches)");
 
-
-        # TODO: bin-size / utg-bin-size
-        # TODO: --utg and coverage -> 1
-        # TODO: --coverage needs to be adjusted coverage if there is no more tmp_sam
-        # $opt_cov * $xf (sampling factor) * $cov_scale_factor
         my $max_cov;
         my $bin_size;
         if($TASK =~ /utg/){
             $max_cov = 1;
             $bin_size = cfg('utg-bin-size');
         }else{
-            my $xf=1;
-            if(my $x = cfg('sr-sampling',$TASK)){ # adjust if sampling
-                $xf = exists ${$x}{'--chunks-per-step'} 
-                    ? ${$x}{'--chunks-per-step'} / ${$x}{'--chunk-step'}
-                        : 1 / ${$x}{'--chunk-step'};
-            }
-            $max_cov = $opt_cov * $xf * cfg('coverage-scale-factor');
+            my $task_cov = cfg('sr-coverage', $TASK);
+            $max_cov = ($opt_cov < $task_cov ? $opt_cov : $task_cov) * cfg('coverage-scale-factor');
             $bin_size = cfg('bin-size', $opt_mode);
         }
 
@@ -1895,6 +1888,22 @@ sub check_binary{
 }
 
 
+sub cov2seqchunker{
+    my ($c, $tc) = @_;
+    # don't sample if target coverage is more than 80% of given coverage
+    return 0 if ($c*0.8) < $tc;
+
+    my $chunks_per_step = int((cfg('sr-chunk-step') * ($tc/$c)) +.5);
+    my $sc = {
+              '--chunk-number' => cfg('sr-chunk-number'),
+              '--chunk-step' => cfg('sr-chunk-step'),
+              '--chunks-per-step' => $chunks_per_step,
+              '--first-chunk' => $first_chunk, # an ugly global, 'cause its late and i'm tired
+            };
+    $first_chunk+= $chunks_per_step;
+    $first_chunk-= cfg('sr-chunk-step') if $first_chunk > cfg('sr-chunk-step');
+    return $sc;
+}
 
 ##------------------------------------------------------------------------##
 
