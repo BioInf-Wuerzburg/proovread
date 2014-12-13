@@ -39,7 +39,7 @@ use Time::HiRes qw(usleep);
 use Data::Dumper;
 $Data::Dumper::Sortkeys = 1;
 
-our $VERSION = '2.09';
+our $VERSION = '2.10';
 
 my $RealLib = "$RealBin/../lib/";
 my $RealPerl = "perl -I${RealLib} $RealBin";
@@ -984,75 +984,69 @@ Run and process shrimp
 =cut
 
 sub run_shrimp{
-	my $p = {
-		sr_files => [],
-		sr_sampling => 0,
-		shrimp => {},
-		tmp_bam => task_file_name("_tmp.bam"),
-		@_
-	};
+    my $p = {
+             sr_files => [],
+             sr_sampling => 0,
+             shrimp => {},
+             tmp_bam => task_file_name("_tmp.bam"),
+             @_
+            };
 	
-	$V->nline;
-	$VS->verbose("Running task ".$TASK);
+    $V->nline;
+    $VS->verbose("Running task ".$TASK);
 	
-	# Index genome file first and save projection for multiple short read
-	#  files
-	$VS->verbose("Indexing Long reads");
+    # Index genome file first and save projection for multiple short read
+    #  files
+    $VS->verbose("Indexing Long reads");
 	
-	# init shrimp handler
-	my $shrimp_ldx = Shrimp->new( 
-                %{$p->{shrimp}},
-                bin => cfg('shrimp-path').'gmapper-ls',
-                '--save' => task_file_name("_shrimp_idx"),
-		'log' => task_file_name(suffix => "_shrimp_idx.log"),
-	);
+    # init shrimp handler
+    my $shrimp_ldx = Shrimp->new( 
+                                 %{$p->{shrimp}},
+                                 bin => cfg('shrimp-path').'gmapper-ls',
+                                 '--save' => task_file_name("_shrimp_idx"),
+                                 'log' => task_file_name(suffix => "_shrimp_idx.log"),
+                                );
 
-	$VB->hline();
-	$VB->verbose($shrimp_ldx->command());
-	$VB->hline();
+    $VB->hline();
+    $VB->verbose($shrimp_ldx->command());
+    $VB->hline();
 	
-	# run shrimp
-	$shrimp_ldx->run->finish;
+    # run shrimp
+    $shrimp_ldx->run->finish;
 
-	my $sr_file_c = 0;
+    my $sr_files = "@{$p->{sr_files}}";
 	
-	### foreach sr file read mappings	
-	foreach my $sr_file (@{$p->{sr_files}}){
-		
-		$VS->verbose("Mapping short reads `$sr_file`");
+    $VS->verbose("Mapping short reads `$sr_files`");
 
-		# init shrimp handler
-		my $shrimp = Shrimp->new( 
-			%{$p->{shrimp}},
-                        bin => cfg('shrimp-path').'gmapper-ls',
-			'ref' => undef,
-			($p->{sr_sampling}
-				? (
-					'reads' => '/dev/fd/0',
-					'pre_command' => seq_chunker(
-						'NO_EXEC',
-						$sr_file,
-						%{cfg('sr-sampling', $TASK)},
-					) . ' | ',
-				)
-				: ('reads' => $sr_file)
-			),
-			'--load' => task_file_name("_shrimp_idx"),
-			'-s' => undef, # cannot specify seeds when loading genome
-		);
+    # init shrimp handler
+    my $shrimp = Shrimp->new( 
+                             %{$p->{shrimp}},
+                             bin => cfg('shrimp-path').'gmapper-ls',
+                             'ref' => undef,
+                             ($p->{sr_sampling}
+                              ? (
+                                 'reads' => '/dev/fd/0',
+                                 'pre_command' => seq_chunker(
+                                                              'NO_EXEC',
+                                                              $sr_files,
+                                                              %{cfg('sr-sampling', $TASK)},
+                                                             ) . ' | ',
+                                )
+                              : ('reads' => $sr_files)
+                             ),
+                             '--load' => task_file_name("_shrimp_idx"),
+                             '-s' => undef, # cannot specify seeds when loading genome
+                            );
 
-                my $shrimp_log = task_file_name("_shrimp_sr".$sr_file_c.".log");
-                my $shrimp_cmd = $shrimp->command()." 2>$shrimp_log | ".cfg('samtools-path')."samtools view -@ $opt_threads -bS /dev/fd/0 >$p->{tmp_bam}" ;
+    my $shrimp_log = task_file_name("_shrimp_sr.log");
+    my $shrimp_cmd = $shrimp->command()." 2>$shrimp_log | ".cfg('samtools-path')."samtools view -@ $opt_threads -bS /dev/fd/0 >$p->{tmp_bam}" ;
 
-                $VB->hline();
-                $VB->verbose($shrimp_cmd);
-                $VB->hline();
-                qx($shrimp_cmd);
+    $VB->hline();
+    $VB->verbose($shrimp_cmd);
+    $VB->hline();
+    qx($shrimp_cmd);
                 
-                $V->exit("shrimp failed: $?\n", do { local $/; local @ARGV = ("$shrimp_log") ; <> }) if $?;
-
-		$sr_file_c++;
-	}
+    $V->exit("shrimp failed: $?\n", do { local $/; local @ARGV = ("$shrimp_log") ; <> }) if $?;
 }
 
 =head2 run_blasr
@@ -1072,29 +1066,24 @@ sub run_blasr{
     $V->nline;
     $VS->verbose("Running task ".$TASK);
 	
-    my $or_file_c = 0;
+    my $or_files = "@{$p->{or_files}}";
 	
-    ### foreach sr file read mappings	
-    foreach my $or_file (@{$p->{or_files}}) {
-		
-        $VS->verbose("Mapping reads `$or_file`");
+    $VS->verbose("Mapping reads `$or_files`");
 
-        my @blasr_opts;
-        while(my ($k, $v) = each %{$p->{blasr}}){
-            push @blasr_opts, $k, $v if $k =~ /^-/;
-        }
-
-        my $blasr_cmd = cfg('blasr-path')."blasr $or_file $p->{blasr}{ref} @blasr_opts -sam 2>$p->{blasr}{log} | ".cfg('samtools-path')."samtools view -@ $opt_threads -bS /dev/fd/0 >$p->{tmp_bam}";
-
-        $VB->hline();
-        $VB->verbose($blasr_cmd);
-        $VB->hline();
-        qx($blasr_cmd);
-
-        $V->exit("blasr failed: $?\n", do { local $/; local @ARGV = ("$p->{blasr}{log}") ; <> }) if $?;
-
-        $or_file_c++;
+    my @blasr_opts;
+    while (my ($k, $v) = each %{$p->{blasr}}) {
+        push @blasr_opts, $k, $v if $k =~ /^-/;
     }
+
+    my $blasr_cmd = cfg('blasr-path')."blasr $or_files $p->{blasr}{ref} @blasr_opts -sam 2>$p->{blasr}{log} | ".cfg('samtools-path')."samtools view -@ $opt_threads -bS /dev/fd/0 >$p->{tmp_bam}";
+
+    $VB->hline();
+    $VB->verbose($blasr_cmd);
+    $VB->hline();
+    qx($blasr_cmd);
+
+    $V->exit("blasr failed: $?\n", do { local $/; local @ARGV = ("$p->{blasr}{log}") ; <> }) if $?;
+
 }
 
 
@@ -1129,57 +1118,47 @@ sub run_bwa{
     qx($bwa_index_cmd);
     $V->exit("bwa failed: $?\n", do { local $/; local @ARGV = ("$p->{bwa}{log}") ; <> }) if $?;
     
-    my $or_file_c = 0;
     my $pg_rsp;
     my $pg_step;
 	
     ### foreach sr file read mappings	
-    foreach my $or_file (@{$p->{or_files}}) {
+    my $or_files = "@{$p->{or_files}}";
 		
-        my $or_count_netto = $or_count[$or_file_c];
-		
-        $VS->verbose("Mapping reads `$or_file`");
+    $VS->verbose("Mapping reads `$or_files`");
 
-        my @bwa_opts;
-        while(my ($k, $v) = each %{$p->{bwa}}){
-            push @bwa_opts, $k, $v if $k =~ /^-/;
-        }
-
-        my $pre_command = "";
-        my $reads;
-        if($p->{sr_sampling}){
-            $pre_command = seq_chunker(
-                                       'NO_EXEC',
-                                       $or_file,
-                                       %{$p->{sr_sampling}},
-                                      )
-                . ' | ';
-
-            $reads = '/dev/fd/0';
-        }else{
-            $reads = $or_file
-        }
-
-        my ($bin_size, $bin_length);
-        if($TASK =~ /utg/){
-            $bin_size = cfg('utg-bin-size');
-            $bin_length = $bin_size * cfg('utg-bin-coverage');
-        }else{
-            $bin_size = cfg('bin-size', $opt_mode);
-            $bin_length = $bin_size * cfg('bin-coverage');
-        }
-
-        my $bwa_cmd = $pre_command.cfg('bwa-path')."bwa-proovread mem -b $bin_size -l $bin_length @bwa_opts $p->{bwa}{ref} $reads 2>$p->{bwa}{log} | ".cfg('samtools-path')."samtools view -@ $opt_threads -bS /dev/fd/0 >$p->{tmp_bam}" ;
-
-        $VB->hline();
-        $VB->verbose($bwa_cmd);
-        $VB->hline();
-        qx($bwa_cmd);
-
-        $V->exit("bwa failed: $?\n", do { local $/; local @ARGV = ("$p->{bwa}{log}") ; <> }) if $?;
-
-        $or_file_c++;
+    my @bwa_opts;
+    while (my ($k, $v) = each %{$p->{bwa}}) {
+        push @bwa_opts, $k, $v if $k =~ /^-/;
     }
+
+    my $pre_command = "cat $or_files | ";
+    if ($p->{sr_sampling}) {
+        $pre_command = seq_chunker(
+                                   'NO_EXEC',
+                                   $or_files,
+                                   %{$p->{sr_sampling}},
+                                  )
+            . ' | ';
+    }
+
+    my ($bin_size, $bin_length);
+    if ($TASK =~ /utg/) {
+        $bin_size = cfg('utg-bin-size');
+        $bin_length = $bin_size * cfg('utg-bin-coverage');
+    } else {
+        $bin_size = cfg('bin-size', $opt_mode);
+        $bin_length = $bin_size * cfg('bin-coverage');
+    }
+
+    my $bwa_cmd = $pre_command.cfg('bwa-path')."bwa-proovread mem -b $bin_size -l $bin_length @bwa_opts $p->{bwa}{ref} /dev/fd/0 2>$p->{bwa}{log} | ".cfg('samtools-path')."samtools view -@ $opt_threads -bS /dev/fd/0 >$p->{tmp_bam}" ;
+
+    $VB->hline();
+    $VB->verbose($bwa_cmd);
+    $VB->hline();
+    qx($bwa_cmd);
+
+    $V->exit("bwa failed: $?\n", do { local $/; local @ARGV = ("$p->{bwa}{log}") ; <> }) if $?;
+
 }
 
 
