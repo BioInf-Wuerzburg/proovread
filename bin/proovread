@@ -1803,7 +1803,12 @@ Return parameter settings from %cfg w/r/t given task and global options
 
 sub cfg{
 	my ($k, $t) = @_;
-	return undef unless exists $cfg{$k};
+
+        unless (exists $cfg{$k}){
+            $k =~ s/-\d+$//;
+            return undef unless exists $cfg{$k};
+        }
+        
 	return $cfg{$k} unless ref $cfg{$k};
 	
 	if(ref $cfg{$k} eq "ARRAY"){
@@ -1820,10 +1825,14 @@ sub cfg{
 	my $v = exists $p{DEF} ? $p{DEF} : undef;
 	
 	if(defined $t){
-		if($t =~ /[^-0-9]/){
-			$v = $p{$t} if exists $p{$t};
-		}else{
-			$v = $p{$TASKS[$t]} if exists $p{$TASKS[$t]};
+		if($t =~ /[^-0-9]/){ # task by id
+                    if(exists $p{$t}){
+                        $v = $p{$t}
+                    }elsif($t =~ s/-\d+$//){ # task-id w/o counter bwa-mr[-1/-2/-3...]
+                        $v = $p{$t} if exists $p{$t};
+                    }
+		}else{ # task by idx
+                    $v = $p{$TASKS[$t]} if exists $p{$TASKS[$t]};
 		}
 	}
 	return $v;
