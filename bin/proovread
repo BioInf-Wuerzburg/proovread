@@ -507,7 +507,16 @@ my $max_or_dev;
 my $first_chunk = 1;
 
 if($opt_utg_file && @$opt_utg_file){
-	$VS->nline;
+
+    die "\n\n!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+There have been reports indicating a critial problem with unitig-modes. I'm
+currently investigating. Until the issue has been resolved, I strongly advice
+against using unitig correction modes. If you still want to use it, remove
+this paragraph from your source code:\n".__FILE__.":".__LINE__."\n".
+    "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n\n";
+
+
+    	$VS->nline;
   	$VS->verbose("Checking alternative read files");
 	
 	# short read files
