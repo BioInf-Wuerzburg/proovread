@@ -216,6 +216,7 @@ open(SAM, "$samtools view -H $opt_bam_file |") or $v->exit($!);
 my $sp = Sam::Parser->new(fh => \*SAM);
 
 Sam::Seq->Trim($cfg{'sr-trim'});
+Sam::Seq->InDelTabooLength($cfg{'sr-indel-taboo-length'}, 1);
 Sam::Seq->InDelTaboo($cfg{'sr-indel-taboo'});
 Sam::Seq->MaxCoverage($opt_cov);
 Sam::Seq->BinSize($opt_bin_size);
