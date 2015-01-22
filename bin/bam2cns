@@ -14,9 +14,9 @@ use List::Util;
 use Verbose;
 use Verbose::ProgressBar;
 
-use Sam::Parser;
-use Sam::Alignment 0.08 ':flags';
-use Sam::Seq 0.10;
+use Sam::Parser 0.11;
+use Sam::Alignment 0.10 ':flags';
+use Sam::Seq 0.16;
 
 use Fasta::Parser;
 use Fasta::Seq;
@@ -31,7 +31,7 @@ use constant {
 
 use Storable qw(dclone);
 
-our $VERSION  = '0.01';
+our $VERSION  = '0.10';
 
 
 
@@ -56,7 +56,7 @@ Compute consensus sequences from BAM file.
 ##------------------------------------------------------------------------##
 
 # load core defaults
-my $cfg_core_file = "$RealBin/../proovread.cfg"; 
+my $cfg_core_file = "$RealBin/../proovread.cfg";
 my %cfg = do $cfg_core_file;
 
 # custom config
@@ -64,7 +64,7 @@ my $cfg;
 for(my $i=0; $i<@ARGV; $i++){
 	if($ARGV[$i] =~ /-c$|--cfg$/){
 		$cfg = $ARGV[$i+1];
-		%cfg = (%cfg, do "$cfg"); 
+		%cfg = (%cfg, do "$cfg");
 		last;
 	}
 }
@@ -186,9 +186,15 @@ Toggle debug messages.
         'bin-size' => (my $opt_bin_size = 20),
         'fallback-phred=i' => \(my $opt_fallback_phred = undef),
 
+        'invert-scores!'=> \(my $opt_invert_scores),
+
+        'utg-mode!' => \(my $opt_utg_mode),
+        'rep-coverage=i' => \(my $opt_rep_coverage = undef),
+        'min-ncscore=f' => \(my $opt_min_ncscore = undef),
+
         'mask-weak-reads=i' => \(my $opt_mask_weak_reads = 20),
         'ignore-weak-reads=i' => \(my $opt_ignore_weak_reads = 20),
-        
+
         'append!' => \(my $opt_append),
         'samtools-path' => \(my $opt_samtools_path = undef),
         'debug!' => \(my $debug = $cfg{debug}),
@@ -222,6 +228,12 @@ Sam::Seq->MaxCoverage($opt_cov);
 Sam::Seq->BinSize($opt_bin_size);
 Sam::Seq->MaxInsLength($opt_max_ins_length);
 Sam::Seq->FallbackPhred($opt_fallback_phred) if defined($opt_fallback_phred);
+Sam::Seq->RepCoverage($opt_rep_coverage) if defined $opt_rep_coverage;
+Sam::Seq->MinNCScore($opt_min_ncscore) if defined $opt_min_ncscore;
+
+Sam::Alignment->InvertScores(1) if $opt_invert_scores;
+
+
 # use glob, to allow glob pattern instead of full filename (fa/fq is decided by parser)
 my $opt_ref_file;
 my $rpr;
@@ -238,7 +250,7 @@ if($opt_ref_pat){
 		$v->exit("Cannot guess phred offset from provided reference file, please specify --qv-offset")
 			unless $po;
 		$rpr->phred_offset($po);
-		
+
 	}else{
 		$rpr = Fasta::Parser->new(file => $opt_ref_file)->check_format;
 		unless ($opt_ignore_mcr){
@@ -283,14 +295,14 @@ if($rpr){ # read fasta to get ref id, length and seq
 			len => length($ref->seq),
 			id => $ref->id
 		};
-		push @LR_IDS, $ref->id;	
+		push @LR_IDS, $ref->id;
           	last if $opt_max_reads && ++$ref_c >= $opt_max_reads;
 
 	}
 }else{# read the sam header to get ref ids and length
 	while(my %h = $sp->next_header_line('SQ')){
 		$LR{$h{'SN'}} = {
-			id => $h{SN}, 
+			id => $h{SN},
 			len => $h{LN},
 		};
 	}
@@ -310,7 +322,7 @@ foreach my $ref_id(@LR_IDS){
 
     open(SAM, "$samtools view $opt_bam_file $ref_id |") or $v->exit($!);
     my $sp = Sam::Parser->new(fh => \*SAM);
-    
+
     $sso = Sam::Seq->new(
                          id => $LR{$ref_id}{id},
                          len => $LR{$ref_id}{len},
@@ -321,8 +333,15 @@ foreach my $ref_id(@LR_IDS){
         $v->exit("$ref_id ne $aln->rname") unless $ref_id eq $aln->rname;
         $v->exit("Cannot handle BAM secondary alignments without seq/qual") if $aln->seq eq "*";
 
-        $sso->add_aln_by_score($aln)        
+        if ($opt_utg_mode) { # no binning for utgs
+            $sso->add_aln($aln);
+        }else {
+            $sso->add_aln_by_score($aln);
+        }
     }
+
+    $sso->filter_by_ncscore if defined $opt_min_ncscore;
+    $sso->filter_rep_region_alns if defined $opt_rep_coverage;
 
     generate_consensus($sso);
 
@@ -342,7 +361,7 @@ sub generate_consensus{
 	my $sso = shift; # Sam::Seq object
 
         my @mcrs = ();
-	
+
 	if($rpr && ! $opt_ignore_mcr){
 		if(my $mcrs = $sso->ref->desc){
                         while($mcrs =~ /MCR\d+:(\d+),(\d+)/g){
@@ -350,10 +369,39 @@ sub generate_consensus{
 			}
 		};
 	}
-	
+
+
+        # filter contained alignments and add overlap regions to ignore_coords
+        my @owin;
+        if ( $opt_utg_mode ) {
+            $sso->filter_contained_alns;
+
+            # filter overlap regions
+            my @cov = $sso->coverage(1);
+            my $cmax = $opt_rep_coverage;
+            my $high = 0;
+
+
+            for (my $i=0; $i<@cov; $i++) {
+                if ($cov[$i] < $cmax) {
+                    if ($high) {
+                        $high = 0;
+                        $owin[$#owin][1] = $i - $owin[$#owin][0];
+                    }
+                } else {
+                    unless ($high) {
+                        $high = 1;
+                        push @owin, [$i];
+                    }
+                }
+            }
+            $owin[$#owin][1] = @cov - $owin[$#owin][0] if $high;
+        }
+
+
 	my $con = $sso->consensus(
                                   use_ref_qual => $opt_use_ref_qual,
-                                  ignore_coords => \@mcrs,
+                                  ignore_coords => [@mcrs, @owin],
                                   qual_weighted => $opt_qual_weighted,
                                  );
 
@@ -361,16 +409,16 @@ sub generate_consensus{
             print $trh "$con";
             print $trh $con->{trace},"\n";
         }
-        
+
 	# chimera
 	detect_chimera($sso, $con) if $opt_detect_chimera;
-	
+
 	# undef state matrix to make memory availabe again
-	$sso->{_state_matrix} = {}; 
+	$sso->{_state_matrix} = {};
 
 	# write current fastq
 	print $fqh "$con";
-	
+
 }
 
 =head2 detect_chimera
@@ -380,25 +428,25 @@ sub generate_consensus{
 sub detect_chimera{
     my ($sso, $con) = @_;
     my @coords = $sso->chimera();
-    
+
     if (@coords) {
         my $i;
         my %cigar = (M=>0, I=>0, D=>0);
         for ($i=0; $i<@coords; $i++) {
-				
+
             my $fr = $coords[$i]{col_range}[0];
             my $to = $coords[$i]{col_range}[1];
             my $sc = $coords[$i]{score};
-				
+
             # use cigar to compute correct location of chimera coords on corrected seq.
             # -I, +D
             # get read cigar, eg 80M2D3M
             # /g remembers position even between multiple calls to while on same cigar
             # hence we can just always add to %cigar outside the for loop
-            while ($con->{cigar} =~ m/(\d+)(\w)/g && ($cigar{M}+$cigar{I} < $fr)) { 
+            while ($con->{cigar} =~ m/(\d+)(\w)/g && ($cigar{M}+$cigar{I} < $fr)) {
                 $cigar{$2}+=$1;
             }
-				
+
             my $pos_corr = $cigar{D}-$cigar{I}; # corrected string has additional nucs
             # at D's and has lost nucs at I's
             $fr+=$pos_corr;

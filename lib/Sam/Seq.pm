@@ -3,7 +3,7 @@ package Sam::Seq;
 use warnings;
 use strict;
 
-# $Id: Seq.pm 134 2013-05-21 14:24:48Z s187512 $
+use overload '""' => \&string;
 
 use List::Util;
 
@@ -13,7 +13,7 @@ use lib '../';
 use Verbose;
 
 use Sam::Parser;
-use Sam::Alignment ':flags';
+use Sam::Alignment 0.10 ':flags';
 
 use Fastq::Seq;
 use Fasta::Seq;
@@ -21,15 +21,15 @@ use Fasta::Seq;
 use constant {
     # :) scaling constant for frequency to phred conversion. The higher
     # the value, the more trust is put into frequency (proovread-1.01: 50)
-    PROOVREAD_CONSTANT => 120
+    PROOVREAD_CONSTANT => 120,
 };
 
-our $VERSION = '0.12';
+our $VERSION = '0.16';
 
 
 
 
-=head1 NAME 
+=head1 NAME
 
 Sam::Seq.pm
 
@@ -42,147 +42,20 @@ Class for handling sam reference sequences and its aligned reads.
 =head1 SYNOPSIS
 
   use Sam::Seq;
-  
-=cut
 
-=head1 CHANGELOG
+  my $sp = Sam::Parser->new(fh => \*SAM);
+  my %ss;
 
-=head2 0.10
+  while (my %h = $sp->next_header_line('SQ')) {
+      $ss{$h{SN}} = Sam::Seq->new(id=>$h{SN}, len => $h{LN});
+  }
 
-=over
-
-=item [Feature] Some mappers, e.g. bowtie2 create a two asymetric gaps instead of 
- a mismatch, if it is cheaper. This case is now correctly handled like a mismatch. 
-
-=item [Feature] Added trace to consensus call, which is compressed to cigar
- string and returned as attributes "trace" and "cigar" of the Fastq::Seq.
-
-=back
-
-=head2 0.09
-
-=over
-
-=item [Feature] $Sam::Seq::MaxInsLength determines the maximum allowed 
- insertion length.
-
-=item [Change] C<< $fq->substr_seq >> for precalculated hcrs, 
- C<< $fq->slice_seq >> is deprecated. 
-
-=item [Change] State matrix is now by default reinitialized by 
- _state_matrix call, unless $append_matrix is set to TRUE.
-
-=item [Feature] Chimera detection
-
-=item [Change] Replaced C<each> and C<keys> statements on reference
- values, which are considered experimental features and would 
- require Perl 5.014. Also removed C<use 5.014>. 
-
-=back
-
-=head2 0.08
-
-=over
-
-=item [Change] In order to implement InDelTaboo correctly, the states
- of an alignment are now computed independently of the state matrix, then 
- trimmed and after that added to the global matrix.
-
-=item [Feature] C<< $Sam::Seq::InDelTaboo >> and C<< Sam::Seq->InDelTaboo() >>
-
-=item [Feature] length normalize score to handle varying short read lengths
-
-=back
-
-=head2 0.07
-
-=over
-
-=item [Change] Added svn:keywords
-
-=back
-
-=head2 0.06
-
-=over
-
-=item [Change]  C<< use lib '../' >>: Prioritise libs in same path over default
- @INC libs
-
-=item [Feature] Added C<< Sam::Seq->BinSize >>, C<< Sam::Seq->BinMaxCoverage >>
- and C<< Sam::Seq->PhredOffset >> to controll the corresponding class attributes.
-
-=back
-
-=over
-
-=item 0.05 [Thomas Hackl 2012-11-29]
-
-New phred score calculation, using square root of coverage 
- probability of consensus state C<< freq2phred >>.
-
-Ignore long insertions (length > 3) in query, since they are more
- likely to be mapping artefacts caused by cheap gap costs, than 
- actual pacbio sequencing errors (would be 4 or more insertions in
- a row...)
-
-Merging of previously corrected FASTQs to _state_matrix now 
- uses C<< phred2freq >> to recompute frequency of chosen state.
-
-=item 0.04 [Thomas Hackl 2012-11-02]
-
-Set a minimum phred score of 10 (10% error rate) in case anything has been 
- aligned. 
-
-=item 0.03
-
-Reference and consensus sequences are now kept as Fasta::Seq/Fastq:Seq 
- objects within the Sam::Seq object;
-
-=item 0.02
-
-Merged Sam::Consensus functionality into this module.
-
-Alignments are now stored in globally, local bins for local coverage 
- estimation only hold pointer to the global store.
-
-Added Object ATTRIBUTES C<bin_size and bin_max_coverage>, which default to
- Class ATTRIBUTES C<$BinSize and $BinMaxCoverage>, respectively.
-
-=item 0.01
-
-Initial Alignment module. Provides Constructor, generic accessor 
- methods.
-
-=back
+  while (my $aln = $sp->next_aln) {
+      $ss{$aln->rname}->add_aln($aln);
+  }
 
 =cut
 
-
-=head1 TODO
-
-
-=over
-
-=item BUG
-
-Use of uninitialized value $idx in hash element at /storage/genomics/scripts/lib\
-/Sam/Seq.pm line 830, <$fh> line 54918.
-
-=item Tests
-
-=item Coverage
-
-Currently there is a stand-alone coverage() methods, which uses the 
- _state_matrix and returns an array of absolute coverage values and the
- consensus methods stores a coverage in phred style (chr+offset) in 
- $self->cov seq. This is redundant...
-
-
-
-=back
-
-=cut
 
 ##------------------------------------------------------------------------##
 
@@ -193,7 +66,7 @@ Currently there is a stand-alone coverage() methods, which uses the
 
 =head2 $V
 
-Verbose messages are handled using the Verbose.pm module. To 
+Verbose messages are handled using the Verbose.pm module. To
  customize verbose message behaviour, overwrite the attribute with
  another Verbose object created with the Verbose module.
 
@@ -221,16 +94,26 @@ our $PhredOffset = 33;
 
 =head2 InDelTaboo [0.1]
 
-Trim reads to prevent insertions/deletions within the first/last 
+Trim reads to prevent insertions/deletions within the first/last
  InDelTaboo fraction of the read. N=0 deactivates the feature.
 
 =cut
 
 our $InDelTaboo = 0.1;
 
+=head2 InDelTabooLength [undef]
+
+Trim reads to prevent insertions/deletions within the first/last
+ InDelTabooLength bps of the read. N=0 deactivates the feature. If defined,
+ superceeds relative InDelTaboo
+
+=cut
+
+our $InDelTabooLength = undef;
+
 =head2 $Trim
 
-Boolean. Deactivate trimming completely, including leading/trailing indels 
+Boolean. Deactivate trimming completely, including leading/trailing indels
  and InDelTaboo.
 
 =cut
@@ -252,6 +135,27 @@ Default 1. Used if alignment w/o qual is used in quality context
 =cut
 
 our $FallbackPhred = 1;
+
+=head2 $RepCoverage
+
+Default = 0, which deactivates the feature. If set triggers
+filter_rep_region_alns for each region with higher coverage.
+
+=cut
+
+our $RepCoverage = 0;
+
+
+=head2 $MinScore/$MinNScore/$MinNCScore
+
+Minimum score/nscore/ncscore cutoffs for accoring filter_by_n/c/score()
+functions;
+
+=cut
+
+our $MinScore = undef;
+our $MinNScore = undef;
+our $MinNCScore = undef;
 
 # DEPRECATED
 #=head2 %Freqs2phreds
@@ -305,6 +209,42 @@ sub PhredOffset{
 	return $PhredOffset;
 }
 
+=head2 RepCoverage
+
+Get/Set $Sam::Seq::RepCoverage. Default 0.
+
+=cut
+
+sub RepCoverage{
+	my ($class, $cov) = @_;
+	$RepCoverage = $cov if defined $cov;
+	return $RepCoverage;
+}
+
+=head2 MinScore/MinNScore/MinNCScore
+
+Get/Set $Sam::Seq::MinScore/MinNScore/MinNCScore. Default undef.
+
+=cut
+
+sub MinScore{
+	my ($class, $score, $force) = @_;
+	$MinScore = $score if defined($score) || $force;
+	return $MinScore;
+}
+
+sub MinNScore{
+	my ($class, $score, $force) = @_;
+	$MinNScore = $score if defined($score) || $force;
+	return $MinNScore;
+}
+
+sub MinNCScore{
+	my ($class, $score, $force) = @_;
+	$MinNCScore = $score if defined($score) || $force;
+	return $MinNCScore;
+}
+
 =head2 InDelTaboo
 
 Get/Set $Sam::Seq::InDelTaboo. Default 10.
@@ -315,6 +255,18 @@ sub InDelTaboo{
 	my ($class, $indeltaboo) = @_;
 	$InDelTaboo = $indeltaboo if defined $indeltaboo;
 	return $InDelTaboo;
+}
+
+=head2 InDelTabooLength
+
+Get/Set $Sam::Seq::InDelTabooLength. Default undef.
+
+=cut
+
+sub InDelTabooLength{
+	my ($class, $indeltaboolength, $force) = @_;
+	$InDelTabooLength = $indeltaboolength if defined $indeltaboolength || $force;
+	return $InDelTabooLength;
 }
 
 =head2 Trim
@@ -382,11 +334,11 @@ sub Phreds2freqs{
 }
 
 
-=head2 Qual2phreds                                                                                                                                                     
+=head2 Qual2phreds
 
 Return the phred values of the quality string accorting to specified offset.
 
-=cut                                                                                      
+=cut
 
 sub Qual2phreds{
     my $class = shift;
@@ -404,7 +356,7 @@ NOTE: Not a Class Method
 
   # R
   Hx = function(x){
-  	p = x/sum(x); 
+  	p = x/sum(x);
   	-(sum(sapply(p, function(pi){pi*log2(pi)})))
   }
 
@@ -432,7 +384,7 @@ sub Trace2cigar{
 	my ($class, $trace) = @_;
         chomp($trace); # just to be safe
 
-	my $cigar = '';        
+	my $cigar = '';
         my $spos = 0;
 
         while($trace =~ /(\w)(?!\g{1})/g){
@@ -445,7 +397,7 @@ sub Trace2cigar{
         #	while($trace =~ m/(\w)(\g{1}*)/g){
         #		$cigar .= length($1.$2).$1;
         #	}
-        
+
 	return $cigar;
 }
 
@@ -468,12 +420,12 @@ sub State_matrix{
 	);
 
 	die unless defined ($p{alns} and $p{'length'}) || $p{matrix};
-	
+
 	# state matrix
 	my @S = $p{matrix}
 		? @{$p{matrix}}
 		: map{[]}1..$p{'length'};	# init state matrix
-	
+
 	# predefined states
 	my %states = %{$p{states}};
 
@@ -481,7 +433,7 @@ sub State_matrix{
         if($p{use_ref_qual} && $self->ref){
             my @seq = split (//, $self->ref->seq);
             my @freqs = Sam::Seq->Phreds2freqs($self->ref->phreds);
-            
+
             for(my $i=0; $i<@seq; $i++){
                 # never add 0, if nothing more matches, a 0 count might be introduced
                 next unless $freqs[$i];
@@ -491,7 +443,7 @@ sub State_matrix{
         }
 
         foreach my $aln (@{$p{alns}}){
-		
+
 		###################
 		### prepare aln ###
 		# get read seq
@@ -509,7 +461,7 @@ sub State_matrix{
 		# get read cigar, eg 80M2D3M1IM4
 		my @cigar = split(/(\d+)/,$aln->cigar);
 		shift @cigar;
-                
+
                 if($cigar[1] eq 'S'){
                     # just move on in query, do nothing else
                     $seq = substr($seq, $cigar[0]);
@@ -531,10 +483,10 @@ sub State_matrix{
                     pop @cigar;
                     pop @cigar;
                 }
-                
-                
+
+
 		$V->exit("Empty Cigar") unless @cigar;
-		
+
 		# reference position
 		my $rpos = $aln->pos-1;
 
@@ -546,10 +498,10 @@ sub State_matrix{
 			my $mc = 0;
 			my $dc = 0;
 			my $ic = 0;
-			my $InDelTabooLength = int($orig_seq_length * $InDelTaboo + 0.5);
+			my $indeltaboolength = $InDelTabooLength ? $InDelTabooLength : int($orig_seq_length * $InDelTaboo + 0.5);
 			for(my $i=0; $i<@cigar;$i+=2){
 				if($cigar[$i+1] eq 'M'){
-					if($mc + $ic + $cigar[$i] > $InDelTabooLength){
+					if($mc + $ic + $cigar[$i] > $indeltaboolength){
 						if($i){# there was something before this match
 							# only cut before this match
 							# trim cigar
@@ -571,20 +523,20 @@ sub State_matrix{
 					$V->exit("Unknown Cigar '".$cigar[$i+1]."'");
 				}
 			}
-			
+
 			# have to have kept at least 50 bps and 70% of original read length
 			#  to consider read for state matrix
 			next if length($seq) < 50  || (length($seq)/$orig_seq_length) < 0.7;
-			
+
 			# trim tail
-			my $tail=0;	
+			my $tail=0;
 			for(my $i=$#cigar-1; $i;$i-=2){
 				if($cigar[$i+1] eq 'M'){
 					$tail+=$cigar[$i];
-					if($tail > $InDelTabooLength){
+					if($tail > $indeltaboolength){
 						if($i < $#cigar-1){# there is after this match
 							# only cut before this match
-							my $tail_cut = $tail-$cigar[$i]; 
+							my $tail_cut = $tail-$cigar[$i];
 							# trim cigar
 							splice(@cigar, -($#cigar-($i+1)));
 							# trim seq
@@ -594,25 +546,25 @@ sub State_matrix{
 						last;
 					}
 				}elsif($cigar[$i+1] eq 'D'){ # ignore leading deletions, but adjust rpos
-	
+
 				}elsif($cigar[$i+1] eq 'I'){
 					$tail+=$cigar[$i];
 				}else{
 					$V->exit("Unknown Cigar '".$cigar[$i+1]."'");
 				}
 			}
-	
+
 			# have to have kept at least 50 bps and 70% of original read length
 			#  to consider read for state matrix
 			next if length($seq) < 50  || (length($seq)/$orig_seq_length) < 0.7;
 		}
-		
-		
+
+
 		#######################
 		### cigar to states ###
 		my @states;
                 my @squals;
-		
+
 		# cigar counter, increment by 2 to capture count and type of cigar (10,M) (3,I) (5,D) ...
 
 		my $qpos = 0; # usually 0, >0 for cigar S
@@ -634,8 +586,8 @@ sub State_matrix{
                             # append to prev state
                             #print STDERR "@cigar\n" unless @states;
                             if ($states[$#states] eq '-') {
-                                # some mappers, e.g. bowtie2 produce 1D1I instead of 
-                                # mismatchas (1M), as it is cheaper. This needs to be 
+                                # some mappers, e.g. bowtie2 produce 1D1I instead of
+                                # mismatchas (1M), as it is cheaper. This needs to be
                                 # corrected to a MM
                                 $states[$#states] = substr($seq,$qpos,$cigar[$i]);
                                 $squals[$#states] = substr($qua,$qpos,$cigar[$i]) if $p{qual_weighted};
@@ -643,7 +595,7 @@ sub State_matrix{
                             } else {
                                 $states[$#states] .= substr($seq,$qpos,$cigar[$i]);
                                 $squals[$#states] .= substr($qua,$qpos,$cigar[$i]) if $p{qual_weighted};
-                            }	
+                            }
                         } else {
                             $states[0] = substr($seq,$qpos,$cigar[$i]);
                             $squals[0] = substr($qua,$qpos,$cigar[$i]) if $p{qual_weighted};
@@ -653,11 +605,11 @@ sub State_matrix{
                         $V->exit("Unknown Cigar '".$cigar[$i+1]."'");
                     }
 		}
-		
-		
+
+
 		########################
 		### states to matrix ###
-		
+
 		for(my $i=0; $i<@states; $i++) {
                     if ($p{ignore_coords} && _is_in_range($rpos, $p{ignore_coords})) {
                         $rpos++;
@@ -667,7 +619,7 @@ sub State_matrix{
                     my $state = $states[$i];
 
                     if (length ($state) > 1 && ! exists $states{$state}) {
-                        $states{$state} = scalar keys %states; 
+                        $states{$state} = scalar keys %states;
                     }
 
                     if($p{qual_weighted}){
@@ -682,11 +634,11 @@ sub State_matrix{
                     }
                     $rpos++;
 		}
-	
+
 	}
-	
+
 	return \@S, \%states;
-	
+
 }
 
 
@@ -696,62 +648,61 @@ sub State_matrix{
 
 =head2 new
 
-Create a Sam::Seq object. Takes key => value representation. 
+Create a Sam::Seq object. Takes key => value representation.
 Returns a Sam::Seq object.
 
   ## defaults
-  id => undef,		
-  len => undef,           # length of the reference sequence, required			
+  id => undef,
+  len => undef,           # length of the reference sequence, required
   ref => undef,           # reference seq object, Fasta::Seq or Fastq::Seq
   con => undef,           # consensus seq, Fastq::Seq (+cov)
-  ref_merge_regions => [],# regions in the ref seq, to be included in 
+  ref_merge_regions => [],# regions in the ref seq, to be included in
                           #  consensus calling, ARRAY of Tuples (start, offset)
-  max_coverage => 50,     # assumed maximum coverage value for consensus 
+  max_coverage => 50,     # assumed maximum coverage value for consensus
                           #  quality value calculation
   sam => undef,           # associate with a Sam::Parser object, only an
-                          #  index positions to this file will be stored  
+                          #  index positions to this file will be stored
                           #  in _aln, data is assumed to be stored in this
-                          #  file at respective position and will be 
-                          #  retieved by reading from the Sam::Parser at 
+                          #  file at respective position and will be
+                          #  retieved by reading from the Sam::Parser at
                           #  this position
-                          # default no file -> everything in ram, _aln 
+                          # default no file -> everything in ram, _aln
                           #  contains real Sam::Alignment objects.
   is => undef,            # see Sam::Parser->is()
-                          
+
   bin_size => $Sam::Seq::BinSize,
   bin_max_coverage => $Sam::Seq::BinMaxCoverage,
   phred_offset => $Sam::Seq::PhredOffset,
-  
+
 
 =cut
 
 sub new{
 	my $class = shift;
 	my $self;
-	
+
 	$self = {
 		## defaults
-		id => undef,		
-		len => undef,			# length of the reference sequence, required			
+		id => undef,
+		len => undef,			# length of the reference sequence, required
 		ref => undef,			# reference seq object, Fasta::Seq or Fastq::Seq
 		con => undef,			# consensus seq, Fastq::Seq (+cov)
 		sam => undef,			# associate with a Sam::Parser object, only an
-								#  index positions to this file will be stored  
+								#  index positions to this file will be stored
 								#  in _aln, data is assumed to be stored in this
-								#  file at respective position and will be 
-								#  retieved by reading from the Sam::Parser at 
+								#  file at respective position and will be
+								#  retieved by reading from the Sam::Parser at
 								#  this position
-								# default no file -> everything in ram, _aln 
+								# default no file -> everything in ram, _aln
 								#  contains real Sam::Alignment objects.
 		max_coverage => $MaxCoverage,
 		bin_size => $BinSize,
 		bin_max_bases => $BinSize * $MaxCoverage,
 		phred_offset => $PhredOffset,
-		max_coverage => 50,
 		is => undef,
 		## custom overwrites
 		@_,
-		## protected				
+		## protected
 		_is => sub{return 1},	# don't set directly, use is()
 		_alns => {},			# reads or idx pos of reads in sam
 		_bin_alns => undef,		# position bins containing aln refs
@@ -769,7 +720,7 @@ sub new{
 			N => 5,
 			# .. complex states, dynamically added
 		}
-		
+
 	};
 
 
@@ -777,7 +728,7 @@ sub new{
 
 	# prepare is test routine
 	$self->is($self->{is}) if $self->{is};#
-	
+
 	# init bins
 	$self->_init_read_bins;
 	return $self;
@@ -797,12 +748,13 @@ sub new{
 
 =head2 add_aln_by_score
 
-Add a sam alignment object of a mapped illumina read to the object, based 
- on position and score. Takes a file position as second object. If provided
- this position is stored instead of the actual alignment, the position is 
- assumed to be a index pointing to the alignment in the file indicated by
- C<< $sam_seq->sam >>. Returns internal alignment id (>0) if aln has been 
- added, else 0.
+Add a sam alignment object of a mapped illumina read to the object, based on
+ position and score. Takes a file position as second object. If provided this
+ position is stored instead of the actual alignment, the position is assumed to
+ be a index pointing to the alignment in the file indicated by C<< $sam_seq->sam
+ >>. Returns internal alignment id (>0) if aln has been added, 0 if the
+ alignment did not make the threshold or undef, if alignment couldn't be
+ assessed, e.g. because it had no score/was unaligned.
 
   $sam_seq->add_aln_by_score($aln);
   $sam_seq->add_aln_by_score($aln, tell($sam_fh);
@@ -812,54 +764,32 @@ Add a sam alignment object of a mapped illumina read to the object, based
 
 sub add_aln_by_score{
 	my ($self, $aln) = @_;
-	
+
 	my $bin = $self->bin($aln);
-	return 0 if $aln->cigar() =~ /S/; # omit alignments outside bins
-	my $bases = length($aln->seq);
-	my $nscore = $aln->opt('AS') / $bases;
-#	use Data::Dumper;
-#	print Dumper({
-#		$aln->opt('AS'),
-#		aln => $aln->cigar,
-#		length => $self->len,
-#		bin => $bin,
-#		bin_max_bases => $self->{bin_max_bases},
-#		bin_bases => scalar @{$self->{_bin_bases}},
-#		qname => $aln->qname
-#	});
-	# if bin_bases are full, check if new nscore is good enough
+
+	my $ncscore = $aln->ncscore;
+        return undef unless defined $ncscore;
+
+	# if bin_bases are full, check if new ncscore is good enough
 	if( $self->{_bin_bases}[$bin] > $self->{bin_max_bases} ){
-		# ignore scores, that are too low
-		if( $nscore <= $self->{_bin_scores}[$bin][-1] ){
-			return 0; 
-		}else{ # sufficient score
-			# remove lowest scoring aln before adding new one
-			#  from score bins
-			pop(@{$self->{_bin_scores}[$bin]});
-			#  from length bin
-			my $rm_bases = pop(@{$self->{_bin_lengths}[$bin]});
-			
-			# remove aln from global store 
-			delete($self->{_alns}{
-					# and remove aln id from aln bins
-					pop(@{$self->{_bin_alns}[$bin]})
-				});
-				
-			# adjust bin_bases by length length difference of new and old alignment
-			$self->{_bin_bases}[$bin] += ($bases - $rm_bases);
-		}
-	}else{
-		# new aln added w/o removal other aln -> add length to bin bases
-		$self->{_bin_bases}[$bin] += $bases;
+            # ignore scores, that are too low
+            if( $ncscore <= $self->{_bin_scores}[$bin][-1] ){
+                return 0;
+            }else{ # sufficient score
+                my $iid = $self->{_bin_alns}[$bin][-1];
+                $self->remove_aln_by_iid($iid);
+            }
 	}
 
+        my $bases = $aln->length;
+        $self->{_bin_bases}[$bin] += $bases;
 	my $id = $self->add_aln($aln);
-	
+
 	# set score/id at the right place
 	my $i = @{$self->{_bin_scores}[$bin]} - 1;
-	$i-- while $i >= 0 && $nscore > $self->{_bin_scores}[$bin][$i];
+	$i-- while $i >= 0 && $ncscore > $self->{_bin_scores}[$bin][$i];
 	# store new  score and _id of aln at correct position
-	splice(@{$self->{_bin_scores}[$bin]}, $i+1, 0, $nscore);
+	splice(@{$self->{_bin_scores}[$bin]}, $i+1, 0, $ncscore);
 	splice(@{$self->{_bin_alns}[$bin]}, $i+1, 0, $id);
 	splice(@{$self->{_bin_lengths}[$bin]}, $i+1, 0, $bases);
 
@@ -876,34 +806,41 @@ Add a Sam::Alignment to Sam::Seq. If Sam::Seq->sam is set, it writes
 
 sub add_aln{
 	my ($self, $aln) = @_;
-	
-	$self->{_alns}{++$self->{_aln_idc}} = $self->{sam} 
-		? $self->{sam}->append_tell 
+
+	$self->{_alns}{++$self->{_aln_idc}} = $self->{sam}
+		? $self->{sam}->append_tell
 		: $aln;
 
 	return $self->{_aln_idc};
 }
 
 
-=head2 remove_aln
+=head2 remove_aln_by_iid
 
 Remove a Sam::Alignment from Sam::Seq (including position bins, if it exits).
- Returns the removed Sam::Alignment or undef. 
+ Returns the removed Sam::Alignment or undef.
 
 =cut
 
-sub remove_aln{
-	my ($self, $id);
-	
+sub remove_aln_by_iid{
+	my ($self, $id) = @_;
+
 	my $aln = delete $self->{_alns}{$id};
-	defined $aln || return; 
-	
-	my $bin = $self->_bin($aln);
-	my $idx = List::Util::first {$self->{_bin_alns}[$_] == $id} 1..@{$self->{_bin_alns}};
-	defined $idx || return;
-	
-	splice(@{$self->{_bin_scores}[$bin]}, $idx, 1);
-	splice(@{$self->{_bin_alns}[$bin]}, $idx, 1);
+	defined $aln || return;
+
+	my $bin = $self->bin($aln);
+        my $ba = $self->{_bin_alns}[$bin];
+        if (@$ba) {
+
+            my $idx = List::Util::first {$ba->[$_] == $id} 0..@$ba-1;
+            defined $idx || return;
+
+            splice(@{$self->{_bin_scores}[$bin]}, $idx, 1);
+            splice(@{$self->{_bin_alns}[$bin]}, $idx, 1);
+            my $rm_bases = splice(@{$self->{_bin_lengths}[$bin]}, $idx, 1);
+            $self->{_bin_bases}[$bin] -= $rm_bases;
+        }
+
 	return $aln;
 }
 
@@ -926,13 +863,13 @@ sub consensus{
                  use_ref_qual => 0,
                  @_
                 );
-        
+
 	$self->_init_state_matrix(
                                   ignore_coords => $p{ignore_coords},
                                   qual_weighted => $p{qual_weighted},
                                   use_ref_qual => $p{use_ref_qual},
                                  );
-        
+
 	$self->_add_pre_calc_fq(@{$p{hcrs}}) if $p{hcrs};
 	$self->_consensus;
 	return $self->{con};
@@ -941,8 +878,8 @@ sub consensus{
 
 =head2 variants
 
-By default the state matrix is calculated, wether or not it has 
- been computed before. Set first parameter to TRUE to prevent 
+By default the state matrix is calculated, wether or not it has
+ been computed before. Set first parameter to TRUE to prevent
  unneccessary recalculation.
 
 =cut
@@ -951,15 +888,15 @@ sub variants{
 	my ($self, $reuse_matrix) = (@_,0);
 	# compute state_matrix if required/wanted
         $self->_init_state_matrix() if (!$self->{_state_matrix} || !$reuse_matrix);
-	
+
 	return $self->_variants;
 }
 
 =head2 coverage
 
-Calculate and return LIST of accurate per base coverages. 
-By default the state matrix is calculated, wether or not it has 
- been computed before. Set first parameter to TRUE to prevent 
+Calculate and return LIST of accurate per base coverages.
+By default the state matrix is calculated, wether or not it has
+ been computed before. Set first parameter to TRUE to prevent
  unneccessary recalculation.
 
 =cut
@@ -986,8 +923,8 @@ sub coverage{
 
 =head2 chimera
 
-By default the state matrix is calculated, wether or not it has 
- been computed before. Set first parameter to TRUE to prevent 
+By default the state matrix is calculated, wether or not it has
+ been computed before. Set first parameter to TRUE to prevent
  unneccessary recalculation.
 
 =cut
@@ -1018,13 +955,13 @@ sub chimera{
 			$lcov_bin_count = 0; # reset
 		}
 	}
-	
+
 	my @coords;
-	# get the state matrix columns 
+	# get the state matrix columns
 	foreach my $lcov_bin_idxs (@lcov_bin_idxs){
 		my $mat_from = ($lcov_bin_idxs->[0]-1) * $self->{bin_size};
 		my $mat_to = ($lcov_bin_idxs->[1]+2) * $self->{bin_size} -1;
-		
+
 		# uncovered columns in lcov are zero quality anyways
 		next if grep{!@$_}@{$self->{_state_matrix}}[$mat_from .. $mat_to];
 
@@ -1034,47 +971,47 @@ sub chimera{
 		my $delta = int(($tr - $fl - 1)/2);
 		my $tl = $fl + $delta;
 		my $fr = $tr - $delta;
-		
+
 		my @alns_l_by_bin = $self->alns_by_bins($fl, $tl);
 
 		my @alns_l;
 		foreach(@alns_l_by_bin){
-			push @alns_l, @$_; 
+			push @alns_l, @$_;
 		};
 		my @alns_r_by_bin = $self->alns_by_bins($fr, $tr);
 		my @alns_r;
 		foreach(@alns_r_by_bin){
-			push @alns_r, @$_; 
+			push @alns_r, @$_;
 		};
-		
+
 		my ($mat_l) = $self->State_matrix(
 			alns => \@alns_l,
 			#states => $self->{_states},
 			#'length' => $self->len,
 		);
-		
+
 		my ($mat_r) = $self->State_matrix(
 			alns => \@alns_r,
 			#states => $self->{_states},
 			#'length' => $self->len,
 		);
-		
+
 		my @mat_r = @{$mat_r}[$mat_from .. $mat_to];
 		my @mat_l = @{$mat_l}[$mat_from .. $mat_to];
-		
+
 		my @hx_delta;
 		for(my $i=0; $i< @mat_r; $i++){
 			# only consider columns, where both sides contribute
 			next unless @{$mat_r[$i]} && @{$mat_l[$i]};
-			
-			my $hx_r = Hx($mat_r[$i]); 
+
+			my $hx_r = Hx($mat_r[$i]);
 			my $hx_l = Hx($mat_l[$i]);
 			my $hx_gt = $hx_r > $hx_l ? $hx_r : $hx_l;
 
 			# combined column
 			my @col;
 			my ($max) = sort{$b <=>$a}(scalar @{$mat_l[$i]}, scalar @{$mat_r[$i]});
-			
+
 			for(my $j=0; $j<$max; $j++){
 				if($mat_l[$i][$j] && $mat_r[$i][$j]){
 					push @col, $mat_l[$i][$j] + $mat_r[$i][$j]
@@ -1087,15 +1024,15 @@ sub chimera{
 
 			# delta of combined entropy and greater entropy of both single ones
 			push @hx_delta, Hx(\@col) - $hx_gt;
-			
+
 		}
-		
+
                 # Hx > 0.7:
                 #  4:1 = 0.72
                 #  5:1 = 0.65
                 #  8:2 = 0.72
                 # 12:3 = 0.72
-                
+
 		push @coords, {
 			col_range => [$mat_from + $self->{bin_size}, $mat_to - $self->{bin_size}],
 			hx => \@hx_delta,
@@ -1103,167 +1040,167 @@ sub chimera{
 		}if @hx_delta;
 
 		#TODO: self chimera
-	} 
-	
+	}
+
 	return @coords;
 
 }
 
 
-=DEPRECATED freq2phred
-#=head2 freq2phred
-#
-#Uses square root of the coverage probability of the most prominent
-# state to compute phred like score,ranging from 0 to 40.
-#
-#  p(cov)  phred   Base call accuracy
-#  0.0      0.00    0.00 %
-#  0.1     12.65   94.57 %
-#  0.2     17.88   98.37 %
-#  0.4     25.29   99.70 %
-#  0.6     30.98   99.92 %
-#  0.8     35.77   99.97 %
-#  1.0     40.00   99.99 %
-#
-#=cut
-#
-#sub freq2phred{
-#	my ($self, $freq) = @_;
-#	return 0  unless $freq;
-#	# probability of state
-#	my $p = $freq/$self->{max_coverage};
-#	$p = 1 if $p > 1;
-#	return int((sqrt($p) * 40) + .5); # phred
-#}
-#
-#=head2 phred2freq
-#
-#Takes phred ranging from 0 to 40 and returns probable frequency of
-# the state, used for phred calculation.
-#
-#=cut
-#
-#sub phred2freq{
-#	my ($self, $phred) = @_;
-#	return 0 unless $phred;
-#	# phred = sqrt($p) * 40 => (phred /40)**29 = $p 
-#	my $p = ($phred/40)**2;
-#	return int(($p * $self->{max_coverage}) + 0.5);
-#}
-#
-#
-#=head2 char2phred
-#
-#
-#=cut
-#
-#sub char2phred{
-#	
-#}
-#
-#=head2 phred2char
-#
-#
-#
-#=cut
-#
-#sub phred2char{
-#	my ($self, $phred) = @_;
-#	return chr($phred+$self->{phred_offset});
-#}
+=head2 filter_by_score/filter_by_nscore/filter_by_ncscore
+
+Filter alignments by score/nscore/ncscore. See _ncscore() for details on ncscore
+computation.
+
 =cut
 
-=DEPRECATED approx_coverage
+sub filter_by_score{
+    my $self = shift;
+    foreach ($self->aln_iids) {
+        my $aln = $self->aln_by_iid($_);
+        my $score = $aln->score;
+        $self->remove_aln_by_iid($_) if ! defined($score) || $score < $MinScore;
+    }
+}
 
-#=head2 approx_coverage
-#
-#Calculate and returns a LIST of coverage values, one value every $BinSize
-# window. Values are estimated by the number of alns in each bin plus the 
-# sum of alignments from previous bins, overlapping the current bin. Read
-# length is assumed to be 100.
-#
-#This approximation is much faster than the exact per base coverage 
-# calculation based on the state matrix. It is used to determine which 
-# (high coverage) regions to mask before the second pass of shrimp.
-#
-#=cut
-#
-#sub approx_coverage{
-#	my ($self) = @_;
-#	
-#	my @tmp;
-#	my @covs;
-#	my @cs = (0,0,0,0,0);
-#	my $cum;
-#	foreach my $bin(@{$self->{_bin_alns}}){
-#		my $c = scalar @$bin;
-#		push @tmp, $c;
-#		push @cs, $c;
-#		$cum += ($c - shift @cs);		
-#		push @covs,$cum;
-#	}
-#	return  @covs;
-#}
+sub filter_by_nscore{
+    my $self = shift;
+    foreach ($self->aln_iids) {
+        my $aln = $self->aln_by_iid($_);
+        my $nscore = $aln->nscore;
+        $self->remove_aln_by_iid($_) if ! defined($nscore) || $nscore < $MinNScore;
+    }
+}
 
+sub filter_by_ncscore{
+    my $self = shift;
+    foreach ($self->aln_iids) {
+        my $aln = $self->aln_by_iid($_);
+        my $ncscore = $aln->ncscore;
+        $self->remove_aln_by_iid($_) if ! defined($ncscore) || $ncscore < $MinNCScore;
 
-# DEPRECATED
-#=head2 high_coverage_regions
-#
-#Determine high coverage regions (HCR) using C<approx_coverage>. HCRs have a
-# minimum length of C<< int(READ_LENGTH / $BinSize) * 2 >> a minimum mean
-# coverage of 70% of the coverage cutoff and no bin with a coverage below
-# 20% of the coverage cutoff.
-#
-#=cut
-#
-##TODO: Values are educated guesses and only work for cov_co 50 and readlength 100
-#
-#sub high_coverage_regions{
-#	my ($self) = @_;
-#	my @covs = $self->approx_coverage();
-#	
-#	# debug -> take up the coverage
-#	# @covs = map{$_*7}@covs;
-#	
-#	my @hcr;
-#	my $hcrl = 0; # length
-#	my $hcrs = 0; # sum
-#	my $c;
-#	
-#	# run through coverage, search for HCRs
-#	for(my $i=0; $i<@covs; $i++){
-#		$c = $covs[$i];
-#		print $c," ";
-#		# hcr
-#		if($c > 35 || ($c > 10 && (($hcrs+$c)/($hcrl+1)) > 0.7)){
-#			$hcrs+=$c;
-#			$hcrl++;
-#			next;
-#		}
-#		# no_hcr
-#		if($hcrl > 8){
-#			# save the hcr, keep 4 bins at start and end unmasked for overlapping reads
-#			push @hcr, [$i-$hcrl+4, $hcrl-4];
-#		}
-#		# reset hcr
-#		$hcrl && ($hcrl = 0);
-#		$hcrs && ($hcrs = 0);
-#	}
-#	
-#	# end of seq, check once more for hcr
-#	if($hcrl > 8){
-#		# save the hcr, keep 4 bins at start unmasked, not at the end since
-#		# obviously the last bins werent empty
-#		push @hcr, [@covs-$hcrl+4, $hcrl];
-#	}
-#	print "\n";
-#	return @hcr;
-#}
+    }
+}
+
+=head2 filter_rep_region_alns
+
+Filter alignments that mostly align to repetitive regions - regions with high
+amount of stacked short local alignments.
+
+  convert:
+
+  --        -            --
+  --        -            ---
+  --        -             ---
+  -----  ------------- ----------
+  ________________________________
+
+  to:
+
+  -----  ------------- ----------
+  ________________________________
+
 =cut
 
+sub filter_rep_region_alns{
+    my ($self, $reuse_matrix) = (@_,0);
+    $self->_init_state_matrix() if (!$self->{_state_matrix} || !$reuse_matrix);
+
+    # get repetitive regions
+    my @cov = $self->coverage(1);
+    my $cmax = $RepCoverage;
+    my $high = 0;
+    my @rwin;
+
+    for (my $i=0; $i<@cov; $i++) {
+        if ($cov[$i] < $cmax) {
+            if ($high) {
+                $high = 0;
+                $rwin[$#rwin][1] = $i - $rwin[$#rwin][0];
+            }
+        } else {
+            unless ($high) {
+                $high = 1;
+                push @rwin, [$i];
+            }
+        }
+    }
+    $rwin[$#rwin][1] = @cov - $rwin[$#rwin][0] if $high;
 
 
+    # filter rep alns
+    if (@rwin) {
+        # extend repetitive regions by 150bp at each side
+        @rwin = map{
+            $_->[0]-=150;
+            $_->[1]+=300;
+            $_;
+        }@rwin;
 
+        # check sequence boundaries
+        if ( $rwin[0][0] < 0 ){
+            $rwin[0][1]+= $rwin[0][0];
+            $rwin[0][0] = 0;
+        };
+        if ( my $too_long = @cov - ($rwin[$#rwin][0] + $rwin[$#rwin][1]) < 0 ){
+            $rwin[$#rwin][1]-= $too_long;
+        }
+
+        # filter alns
+        foreach my $id ($self->aln_iids) {
+            my $aln = $self->aln_by_iid($id);
+            $self->remove_aln_by_iid($id) if _is_in_range([$aln->pos, $aln->length], \@rwin);
+        }
+    }
+}
+
+sub filter_contained_alns{
+    my ($self) = @_;
+    my $alns = $self->{_alns};
+
+    # sort idx by coords-length, descending
+    my @iids = keys %$alns;
+    my @coords = map{[ $alns->{$_}->pos, $alns->{$_}->length ]} @iids;
+    my @scores = map{$alns->{$_}->score} @iids;
+
+    my @idx = sort{$coords[$b][1] <=> $coords[$a][1]}(0..$#iids);
+
+    @iids = @iids[@idx];
+    @coords = @coords[@idx];
+    @scores = @scores[@idx];
+
+    # filter alns
+    while (@iids > 1) {
+        my $iid = pop @iids;
+        my $coo = pop @coords;
+        if ($coo->[1] < 21) { # handle very short hits
+            $coo->[0] += int($coo->[1]/2);
+            $coo->[1] = 1;
+        }elsif ($coo->[1] < 21) { # adjust short hits (+-10bp)
+            $coo->[0]+=10;
+            $coo->[1]-=20;
+        }else { # adjust long hits (+- 10%);
+            my $ad = int($coo->[1] * 0.1);
+            $coo->[0]+=$ad;
+            $coo->[1]-=(2*$ad);
+        }
+
+        if (_is_in_range($coo, \@coords)) {
+            if ($coo->[1] > $coords[$#coords][1]-40) { # hits of almost identical length
+                # compare by score
+                my $i = @coords;
+                if ($scores[$i] > $scores[$i-1]) { # exchange popped and last in queue
+                    my $iid_restore = $iid;
+                    $iid = pop @iids;
+                    pop @coords;
+                    push @iids, $iid_restore;
+                    push @coords, $coo;
+                }
+            }
+            $self->remove_aln_by_iid($iid);
+        }
+    }
+}
 
 ##------------------------------------------------------------------------##
 
@@ -1309,8 +1246,8 @@ sub ref{
 
 =head2 con
 
-Get the consensus sequence, a Fastq::Seq object with an additional entry 
- C<< $seq->{cov} >>, which contains an phred like ascii coded string, 
+Get the consensus sequence, a Fastq::Seq object with an additional entry
+ C<< $seq->{cov} >>, which contains an phred like ascii coded string,
  representing the per base coverages, offset 33. Calls the consensus method
  in case no con object is present.
 
@@ -1325,15 +1262,15 @@ sub con{
 
 =head2 next_aln
 
-Returns the next Sam::Alignment of Sam::Seq. The alns are internally stored 
+Returns the next Sam::Alignment of Sam::Seq. The alns are internally stored
  in a hash and retrieved using each. Therefore the method behaves like each:
- It returns an empty list or undef, respectively, once after all alignments 
- have been returned. It returns alignments in apparently random order, 
- consistent as long as no alignments are added or removed. 
+ It returns an empty list or undef, respectively, once after all alignments
+ have been returned. It returns alignments in apparently random order,
+ consistent as long as no alignments are added or removed.
 
 C< get_alns > returns in identical order as long as no alignments
  are added or removed.
- 
+
 
 =cut
 
@@ -1345,7 +1282,7 @@ sub next_aln{
 			my $pos = (each %{$self->{_alns}})[1];
 			return undef unless defined $pos;
 			$aln = $self->{sam}->aln_by_pos($pos);	#
-			
+
 		}else{
 			$aln = (each %{$self->{_alns}})[1];
 		}
@@ -1364,7 +1301,7 @@ Returns number of Sam::Alignments of the Sam::Seq in scalar context, a list
  argument to call is TRUE.
 
   @alns = $pb->alns();     # LIST of alignments
-  $num_alns = $pb->alns(); 
+  $num_alns = $pb->alns();
     # faster than getting list and using it in scalar context
   @alns_sorted_by_pos = $pb->alns(1);
     # LIST of alignments, sorted by pos, slower than without sorting
@@ -1394,9 +1331,57 @@ sub alns{
 }
 
 
+# TODO: aln_iids
+
+=head2 aln_iids(<SORTED_BY_POS>)
+
+Returns a list of all Sam::Alignments internal IDS (iid). Default order is
+ identical to C<next_aln> as long as no alignments are added or removed. If
+ first argument TRUE, iids are ordered by alignment position.
+
+=cut
+
+sub aln_iids{
+	my ($self, $sorted_by_pos) = @_;
+	wantarray || return scalar keys %{$self->{_alns}};
+	if($self->{sam}){
+		# get indices from _aln and retrieve objects from parser
+		if($sorted_by_pos){
+                    my %pos;
+                    while (my ($k, $v) = each %{$self->{_alns}}) {
+                        $pos{$k} = $self->{sam}->aln_by_pos($v)
+                    }
+                    return sort{ $pos{$a} <=> $pos{$b} } keys %pos;
+		}else{
+                    return keys %{$self->{_alns}};
+		}
+	}else{
+		# return objects from _aln
+		if($sorted_by_pos){
+			return sort{ $self->{_alns}{$a}{pos} <=> $self->{_alns}{$b}{pos} } keys %{$self->{_alns}};
+		}else{
+			return keys %{$self->{_alns}};
+		}
+
+	}
+}
+
+
+=head2 aln_by_iid
+
+Return alignment by iid.
+
+=cut
+
+sub aln_by_iid{
+    my ($self, $iid) = @_;
+    die __PACKAGE__."->aln_by_iid: IID ($iid) does not exist\n" unless exists $self->{_alns}{$iid};
+    return $self->{_alns}{$iid};
+}
+
 =head2 alns_by_bins
 
-Returns list of bins, each containing list of Sam::Alignments, decendingly 
+Returns list of bins, each containing list of Sam::Alignments, decendingly
  ordered by their score. Takes FROM (default 0) and TO (default last bin)
  as optional arguments.
 
@@ -1405,7 +1390,7 @@ Returns list of bins, each containing list of Sam::Alignments, decendingly
 sub alns_by_bins{
 	my ($self, $from, $to) = (@_, 0);
 	my $alns = $self->{_bin_alns};
-	$to = @$alns-1 unless defined $to; 
+	$to = @$alns-1 unless defined $to;
 	my @bins;
 	for(my $i=$from; $i <= $to; $i++ ){
 		push @bins, [map{
@@ -1414,15 +1399,15 @@ sub alns_by_bins{
 				: $self->{_alns}{$_};
 		}@{$alns->[$i]}];
 	};
-		
-	
+
+
 	return @bins;
 }
 
 
 =head2 bin
 
-Compute the bin of given alignment. The bin is determined based on the 
+Compute the bin of given alignment. The bin is determined based on the
  position of the center of the read (read_start + read_length/2) and the
  currently set bin size. Returns the bin (INT).
 
@@ -1430,34 +1415,34 @@ Compute the bin of given alignment. The bin is determined based on the
 
 sub bin{
 	my ($self,$aln) = @_;
-	return int(( $aln->pos + ( length($aln->seq)/2 )) / $self->{bin_size})
+	return int(( $aln->pos + ( $aln->length/2 )) / $self->{bin_size})
 }
 
 
 =head2 is
 
-Get/Set conditions that determine which alignments are returned by the 
- next methods. Takes either a reference to a list of property bitmasks 
+Get/Set conditions that determine which alignments are returned by the
+ next methods. Takes either a reference to a list of property bitmasks
  or a code reference to a customized test which returns 1 and 0 respectively.
  For details on bitmasks see L<Sam::Alignment>.
- 
-The test routine is executed with the parameters C<$parser_obj, $aln_obj> 
+
+The test routine is executed with the parameters C<$parser_obj, $aln_obj>
  and for C<next_pair()> additionally with C< $aln_obj2 >.
 
   # parser returning only BAD_QUALITY alns
   my $sp = Sam::Parser->new(
   	is => [Sam::Alignment->BAD_QUALITY]
   );
-  
+
   # customized parser that only returns reads with a GC content > 70%.
   my $sp = Sam::Parser->new(
   	is => sub{
   	my ($self, $aln) = @_;
   	return ($aln->seq =~ tr/GC//) / length($aln->seq) > .7 ? 1 : 0;
   })
-  
-  
-  
+
+
+
 =cut
 
 sub is{
@@ -1469,9 +1454,36 @@ sub is{
 			$self->{_is} = $is;
 		}else{
 			die (((caller 0)[3])." neither ARRAY nor CODE reference given!\n");
-		}	
+		}
 	}
 	return $self->{_is};
+}
+
+
+=head2 string
+
+Stringify Sam::Seq object to SAM string.
+
+  print $ss->string();
+  print $ss->string(header => 1,sorted => 1);
+
+=cut
+
+sub string{
+    my $self = shift;
+    my %p = (header => 0, sorted => 0);
+
+    # overload adds (undef, '') to the string call, which crashes @_ to hash
+    if (@_ && defined($_[0])) {
+        %p = (%p, @_);
+    }
+
+    my $string = "";
+    if ($p{header}) {
+        $string.="\@SQ\tSN:".$self->id."\tLN:".$self->len."\n";
+    }
+    $string.= $_ for $self->alns($p{sorted});
+    return $string;
 }
 
 ##------------------------------------------------------------------------##
@@ -1520,14 +1532,14 @@ sub _init_state_matrix{
 	# return state matrix
 	$self->{_state_matrix} = $S;
 	$self->{_states} = $states;
-	
+
 	return $self;
-	
+
 }
 
 =head2 _add_pre_calc_fq
 
-Add partial, already corrected sequences information (FASTQ) to the 
+Add partial, already corrected sequences information (FASTQ) to the
  state_matrix, to include them in consensus.
 
 =cut
@@ -1539,7 +1551,7 @@ sub _add_pre_calc_fq{
 		my ($seq) = $self->ref->substr_seq($coords);
 		my @seq = split (//, $seq->seq);
 		my @freqs = Sam::Seq->Phreds2freqs($seq->phreds);
-		
+
 		for(my $i=0; $i<length($seq->seq); $i++){
 			# never add 0, if nothing more matches, a 0 count might be introduced
 			next unless $freqs[$i];
@@ -1562,7 +1574,7 @@ sub _consensus{
 	my @freqs;
 	my $trace;
 	my $col_c = -1;
-	
+
 	foreach my $col (@{$self->{_state_matrix}}){
 		$col_c++;
 		# uncovered col
@@ -1572,35 +1584,35 @@ sub _consensus{
 			$trace.='M';
 			next;
 		}
-		
+
 		my $idx=undef;
 		my $max_freq=0;
 		my $i;
 		my $cov;
-		
+
 		# majority vote
 		for($i=0; $i<@$col; $i++){
 			# get all defined states
 			if (defined(my $freq = $col->[$i])){
 				# add state frequency to coverage
-				$cov+=$freq; 
+				$cov+=$freq;
 				# check if more frequent than previous states
 				if($freq > $max_freq){
 					# exception: long prominent inserts (>3) are very ugly,
-					# probable mapping artefacts caused by cheap gap costs 
+					# probable mapping artefacts caused by cheap gap costs
 					# compared to mismatch which might lead to long gaps
 					# at read ends close to error rich regions. These long
 					# gaps should not be considered.
 					# Insert state has to have idx > 4 (not A,T,G,C or -)
 					# for check to make sense
 					next if($MaxInsLength && $i > 4 && length $states_rev{$i} > $MaxInsLength);
-										
+
 					$max_freq = $freq;
-					$idx = $i; 
+					$idx = $i;
 				};
-			} 
+			}
 		};
-		
+
 		# check $max_freq, necessary due to long gap exception
 		unless ($max_freq){
 			$seq.= $self->{ref} ? substr($self->{ref}{seq}, $col_c, 1) : 'n';
@@ -1608,13 +1620,13 @@ sub _consensus{
 			$trace.='M';
 			next;
 		}
-		
+
 		# insertion on reference
 		if ($idx == 4){
 			$trace.='I';
-			next 
-		}; 
-		
+			next
+		};
+
 		# get most prominent state
 		my $con = $states_rev{$idx};
 		#use Data::Dumper;
@@ -1625,9 +1637,9 @@ sub _consensus{
 	}
 
 	# compress trace to cigar
-	
-	
-	
+
+
+
 	$self->{con} = Fastq::Seq->new(
 		'@'.$self->{id},
 		$seq,
@@ -1638,7 +1650,7 @@ sub _consensus{
 		trace => $trace,
 		cigar => Sam::Seq->Trace2cigar($trace),
 	);
-	
+
 	return $self;
 }
 
@@ -1655,12 +1667,12 @@ sub _variants{
 		accuracy => 5,
 		@_
 	);
-	
-	
+
+
 	#print Dumper($self->{_state_matrix});
 	my @seq;
 	my %states_rev = reverse %{$self->{_states}}; # works since values are also unique
-	
+
 	foreach my $col (@{$self->{_state_matrix}}){
 		# cov
 		unless($col){
@@ -1675,7 +1687,7 @@ sub _variants{
 		# variants
 		for(my $i=0; $i<@$col; $i++){
 			if (defined(my $v = $col->[$i])){
-				$cov+= $v; 
+				$cov+= $v;
 				$vars{$states_rev{$i}} = $v;
 			};
 		};
@@ -1712,7 +1724,7 @@ sub _phred_Hx{
 	return chr(
 		int(
 		((1-$Hx)/($self->{max_coverage}/$total))
-		*30)							# phred range - phred minimum 
+		*30)							# phred range - phred minimum
 		+ 10							# phred minimum
 		+ $self->{phred_offset});  		# phred offset
 }
@@ -1731,7 +1743,7 @@ sub _stddev{
 	my($values, $mean1) = (@_);
 	#Prevent division by 0 error in case you get junk data
 	return undef unless scalar @$values;
-	
+
 	# calculate mean unless given
 	unless(defined $mean1){
 		# Step 1, find the mean of the numbers
@@ -1739,33 +1751,53 @@ sub _stddev{
 		$total1 += $_  for @$values;
 		my $mean1 = $total1 / (scalar @$values);
 	}
-	
-	
+
+
 	# find the mean of the squares of the differences
 	# between each number and the mean
 	my $total2 = 0;
 	$total2 += ($mean1-$_)**2 for @$values;
 	my $mean2 = $total2 / (scalar @$values);
-	
+
 	# standard deviation is the square root of the
 	# above mean
 	return sqrt($mean2);
 }
 
-=head
+=head2 _is_in_range
 
-Test if a value lies within a given set of ranges.
+Test if a value/range lies within a given set of ranges. ranges are expected in
+[OFFSET, LENGTH] format.
+
+  _is_in_range(5, [[0, 3], [4,7]])
+  _is_in_range([2,2], [[0, 3], [4,7]])
 
 =cut
 
 sub _is_in_range{
     my ($c, $ranges) = @_;
-    for my $r (@$ranges){
-        return 1 if $c >= $r->[0] && $c < $r->[0] + $r->[1];
+    die __PACKAGE__."::_is_in_range: requires exactly to arguments: VALUE or RANGE[OFFSET, LENGTH],  RANGES[[OFFSET, LENGTH][OFFSET, LENGTH]]" unless @_ == 2;
+
+    if (CORE::ref $c eq "ARRAY") {
+        my $c1 = $c->[0];
+        my $c2 = $c->[0] + $c->[1]-1;
+        for my $r (@$ranges){
+            if (
+                ($c1 >= $r->[0] && $c1 < $r->[0] + $r->[1]) &&
+                ($c2 >= $r->[0] && $c2 < $r->[0] + $r->[1])
+            ){
+                return 1;
+            }
+        }
+    }elsif (! CORE::ref $c) {
+        for my $r (@$ranges){
+            return 1 if $c >= $r->[0] && $c < $r->[0] + $r->[1];
+        }
+    }else {
+        die __PACKAGE__."::_is_in_range: first arguments needs to be SCALAR or ARRAY ref";
     }
     return 0;
 }
-
 
 ##------------------------------------------------------------------------##
 
@@ -1778,6 +1810,3 @@ Thomas Hackl S<thomas.hackl@uni-wuerzburg.de>
 
 
 1;
-
-
-

@@ -29,8 +29,8 @@ use Fasta::Parser 0.08;
 use Fasta::Seq 0.07;
 
 use Sam::Parser 0.11;
-use Sam::Alignment 0.0 ':flags';
-use Sam::Seq 0.10;
+use Sam::Alignment 0.10 ':flags';
+use Sam::Seq 0.16;
 
 use Shrimp 0.08;
 
@@ -41,7 +41,7 @@ use Time::HiRes qw(usleep);
 use Data::Dumper;
 $Data::Dumper::Sortkeys = 1;
 
-our $VERSION = '2.10';
+our $VERSION = '2.12';
 
 my $RealLib = "$RealBin/../lib/";
 my $RealPerl = "perl -I${RealLib} $RealBin";
@@ -509,14 +509,6 @@ my $max_or_dev;
 my $first_chunk = 1;
 
 if($opt_utg_file && @$opt_utg_file){
-
-    die "\n\n!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-There have been reports indicating a critial problem with unitig-modes. I'm
-currently investigating. Until the issue has been resolved, I strongly advice
-against using unitig correction modes. If you still want to use it, remove
-this paragraph from your source code:\n".__FILE__.":".__LINE__."\n".
-    "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n\n";
-
 
     	$VS->nline;
   	$VS->verbose("Checking alternative read files");
@@ -1396,11 +1388,17 @@ sub correct_sr_mt{
 		'--mask-weak-reads' => cfg('mask-weak-reads', $TASK),
 		'--ignore-weak-reads' => cfg('ignore-weak-reads', $TASK), 
                 '--max-ins-length' => cfg('max-ins-length', $TASK),
+
+                defined(cfg('rep-coverage', $TASK)) ? ('--rep-coverage' => cfg('rep-coverage', $TASK)) : (),
+                defined(cfg('min-ncscore', $TASK)) ? ('--min-ncscore' => cfg('min-ncscore', $TASK)) : (),
                            
 		cfg('detect-chimera', $TASK) ? ('--detect-chimera' => '') : (), 
 		cfg('mcr-ignore', $TASK) ? ('--ignore-hcr' => '') : (),
 		 
-		@$opt_lr_file
+                ($TASK =~ /blasr/) # blasr has descending, negative scores!!
+                    ? ('--invert-scores' => '') : (),
+                        
+                @$opt_lr_file
 			? ('--ref' => task_file_name(".fq", task => $TASKS[$TC-1] )) : (),
 			
                 ($TASK =~ /-finish/) # calculate hcrs on first iter for second iter
@@ -1413,6 +1411,7 @@ sub correct_sr_mt{
 
                 ($TASK =~ /utg/) # calculate hcrs on first iter for second iter
 			? (
+                           '--utg-mode' => '',
                            '--qual-weighted' => '',
                            '--fallback-phred' => 30, # use phred 30 for high confidence utgs
                           ) : (),
