@@ -25,7 +25,7 @@ use Verbose::ProgressBar;
 use Fastq::Parser 0.09;
 use Fastq::Seq 0.13;
 
-use Fasta::Parser 0.08;
+use Fasta::Parser 0.09;
 use Fasta::Seq 0.07;
 
 use Sam::Parser 0.11;
@@ -526,24 +526,26 @@ if($opt_utg_file && @$opt_utg_file){
 		my $or_qv_offset;
 		my $or_count;
 		
-		# FASTQ
-		if($fp = Fastq::Parser->new(file => $_)->check_format){ 
-			# format
-			$V->verbose("Detected FASTQ format");
-			
-			# length
-			($or_length, $or_length_dev) = $fp->guess_seq_length;
-			$V->verbose(sprintf("Estimated short read length: %d +-%d", $or_length, $or_length_dev ));
+		# # FASTQ
+		# if($fp = Fastq::Parser->new(file => $_)->check_format){ 
+		# 	# format
+		# 	$V->verbose("Detected FASTQ format");
+		# 	
+		# 	# length
+		# 	($or_length, $or_length_dev) = $fp->guess_seq_length;
+		# 	$V->verbose(sprintf("Estimated short read length: %d +-%d", $or_length, $or_length_dev ));
+                # 
+                #         # dont really care about length
+		# 	# dont care about offset
+		# 	
+		# 	# count
+		# 	$or_count = $fp->guess_seq_count();
+		# 	$V->verbose(sprintf("Estimating approximate number of alternative reads: %s", Verbose->Humanize($or_count)));
+	        # 
+		# # FASTA
+		# }els
 
-                        # dont really care about length
-			# dont care about offset
-			
-			# count
-			$or_count = $fp->guess_seq_count();
-			$V->verbose(sprintf("Estimating approximate number of alternative reads: %s", Verbose->Humanize($or_count)));
-	
-		# FASTA
-		}elsif($fp = Fasta::Parser->new(file=> $_)->check_format){
+                if($fp = Fasta::Parser->new(file=> $_)->check_format){
 			# format
 			$V->verbose("Detected FASTA format");
 	
@@ -560,7 +562,7 @@ if($opt_utg_file && @$opt_utg_file){
 	
 			
 		}else{
-			$V->exit("Alternative read file $_ neither FASTQ nor FASTA format");
+			$V->exit("Alternative read file needs to be in FASTA format. You can use `proovread/bin/SeqFilter --fasta --line-width 80 --out utg.fa utg.fq` to convert FASTQ");
 		}
 	
 		# push
@@ -635,6 +637,8 @@ check_binary(cfg('samtools-path')."samtools", ["--version", "1.1"]);
 check_binary(cfg('shrimp-path')."gmapper-ls") if (grep{/shrimp/}@TASKS);
 check_binary(cfg('bwa-path')."bwa-proovread") if (grep{/bwa/}@TASKS);
 check_binary(cfg('blasr-path')."blasr") if (grep{/blasr/}@TASKS);
+check_binary(cfg('daligner-path')."daligner") if (grep{/dazzler/}@TASKS);
+check_binary(cfg('dazz-db-path')."DBshow") if (grep{/dazzler/}@TASKS);
 check_binary(cfg('blast-path')."blastn", ["-version", "2.2.24" ]) if (defined cfg('siamaera'));
 
 $VS->nline;
@@ -759,7 +763,7 @@ while($TC < $#TASKS){
                         blasr => {
 				cfg($TASK), # basic shrimp params from cfg
 				'log' => task_file_name(suffix => "_blasr.log"),
-				'ref' => $TC > 0
+ 				'ref' => $TC > 0
                                   ? task_file_name('.masked.fa', task => $TASKS[$TC-1] )
                                   : task_file_name('.fa', task => $TASKS[$TC-1] ),
 				'-nproc' => $opt_threads,
@@ -769,7 +773,17 @@ while($TC < $#TASKS){
 		create_sorted_bam();
 
 		$lr_chunk_offsets = correct_sr_mt($lr_chunk_offsets);
-		
+
+
+	}elsif($TASK eq 'dazzler-utg'){
+
+            run_dazzler(or_files => $opt_utg_file);
+
+            create_sorted_bam();
+
+            $lr_chunk_offsets = correct_sr_mt($lr_chunk_offsets);
+
+
 	}elsif($TASK eq 'bwa-utg'){
 
                 run_bwa(			
@@ -835,7 +849,7 @@ while($TC < $#TASKS){
             my $ccs_mask = join(",", @ccs_mask );
 
             my $cmd = "$RealPerl/ccseq ".(cfg('debug') ? "--debug" : "").(cfg('bwa-path') ? "--bwa-path ".cfg('bwa-path') : "")." --threads $opt_threads --pre $opt_prefix/$TASK <$fqi | tee $fqo | "
-              ."$RealPerl/SeqFilter --phred-offset 33 --phred-mask $ccs_mask --fasta --out $fmo --base-content N --tsv - --quiet";
+              ."$RealPerl/SeqFilter --line-width 80 --phred-offset 33 --phred-mask $ccs_mask --fasta --out $fmo --base-content N --tsv - --quiet";
             
             $VB->hline;
             $VB->verbose($cmd);
@@ -1091,6 +1105,97 @@ sub run_blasr{
 }
 
 
+=head2 run_dazzler
+
+Run and process blasr
+
+=cut
+
+sub run_dazzler{
+    my $p = {
+             or_files => [],
+             @_
+            };
+
+    $V->nline;
+    $VS->verbose("Running task ".$TASK);
+
+    my $dir = task_file_name(prefix => '');
+    my $or_files = "@{$p->{or_files}}";
+
+    my $ref_tmp = $TC > 0
+        ? File::Spec->rel2abs(task_file_name('.masked.fa', task => $TASKS[$TC-1] ))
+        : File::Spec->rel2abs(task_file_name('.fa', task => $TASKS[$TC-1] ));
+
+    chdir($dir) or $V->exit($!);
+    my $rfa = $opt_prefix.".fasta";
+    my $rdb = $opt_prefix;
+    my $qdb = $opt_prefix."-utg";
+    my $log = $opt_prefix."-dazz.log";
+    my @qfa;
+    my $c=0;
+    foreach ( @{$p->{or_files}} ) {
+        my $qf = File::Spec->rel2abs($_);
+        my $qfa = $opt_prefix."-utg".($c++).".fasta";
+        qx(ln -s $qf $qfa);
+        push @qfa, $qfa;
+    }
+
+    qx(ln -s $ref_tmp $rfa);
+
+    my $cmd;
+
+    $VS->verbose("Creating DAMs");
+    $cmd = cfg('dazz-db-path')."fasta2DAM $qdb.dam @qfa 2>$log";
+    $VB->hline();
+    $VB->verbose($cmd);
+    $VB->hline();
+    qx($cmd);
+    $V->exit("fasta2DAM failed: $?\n", do { local $/; local @ARGV = ($log) ; <> }) if $?;
+
+
+    $VS->verbose("Creating read database");
+    $cmd = cfg('dazz-db-path')."fasta2DAM $rdb.dam $rfa 2>>$log";
+    $VB->hline();
+    $VB->verbose($cmd);
+    $VB->hline();
+    qx($cmd);
+    $V->exit("fasta2DAM failed: $?\n", do { local $/; local @ARGV = ($log) ; <> }) if $?;
+
+
+    $VS->verbose("Mapping unitigs");
+
+    # opts
+    # my $blasr_cmd = cfg('blasr-path')."blasr $or_files $p->{blasr}{ref} @blasr_opts -sam 2>$p->{blasr}{log} | ".cfg('samtools-path')."samtools view -@ $opt_threads -bS /dev/fd/0 >$p->{tmp_bam}";
+    my $dazz = task_file_name("-dazz.sh");
+    my $dap = cfg('daligner-path');
+    $cmd = qx($dap/HPCmapper $rdb.dam $qdb.dam 2>>$log);
+    $cmd =~ s/(?=daligner|LAmerge|LAsort)/$dap/g;
+    $cmd =~ s/-k20 -h50 -e.85/ -k15 -h35 -e.8/;
+    $VB->hline();
+    $VB->verbose($cmd);
+    $VB->hline();
+    qx($cmd);
+    $V->exit("daligner failed: $?\n", do { local $/; local @ARGV = ($log) ; <> }) if $?;
+
+    $VS->verbose("Converting to/sorting BAM");
+    $cmd = "($RealBin/dazz2sam --dazz-db-path ".cfg('dazz-db-path')
+        ." --add-scores"
+        ." --daligner-path ".cfg('daligner-path')
+        ." --las $opt_prefix.$opt_prefix-utg.las"
+        ." --ref $rdb.dam --qry $qdb.dam"
+        ." | ".cfg('samtools-path')."samtools view -@ $opt_threads -bS /dev/fd/0 >${opt_prefix}_tmp.bam )2>>$log";
+    $VB->hline();
+    $VB->verbose($cmd);
+    $VB->hline();
+    qx($cmd);
+    $V->exit("Converting to BAM failed: $?\n", do { local $/; local @ARGV = ($log) ; <> }) if $?;
+
+    chdir("../..") or $V->exit($!);
+
+}
+
+
 =head2 run_bwa
 
 Run and process bwa
@@ -1099,7 +1204,7 @@ Run and process bwa
 
 sub run_bwa{
     my $p = {
-             or_files => [],
+        or_files => [],
              sr_sampling => 0,
              bwa => {},
              tmp_bam => task_file_name("_tmp.bam"),
@@ -1330,7 +1435,7 @@ sub read_long{
 	my $lr_c = 0;
 	@LR_IDS = sort byfile keys %lr;
 	foreach(@LR_IDS){
-		my $pos = $lrpw->append_seq($lr{$_});
+		my $pos = $lrpw->append_seq($lr{$_}, 80);
 		push @lr_idxs, $pos unless $lr_c % cfg('chunk-size');
 		$lr_c++;
 	}
@@ -1341,6 +1446,7 @@ sub read_long{
                    '--fasta' => '',
                    '--lower-case' => '',
                    '--phred-offset' => 33,
+                   '--line-width' => 80,
                   );
 
         if($opt_mode !~ /noccs/ &&$noccs && grep{$_ =~ /ccs/}@TASKS){
@@ -1528,7 +1634,7 @@ sub correct_sr_mt{
         $hcr_mask[2] = int(($hcr_mask[2] * $min_sr_length  / 100 ) +.5);
         $hcr_mask[3] = int(($hcr_mask[3] * $min_sr_length  / 100 ) +.5);
         my $hcr_mask = join(",", @hcr_mask );
-        my $cmd = "$RealPerl/SeqFilter $fq_file --quiet --out $fa_file --phred-offset 33 --phred-mask $hcr_mask --fasta --base-content N --tsv -";
+        my $cmd = "$RealPerl/SeqFilter $fq_file --line-width 80 --quiet --out $fa_file --phred-offset 33 --phred-mask $hcr_mask --fasta --base-content N --tsv -";
         
         $VB->hline;
         $VB->verbose($cmd);

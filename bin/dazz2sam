@@ -1,0 +1,454 @@
+#!/usr/bin/env perl
+use warnings;
+no warnings 'qw';
+use strict;
+
+use Log::Log4perl qw(:no_extra_logdie_message);
+use Log::Log4perl::Level;
+use Getopt::Long;
+use Pod::Usage;
+use FindBin qw($RealBin $Script);
+use File::Basename;
+use File::Which;
+
+use Data::Dumper;
+$Data::Dumper::Sortkeys = 1;
+
+use Fasta::Parser;
+use Fasta::Seq;
+
+# proovread bwa scoring
+# -A 5 -B 11 -O 2,1 -E 4,
+use constant {
+    MA => 5,
+    MM => -11,
+    RGO => -2,
+    QGO => -1,
+    RGE => -4,
+    QGE => -3,
+ };
+
+=head1 NAME
+
+  dazz2sam - convert DAZZLER daligner .las output to SAM format
+
+=head1 DESCRIPTION
+
+=head1 SYNOPSIS
+
+  dazz2sam [options] --las LAS --ref DB/DAM [--qry DB/DAM] > SAM
+
+=head1 OPTIONS
+
+=over
+
+=item -l/--las <LAS>
+
+.las file.
+
+=item -r/--ref <DB/DAM>
+
+Reference DAZZ_DB .db/.dam file.
+
+=item [-q/--qry <DB/DAM>]
+
+Query DAZZ_DB .db/.dam if available.
+
+=item [-S/--add-scores]
+
+Compute a score for each alignment and add AS:i:<SCORE> tag to SAM. Default
+scoring scheme is derived from proovreads pacbio scoring scheme, also used for
+bwa mappings. Costs are defined in the scripts constants sections and can be
+adjusted if needed.
+
+=item [-c/--config <PATH PATH ...>]
+
+Read parameter from config file
+
+=item [-D/--debug]
+
+Toggle verbose messages.
+
+=item [-h/--help]
+
+Display this help screen.
+
+=item [-V/--version]
+
+Display script version.
+
+=back
+
+=cut
+
+##----------------------------------------------------------------------------##
+# Globals
+
+our $VERSION = 0.02;
+
+Log::Log4perl->init( \(q(
+        log4perl.rootLogger                     = INFO, Screen
+        log4perl.appender.Screen                = Log::Log4perl::Appender::Screen
+        log4perl.appender.Screen.stderr         = 1
+        log4perl.appender.Screen.layout         = PatternLayout
+        log4perl.appender.Screen.layout.ConversionPattern = [%d{yy-MM-dd HH:mm:ss}] [).$Script.q(] %m%n
+)));
+
+my $L = Log::Log4perl->get_logger();
+
+##----------------------------------------------------------------------------##
+# GetOptions
+
+my $argv = join(" ", @ARGV);
+
+my %def = (
+           LAshow_path => '',
+           DBshow_path => '',
+          );
+
+my %opt = (
+           config => []
+          );
+
+GetOptions(                     # use %opt (Cfg) as defaults
+           \%opt, qw(
+                        las=s
+                        ref=s
+                        qry=s
+                        add_scores|add-scores|S!
+                        LAshow_path|daligner_path|daligner-path=s
+                        DBshow_path|dazz_db_path|dazz-db-path=s
+                        config|c=s{,}
+                        version|V!
+                        debug|D!
+                        help|h!
+                   )
+          ) or $L->logcroak('Failed to "GetOptions"');
+
+# help
+$opt{help} && pod2usage(1);
+
+# version
+if ($opt{version}) {
+    print "$VERSION\n"; 
+    exit 0;
+}
+
+
+##----------------------------------------------------------------------------##
+# Config
+
+my %cfg;
+
+# core
+my $core_cfg = "$RealBin/../".basename($Script, qw(.pl)).".cfg";
+
+if ( -e $core_cfg) {
+    $opt{core_config} = File::Spec->rel2abs($core_cfg);
+    %cfg = (%cfg, Cfg->Read($opt{core_config}, $Script));
+}
+
+
+# read all configs
+if (@{$opt{config}}) {
+    foreach my $cfg ( @{$opt{config}} ) {
+	$cfg=File::Spec->rel2abs($cfg);
+	%cfg = (%cfg, Cfg->Read($cfg, $Script));
+    }
+}
+
+
+# create template for user cfg
+if (defined $opt{create_config}) {
+    pod2usage(-msg => 'To many arguments', -exitval=>1) if @ARGV > 1;
+    my $user_cfg = Cfg->Copy($core_cfg, $opt{create_config}) or $L->logdie("Creatring config failed: $!");
+    $L->info("Created config file: $user_cfg");
+    exit 0;
+}
+
+##----------------------------------------------------------------------------##
+# Config + Opt
+
+%opt = (%def, %cfg, %opt);
+
+if (@ARGV) {
+    $L->logdie("unused argument: @ARGV");
+}
+
+# required stuff  
+for (qw(las ref)) {
+    if (ref $opt{$_} eq 'ARRAY') {
+	pod2usage("required: --$_") unless @{$opt{$_}}
+    } else {
+	pod2usage("required: --$_") unless defined ($opt{$_})
+    }
+};
+
+$opt{qry} = $opt{ref} unless $opt{qry};
+$opt{ref} =~ s/(.dam|.db)$//;
+$opt{qry} =~ s/(.dam|.db)$//;
+
+# debug level
+$L->level($DEBUG) if $opt{debug};
+$L->debug('Verbose level set to DEBUG');
+
+$L->debug(Dumper(\%opt));
+
+
+
+##----------------------------------------------------------------------------##
+# Main
+##----------------------------------------------------------------------------##
+
+$L->info("Checking binaries");
+# check DAZZ_DB binaries
+my $lashow = bin("LAshow");
+check_binary($lashow);
+my $dbshow = bin("DBshow");
+check_binary($dbshow);
+
+
+$L->info("Reading DB/DAM");
+my ($rdb, $rldb, $rids) = map_db($opt{ref});
+    
+my ($qdb, $qldb);
+if($opt{qry} eq $opt{ref}){
+    ($qdb, $qldb) = ($rdb, $rldb);
+}else{
+    ($qdb, $qldb) = map_db($opt{qry});
+}
+
+
+$L->info("Creating header");
+
+print "\@HD\tVN:unknown\tSO:coordinate\n";
+foreach my $id (@$rids) {
+    print "\@SQ\tSN:",$id,"\tLN:",$rldb->{$id},"\n";
+}
+print "\@PG\tID:dazz2sam\tVN:$VERSION\tCL:dazz2sam $argv\n";
+
+
+
+open(DZ, "$lashow $opt{ref} $opt{qry} $opt{las} -a -U -w80 -b0 |");
+scalar <DZ>; # skip empty line
+my $dz_head = <DZ>;
+$L->info("Reading LAS and converting alignments\n");
+$L->info($dz_head);
+scalar <DZ>; # skip another empty line
+
+
+my $head = "";
+my $rseq = "";
+my $qseq = "";
+my ($r, $d, $q, $x, $rt, $dt, $qt, $lt);
+while(
+     defined ($r=<DZ>) &&
+     defined ($d=<DZ>) &&
+     defined ($q=<DZ>)
+     ){
+
+    unless(defined($x=<DZ>)){ # final record
+        ($rt) = $r =~ /\s*\d*\s+(\S+)/;
+        ($qt) = $q =~ /\s*\d*\s+(\S+)/;
+
+        las2sam($head, $rseq.$rt, $qseq.$qt) if $head;
+        last;
+    }
+
+    if($d eq "\n"){ # found new record
+        las2sam($head, $rseq, $qseq) if $head; # process prev record
+        $head = $r;
+        ($rseq) = $q =~ /\s*\d*\s+(\S+)/;
+        $lt = <DZ>;
+        ($qseq) = $lt =~ /\s*\d*\s+(\S+)/;
+        scalar <DZ>;
+    }else{
+        ($rt) = $r =~ /\s*\d*\s+(\S+)/;
+        ($qt) = $q =~ /\s*\d*\s+(\S+)/;
+        $rseq.= $rt;
+        $qseq.= $qt;
+    }
+}
+
+close(DZ);
+
+$? && $L->logdie("Failed: $lashow $opt{ref} $opt{qry} $opt{las}");
+
+$L->info("Done.");
+
+my %sec;
+
+sub las2sam{
+    my ($head,$rseq,$qseq) = @_;
+    $L->debug("--LAS--------");
+    $L->debug("HEAD: ",$head);
+    $L->debug("RSEQ: ",$rseq);
+    $L->debug("QSEQ: ",$qseq);
+
+    my ($qname, $flag, $rname, $pos, $mapq, $cigar, $rnext, $pnext, $tlen, $seq, $qual, $score);
+    
+    my ($riid, $qiid, $dir, $rstart, $rend, $qstart, $qend) = $head =~ /^\s*([\d,]+)\s+([\d,]+)\s(\w)\s+\[\s*([\d,]+)\.\.\s*([\d,]+)\] x \[\s*([\d,]+)\.\.\s*([\d,]+)\]/;
+    #print Dumper($head, $riid, $qiid, $dir, $rfrom, $rto, $qfrom, $qto);
+
+    tr/,//d for ($riid, $qiid, $rstart, $rend, $qstart, $qend);
+    my $sec = $sec{$qiid} ? 0x10 : 0;
+    $sec{$qiid}++;
+    my $rev = $dir eq "c" ? 0x100 : 0;
+    
+    $qname = $qdb->{$qiid};
+    $flag = 0 | $sec | $rev;
+    $pos = $rstart+1;
+    $rname = $rdb->{$riid};
+    $mapq = 255;
+    $cigar = aln2cigar($rseq, $qseq, $qstart, $qend, $qldb->{$qdb->{$qiid}});
+    $rnext = "*";
+    $pnext = 0;
+    $tlen = 0;
+    ($seq = $qseq) =~ tr/-//d;
+    $qual = "*"; # qual NA
+    if ( $opt{add_scores}) {
+        $score = "AS:i:".aln2score( $rseq, $qseq );
+    }
+    print "$qname\t$flag\t$rname\t$pos\t$mapq\t$cigar\t$rnext\t$pnext\t$tlen\t$seq\t$qual";
+    print "\t$score" if $score;
+    print "\n";
+};
+
+
+##----------------------------------------------------------------------------##
+# Subs
+##----------------------------------------------------------------------------##
+
+sub aln2cigar{
+    my ($r, $q, $qstart, $qend, $qlen) = @_;
+    chomp($r, $q);
+
+    $L->logdie("query and reference sequence differ in length") if length($r) != length($q);
+
+    my $t =  $r;
+    $t =~ tr/-/M/c;
+    $t =~ tr/-/I/;
+    for(my $i=0; $i<length($r); $i++){
+        if(substr($q, $i, 1) eq "-"){
+            substr($t, $i, 1) = "D";
+        }
+    }
+
+    my $cigar = trace2cigar($t);
+    $cigar = ($qstart-1)."H".$cigar if $qstart > 1;
+    $cigar.= ($qlen - $qend)."H" if $qlen - $qend > 0;
+    return $cigar;
+}
+
+
+sub aln2score{
+    my ($r,$q) = @_;
+
+    # ref gap open/extension
+    my $rg = $r =~ tr/-//;
+    my $ro = $r;
+    $ro =~ tr/-//s;
+    my $rgo = $ro =~ tr/-//;
+    my $rge = $rg - $rgo;
+
+    # qry gap open/extension
+    my $qg = $q =~ tr/-//;
+    my $qo = $q;
+    $qo =~ tr/-//s;
+    my $qgo = $qo =~ tr/-//;
+    my $qge = $qg - $qgo;
+
+    # diffs
+    my $x = $r ^ $q;
+    my $mm = ($x =~ tr/\0//c) - ($rg + $qg);
+    my $ma = length($r) - ($rg + $qg + $mm);
+
+    return MA*$ma + MM*$mm + RGO*$rgo + RGE*$rge + QGO*$qgo + QGE*$qge;
+}
+
+# Compress a trace string (MMMDMMIIMMDMM) to a cigar string (3M1D2M2I2M1D2M)
+
+sub trace2cigar{
+	my ($trace) = @_;
+        chomp($trace); # just to be safe
+
+	my $cigar = '';        
+        my $spos = 0;
+
+        while($trace =~ /(\w)(?!\g{1})/g){
+            $cigar.= pos($trace)-$spos.$1;
+            $spos = pos($trace);
+        }
+	return $cigar;
+}
+
+sub bin{
+    my ($bin) = @_;
+    if (exists $opt{$bin."_path"} && $opt{$bin."_path"}) {
+        return $opt{$bin."_path"}."/".$bin;
+    } else {
+        return $bin;
+    }
+}
+
+sub check_binary{
+    my($bin, $ver) = (@_);
+    my $fbin = $bin;
+    unless(-e $fbin && -x $fbin){
+        if ($fbin = which($bin)) {
+            $L->logdie("Binary '$fbin' not executable") unless -e $fbin && -x $fbin;
+        } else {
+            $L->logdie("Binary '$bin' neither in PATH nor executable");
+        }
+    }
+
+    $bin = basename($fbin);
+
+    my $v;
+    if ($ver) {
+        $L->logdie("ARRAY ref required") unless ref $ver eq "ARRAY";
+
+        my $vs = qx($fbin $ver->[0]);
+        if ($? or ! $vs) {
+            $L->logdie("Couldn't determine version of $bin, at least $ver->[1] required");
+        }
+
+        ($v) = $vs =~ /(\S+?)\D*$/m;
+
+        if (version->parse($v) < version->parse($ver->[1])) {
+            $L->logdie("Version $v of '$bin' < $v");
+        }
+
+    }
+
+    $L->info(sprintf("  [ok] %-15s %s", $bin.($v ? "-$v" : ""), dirname($fbin)));
+
+}
+
+
+sub map_db{
+    my $db = shift;
+    my %db;
+    my %len;
+    my @ids;
+    open(RDB, "$dbshow $db |") or $L->logdie($!);
+
+    my $fp = Fasta::Parser->new(fh => \*RDB);
+    
+    my $c;
+    while(my $fa = $fp->next_seq){
+        $c++;
+        $db{$c} = $fa->id;
+        if ( defined($len{$fa->id}) ){
+            $len{$fa->id}+= length($fa->seq)
+        }else {
+            push @ids, $fa->id;
+            $len{$fa->id} = length($fa->seq)
+        }
+    }
+    close RDB;
+
+    $? && $L->logdie("Failed: $dbshow $db");
+    
+    return \%db, \%len, \@ids;
+}
