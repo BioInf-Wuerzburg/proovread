@@ -1,7 +1,5 @@
 package Fastq::Parser;
 
-# $Id: Parser.pm 128 2013-05-21 10:07:49Z s187512 $
-
 use warnings;
 use strict;
 
@@ -15,7 +13,7 @@ use lib '../';
 use Fastq::Seq 0.10;
 
 
-our $VERSION = '0.09';
+our $VERSION = '0.10';
 
 
 
@@ -353,6 +351,7 @@ sub check_format{
 	die sprintf("%s: %s",(caller 0)[3],"Format checking only works at the start of the file") 
 		if tell($fh);
 	my $c =$fh->getc(); # read first char
+        return undef unless $c;
 	# unread first char
 	$self->is_fh('GZIP') 
 		? $fh->ungetc($c)		# IO::Uncompress::Gunzip->ungetc pushes back string 

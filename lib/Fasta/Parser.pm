@@ -1,6 +1,6 @@
 package Fasta::Parser;
 
-# $Id: Parser.pm 119 2013-05-09 15:40:39Z s187512 $
+# $Id$
 
 use warnings;
 use strict;
@@ -14,9 +14,9 @@ use lib '../';
 use Fasta::Seq 0.06;
 
 
-our $VERSION = '0.08';
-
-
+our $VERSION = '0.09';
+our ($REVISION) = '$Revision$' =~ /(\d+)/;
+our ($MODIFIED) = '$Date$' =~ /Date: (\S+\s\S+)/;
 
 
 
@@ -250,6 +250,7 @@ sub check_format{
 	die sprintf("%s: %s",(caller 0)[3],"Format checking only works at the start of the file") 
 		if tell($fh);
 	my $c =$fh->getc(); # read first char
+        return undef unless $c; # empty file
 	$fh->ungetc(ord($c)); # unread first char
 	# read first char
 	return $c eq '>' ? $self : undef;
@@ -435,9 +436,9 @@ NOTE: In case a string is provided, make sure it contains trailing newline
 =cut
 
 sub append_seq{
-	my ($self, $seq) = @_;
+	my ($self, $seq, $lw) = @_;
 	my $pos = tell($self->{fh});
-	print {$self->{fh}} "$seq";
+	print {$self->{fh}} $seq->string($lw);
 	return $pos;
 }
 
