@@ -295,7 +295,11 @@ if(defined $opt_sample){
         $opt_lr_file = ["$RealBin/../sample/Ec-pb.fq"];
         $opt_sr_file = ["$RealBin/../sample/Ec-il-sim50X_1.fq"];
         $opt_sr_qv_offset = 64;
-        if($opt_sample =~ /uni|utg/i){
+        if($opt_sample =~ /dazz/i){
+            $opt_utg_file = ["$RealBin/../sample/Ec-utg-rand.fa"];
+            $opt_prefix = 'pr-Ec-dazz' unless $opt_prefix;
+            $opt_mode = 'sr+dazz-utg-noccs';
+        }elsif($opt_sample =~ /uni|utg/i){
             $opt_utg_file = ["$RealBin/../sample/Ec-utg-rand.fa"];
             $opt_prefix = 'pr-Ec-utg' unless $opt_prefix;
         }else{
