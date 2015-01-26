@@ -42,10 +42,14 @@ proovread is distributed ready with binaries of [[http://compbio.cs.toronto.edu/
 to employ your own installed version of these mappers, have a look at the
 [[Advanced%20Configuration][Advanced Configuration]] section.
 
-[[Advanced Configuration]]
-[[config]]
-[[#config]]
+[[#advanced-configuration][Advanced Configuration (github)]]
+
+[[config][Advanced_Configuration (pdf/html)]]
+
+[[#advanced-configuration][Advanced Configuration (all)]]
+
 [[Config]]
+
 
 ** Usage
 Test your installation by running proovread on the included sample data set.
@@ -205,10 +209,9 @@ run with strict settings on entirely unmasked data. The obtained percentage can
 be slightly lower as in the last iteration, and is roughly equal to the amount
 of read bases that will make it to high-confidence .trimmed.fq output.
 
-** Advanced Configuration
-<<config>>
+** Advanced Configuration <<#advanced-configuration>>
 
-#+NAME Config
+#+NAME: Config
 
 proovread comes with a comprehensive configuration, which allows tuning down to
 the algorithms core parameters. A custom configuration template can be generated
