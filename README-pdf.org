@@ -28,7 +28,7 @@
   make
 #+END_EXAMPLE
 
-NOTE: proovread comes with its own, modified version of [[#bwa-proovread][bwa]]. Using it
+NOTE: proovread comes with its own, modified version of [[radio-bwa-proovread][bwa]]. Using it
 with a standard bwa built will fail.
 
 ** Dependencies
@@ -40,7 +40,7 @@ with a standard bwa built will fail.
 
 proovread is distributed ready with binaries of [[http://compbio.cs.toronto.edu/shrimp/shrimp][SHRiMP2]] and [[https://github.com/PacificBiosciences/blasr][BLASR]]. If you want
 to employ your own installed version of these mappers, have a look at the
-[[#advanced-configuration][Advanced Configuration]] section.
+[[radio-advanced-configuration][Advanced Configuration]] section.
 
 ** Usage
 Test your installation by running proovread on the included sample data set.
@@ -63,7 +63,7 @@ Run proovread on one chunk first.
   proovread -l pb-001.fq -s reads.fq [-u unitigs.fa] --pre pb-001
 #+END_EXAMPLE
 
-If things go smoothly, submit the rest. See [[#log-and-statistics][Log and statistics]] for some notes on how to
+If things go smoothly, submit the rest. See [[radio-log-and-statistics][Log and statistics]] for some notes on how to
 interpret logging information.
 
 ** Input
@@ -100,7 +100,7 @@ worth running proovread. However, it is likely that contiguity will suffer.
 
 Internally, proovread will sample subsets for different iterations, by default
 15X for initial runs, 30X for the finishing. For customization of these rates
-see =sr-coverage= in proovread's config ([[#advanced-configuration][Advanced Configuration]]).
+see =sr-coverage= in proovread's config ([[radio-advanced-configuration][Advanced Configuration]]).
 
 *** unitigs
 In addition to short reads, [[http://wgs-assembler.sourceforge.net/wiki/index.php/Celera_Assembler_Terminology][unitigs]] can/should be used for correction in
@@ -165,7 +165,7 @@ phred accuracies:
 |    10 |    90.00 | +   |
 
 ** Log and statistics
-
+<<radio-log-and-statistics>>
 
 proovread generates a comprehensive log on STDERR. The includes fully functional
 system calls for scripts/tools invoked by proovread. That way, if something goes
@@ -201,6 +201,7 @@ be slightly lower as in the last iteration, and is roughly equal to the amount
 of read bases that will make it to high-confidence .trimmed.fq output.
 
 ** Advanced Configuration 
+*** <<radio-advanced-configuration>>
 
 proovread comes with a comprehensive configuration, which allows tuning down to
 the algorithms core parameters. A custom configuration template can be generated
@@ -265,7 +266,7 @@ file:media/proovread-poster.pdf
 [[https://github.com/BioInf-Wuerzburg/proovread/blob/master/media/proovread-poster.pdf][view proovread mechanism poster]]
 
 *** bwa-proovread
-
+<<radio-bwa-proovread>>
 
 proovread does local score comparison, rather than using a single hard
 cut-off. bwa-proovread is modified in the same fashion. =proovread.[ch]= extend
