@@ -1168,7 +1168,8 @@ sub run_dazzler{
     # my $blasr_cmd = cfg('blasr-path')."blasr $or_files $p->{blasr}{ref} @blasr_opts -sam 2>$p->{blasr}{log} | ".cfg('samtools-path')."samtools view -@ $opt_threads -bS /dev/fd/0 >$p->{tmp_bam}";
     my $dazz = task_file_name("-dazz.sh");
     my $dap = cfg('daligner-path');
-    $cmd = qx($dap/HPCmapper $rdb.dam $qdb.dam 2>>$log);
+    my $hpc = $dap."HPCmapper $rdb.dam $qdb.dam 2>>$log";
+    $cmd = qx($hpc);
     $cmd =~ s/(?=daligner|LAmerge|LAsort)/$dap/g;
     $cmd =~ s/-k20 -h50 -e.85/ -k15 -h35 -e.8/;
     $VB->hline();
