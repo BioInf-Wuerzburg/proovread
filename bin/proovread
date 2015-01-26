@@ -1183,9 +1183,10 @@ sub run_dazzler{
     $V->exit("daligner failed: $?\n", do { local $/; local @ARGV = ($log) ; <> }) if $?;
 
     $VS->verbose("Converting to/sorting BAM");
-    $cmd = "($RealBin/dazz2sam --dazz-db-path ".cfg('dazz-db-path')
+    $cmd = "($RealBin/dazz2sam"
+        . (cfg('dazz-db-path') ? "--dazz-db-path ".cfg('dazz-db-path') : "")
+        . (cfg('daligner-path') ? " --daligner-path ".cfg('daligner-path') : "")
         ." --add-scores"
-        ." --daligner-path ".cfg('daligner-path')
         ." --las $opt_prefix.$opt_prefix-utg.las"
         ." --ref $rdb.dam --qry $qdb.dam"
         ." | ".cfg('samtools-path')."samtools view -@ $opt_threads -bS /dev/fd/0 >${opt_prefix}_tmp.bam )2>>$log";
