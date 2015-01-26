@@ -1121,7 +1121,7 @@ sub run_dazzler{
     $VS->verbose("Running task ".$TASK);
 
     my $dir = task_file_name(prefix => '');
-    my $or_files = "@{$p->{or_files}}";
+    my @or_files = map{File::Spec->rel2abs($_)}@{$p->{or_files}};
 
     my $ref_tmp = $TC > 0
         ? File::Spec->rel2abs(task_file_name('.masked.fa', task => $TASKS[$TC-1] ))
@@ -1134,8 +1134,7 @@ sub run_dazzler{
     my $log = $opt_prefix."-dazz.log";
     my @qfa;
     my $c=0;
-    foreach ( @{$p->{or_files}} ) {
-        my $qf = File::Spec->rel2abs($_);
+    foreach my $qf ( @or_files ) {
         my $qfa = $opt_prefix."-utg".($c++).".fasta";
         qx(ln -s $qf $qfa);
         push @qfa, $qfa;
