@@ -40,7 +40,12 @@ with a standard bwa built will fail.
 
 proovread is distributed ready with binaries of [[http://compbio.cs.toronto.edu/shrimp/shrimp][SHRiMP2]] and [[https://github.com/PacificBiosciences/blasr][BLASR]]. If you want
 to employ your own installed version of these mappers, have a look at the
-[[config][Advanced Configuration]] section.
+[[Advanced%20Configuration][Advanced Configuration]] section.
+
+[[Advanced Configuration]]
+[[config]]
+[[#config]]
+[[Config]]
 
 ** Usage
 Test your installation by running proovread on the included sample data set.
@@ -66,8 +71,8 @@ Run proovread on one chunk first.
 If things go smoothly, submit the rest. See [[log][Log and statistics]] for some notes on how to
 interpret logging information.
 
-*** Input
-**** long-reads
+** Input
+*** long-reads
 Primarily proovread has been designed to correct /PacBio subreads/. You get
 these reads either from PacBio's SMRT-Portal or by using =dextract= from Gene
 Myers PacBio assembler [[http://dazzlerblog.wordpress.com/2014/03/22/the-dextractor-module-save-disk-space-for-your-pacbio-projects/][DAZZLER]], which I would recommend.
@@ -84,7 +89,7 @@ mappings has been optimized for PacBio reads and may produce artifacts in other
 scenarios. We are currently working on a version optimized for /Oxford Nanopore/
 data.
 
-**** short-reads
+*** short-reads
 For correction of long reads, proovread needs high coverage short read
 data. Typically these are HiSeq (75-150bp) and MiSeq reads (200-300bp), with
 overlapping libraries merged ([[http://ccb.jhu.edu/software/FLASH/][FLASh]]) for best performance. But also 454 or
@@ -102,7 +107,7 @@ Internally, proovread will sample subsets for different iterations, by default
 15X for initial runs, 30X for the finishing. For customization of these rates
 see =sr-coverage= in proovread's config ([[config][Advanced Configuration]]).
 
-**** unitigs
+*** unitigs
 In addition to short reads, [[http://wgs-assembler.sourceforge.net/wiki/index.php/Celera_Assembler_Terminology][unitigs]] can/should be used for correction in
 particular for large data sets (eukaryotes). Unitigs are high-confidence
 assembly fragments produced by for example ALLPATHS, Meraculous2 or the Celera
@@ -120,7 +125,7 @@ However, unitigs only cover regions without conflicts in short read data
 space. To correct PacBio reads in full length these gaps need to be corrected
 with primary short read data.
 
-***** dazzling proovread - dazz2sam
+**** dazzling proovread - dazz2sam
 Currently, support for DAZZLER/DALIGNER is considered experimental. To use
 dazzler instead of blasr, either export paths or set =daligner-path= and
 =dazz-db-path= in the config and invoke with modes
@@ -135,13 +140,13 @@ conversion (=proovread/bin/dazz2sam --help=), which might come in handy if one
 wants to visualize dazzler mappings in common alignment viewers like [[http://www.broadinstitute.org/igv/][IGV]] or
 [[http://ics.hutton.ac.uk/tablet/][tablet]].
 
-***** extracting unitigs from ALLPATHS
+**** extracting unitigs from ALLPATHS
 #+BEGIN_EXAMPLE
 # extract unitigs from allpaths assembly
 allpathslg/bin/Fastb2Fasta IN=reads.unibases.k96 OUT=unitigs.fa 
 #+END_EXAMPLE
 
-*** Output
+** Output
 By default, proovread generates six files in the output folder:
 
 | .trimmed.f[aq] | high accuracy pacbio reads, trimmed for uncorrected/low quality regions |
@@ -164,11 +169,12 @@ phred accuracies:
 |    20 |    99.00 | 5   |
 |    10 |    90.00 | +   |
 
-*** Log and statistics
+** Log and statistics
 <<log>>
+
 proovread generates a comprehensive log on STDERR. The includes fully functional
 system calls for scripts/tools invoked by proovread. That way, if something goes
-wrong, its easy to rerun a certain task invidually and take a closer look on the
+wrong, its easy to rerun a certain task individually and take a closer look on the
 issue.
 
 If you want to analyze, how things are going and whether there might be problems
@@ -191,7 +197,7 @@ grep -P 'Running mode|ked :|ning task' proovread.log
 Masked regions are regions that have already been corrected at high
 confidence, minus some edge fraction, which remains unmasked in order to
 serve as seeds for subsequent iterations. After the first iteration, you should
-have a masking percentage > 50-75%, strongly depending on qualtity, type and
+have a masking percentage > 50-75%, strongly depending on quality, type and
 coverage of your data. With each iteration, this value should increase.
 
 Prior to the final iteration, all data is unmasked and the final iteration is
@@ -199,15 +205,17 @@ run with strict settings on entirely unmasked data. The obtained percentage can
 be slightly lower as in the last iteration, and is roughly equal to the amount
 of read bases that will make it to high-confidence .trimmed.fq output.
 
-*** Advanced Configuration
+** Advanced Configuration
 <<config>>
+
+#+NAME Config
 
 proovread comes with a comprehensive configuration, which allows tuning down to
 the algorithms core parameters. A custom configuration template can be generated
 with =--create-cfg=. Instructions on format etc. can be found inside the
 template file.
 
-*** Hardware and Parallelization
+** Hardware and Parallelization
 proovread has been designed with low memory node cluster architectures in
 mind. Peek memory is mainly controlled by the amount of long reads
 provided. With chunks of less than 20 Mbp it easily runs on a 8 GB RAM machine.
@@ -217,20 +225,21 @@ In theory, proovread can be simply parallelized by increasing
 at some point render it more efficient, to run e.g. 4 instances at 8 threads in
 parallel to make full use of a 32 CPU machine.
 
-*** FAQ / General Remarks
+** FAQ / General Remarks
 **** Why do proovread results from two identical runs differ / Is proovread deterministic?
 
-One might expect that proovread results are deteministic - meaning reproducable
+One might expect that proovread results are deterministic - meaning reproducible
 in identical form if input data is identical. This, however, is not the case in
 a couple of steps:
 
-***** bwa mem mappings: bwa employs heuristics that allow for slightly different
-   results in repeated runs. In particular, one feature is prone to generate
-   differences when imployed in proovread's iterative strategy: for performance
-   reasons bwa encodes nucleotides using 2 bits only, meaning bwa only has a
-   four letter alphabet =[ATGC]=. Other bases, including =NNNN= stretches used
-   for masking by proovread, are converted into random =[ATGC]= strings. This
-   has the most severe effect on alignments at the margins of masked regions:
+***** bwa mem mappings
+bwa employs heuristics that allow for slightly different
+results in repeated runs. In particular, one feature is prone to generate
+differences when employed in proovread's iterative strategy: for performance
+reasons bwa encodes nucleotides using 2 bits only, meaning bwa only has a
+four letter alphabet =[ATGC]=. Other bases, including =NNNN= stretches used
+for masking by proovread, are converted into random =[ATGC]= strings. This
+has the most severe effect on alignments at the margins of masked regions:
 #+BEGIN_EXAMPLE
      orig | ATGAATTGGTTAATCTGC
    masked | ATGAATTGGTNNNNNNNN
@@ -245,17 +254,19 @@ a couple of steps:
    aln-02 |    AATTGGTTAAT
 #+END_EXAMPLE
 
-***** sorting with threshold: whenever there are decisions to make based on some
-   sort of sorted list in combination with fixed amount of items to keep/remove,
-   things get non-deterministic, if different items can have identical values in
-   their sorting fields. In proovread, this for example affects filtering of
-   "best alignments" in bins (local context).
+***** sorting with threshold
+whenever there are decisions to make based on some sort of sorted list in
+combination with fixed amount of items to keep/remove, things get
+non-deterministic, if different items can have identical values in their sorting
+fields. In proovread, this for example affects filtering of "best alignments" in
+bins (local context).
 
-***** consensus calling: Whenever there is a 50-50 ratio for a base call, the
-   resulting base is randomly chosen, to minimize particular biases.
+***** consensus calling
+ Whenever there is a 50-50 ratio for a base call, the resulting base is randomly
+ chosen, to minimize particular biases.
 
 ** Algorithm and Implementation
-Algorithm and Implementation are decribed in detail in the [[http://dx.doi.org/10.1093/bioinformatics/btu392][proovread]] paper.
+Algorithm and Implementation are described in detail in the [[http://dx.doi.org/10.1093/bioinformatics/btu392][proovread]] paper.
 
 file:media/proovread-poster.pdf
 ***                                                            :noexport:
