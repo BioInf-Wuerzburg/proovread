@@ -230,8 +230,8 @@ results in repeated runs. In particular, one feature is prone to generate
 differences when employed in proovread's iterative strategy: for performance
 reasons bwa encodes nucleotides using 2 bits only, meaning bwa only has a
 four letter alphabet =[ATGC]=. Other bases, including =NNNN= stretches used
-for masking by proovread, are converted into random =[ATGC]= strings. This
-has the most severe effect on alignments at the margins of masked regions:
+for masking by proovread, are converted into random =[ATGC]= strings. This,
+in particular, effects alignments at the margins of masked regions:
 #+BEGIN_EXAMPLE
      orig | ATGAATTGGTTAATCTGC
    masked | ATGAATTGGTNNNNNNNN
@@ -247,15 +247,14 @@ has the most severe effect on alignments at the margins of masked regions:
 #+END_EXAMPLE
 
 ***** sorting with threshold
-whenever there are decisions to make based on some sort of sorted list in
-combination with fixed amount of items to keep/remove, things get
-non-deterministic, if different items can have identical values in their sorting
-fields. In proovread, this for example affects filtering of "best alignments" in
-bins (local context).
+Whenever there are decisions to make for sorted list in combination with fixed 
+amount of items to keep/remove, things get non-deterministic if identical values in sorting
+fields occur. In proovread, this for example affects filtering of "best alignments" in
+bins (localized scoring context).
 
 ***** consensus calling
- Whenever there is a 50-50 ratio for a base call, the resulting base is randomly
- chosen, to minimize particular biases.
+50-50 ratios in base calling will result in one randomly
+chosen alternative, minimizing a particular bias.
 
 ** Algorithm and Implementation
 Algorithm and Implementation are described in detail in the [[http://dx.doi.org/10.1093/bioinformatics/btu392][proovread]] paper.
