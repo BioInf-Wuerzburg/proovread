@@ -124,7 +124,7 @@ with primary short read data.
 Currently, support for DAZZLER/DALIGNER is considered experimental. To use
 dazzler instead of blasr, either export paths or set =daligner-path= and
 =dazz-db-path= in the config and invoke with modes
-=sr+dazz-utg=/=mr+dazz-utg=. In the current implementation, only a single
+=sr+dazz-utg / mr+dazz-utg=. In the current implementation, only a single
 instance of dazzler will be invoked, therefore threading is determined by the
 thread setup with which daligner has been compiled (default 4).
 
