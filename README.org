@@ -66,6 +66,22 @@ Run proovread on one chunk first.
 If things go smoothly, submit the rest. See [[#log-and-statistics][Log and statistics]] for some notes on how to
 interpret logging information.
 
+** Crunching numbers
+
+Just to give you a hands-on idea of what to expect from correction. Here are some stats of the latest correction
+I ran. It's from one PacBio cell of a 50Mb heterozygous eukaryote genome (I will add some more numbers on other
+data sets and correction tools soon) 
+
+|               |       raw   |   proovread |     lordec |
+|---------------+-------------+-------------+------------|
+| Sequences     |      56,877 |      55,493 |     53,676 |
+| Total (bp)    | 315,511,633 | 236,687,413 | 99,379,617 |
+| Longest (bp)  |      27,874 |      24,682 |     13,917 |
+| Shortest (bp) |       1,000 |       1,000 |      1,000 |
+| N50 (bp)      |       7,592 |       6,236 |      1,877 |
+| N90 (bp)      |       2,887 |       1,934 |      1,141 |
+
+
 ** Input
 *** long-reads
 Primarily proovread has been designed to correct /PacBio subreads/. You get
