@@ -1,0 +1,5 @@
+#!/bin/bash
+
+BIN="$(dirname "$(readlink -f "$0")")"
+
+$BIN/proovread --haplo-coverage --no-sampling "$@";
