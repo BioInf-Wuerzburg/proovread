@@ -192,6 +192,8 @@ Toggle debug messages.
         'rep-coverage=i' => \(my $opt_rep_coverage = undef),
         'min-ncscore=f' => \(my $opt_min_ncscore = undef),
 
+        'haplo-coverage!' => \(my $opt_haplo_coverage = 1),
+
         'mask-weak-reads=i' => \(my $opt_mask_weak_reads = 20),
         'ignore-weak-reads=i' => \(my $opt_ignore_weak_reads = 20),
 
@@ -349,9 +351,6 @@ foreach my $ref_id(@LR_IDS){
         }
     }
 
-    $sso->filter_by_ncscore if defined $opt_min_ncscore;
-    $sso->filter_rep_region_alns if defined $opt_rep_coverage;
-
     generate_consensus($sso);
 
     # print to filtered BAM for debug
@@ -373,15 +372,36 @@ sub generate_consensus{
 	my $sso = shift; # Sam::Seq object
 
         my @mcrs = ();
+        my @hpl_covs = ();
+        my $hpl_cov;
 
 	if($rpr && ! $opt_ignore_mcr){
 		if(my $mcrs = $sso->ref->desc){
                         while($mcrs =~ /MCR\d+:(\d+),(\d+)/g){
 				push @mcrs, [$1, $2];
 			}
+                        while($mcrs =~ /HPL:(\d+)/g){
+				push @hpl_covs, $1;
+			}
 		};
 	}
 
+        # run filter
+        $sso->filter_by_ncscore if defined $opt_min_ncscore;
+        $sso->filter_rep_region_alns if defined $opt_rep_coverage;
+        if ($opt_haplo_coverage) {
+            # determine haplocov
+            $hpl_cov = $sso->haplo_coverage();
+
+            # compare with prev. determined cov (take max)
+            if ($hpl_cov && @hpl_covs) {
+                $hpl_cov = (sort{$b <=> $a}($hpl_cov, @hpl_covs))[0];
+            }elsif (@hpl_covs) {
+                $hpl_cov = (sort{$b <=> $a}(@hpl_covs))[0];
+            }
+
+            $sso->filter_by_coverage($hpl_cov) if $hpl_cov;
+        }
 
         # filter contained alignments and add overlap regions to ignore_coords
         my @owin;
@@ -416,6 +436,10 @@ sub generate_consensus{
                                   ignore_coords => [@mcrs, @owin],
                                   qual_weighted => $opt_qual_weighted,
                                  );
+
+        if ($hpl_cov) {
+            $con->desc_append("HPL:$hpl_cov");
+        }
 
         if($debug){
             print $trh "$con";

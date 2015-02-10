@@ -94,7 +94,7 @@ my $VB = Verbose->new(
 
 # load core defaults
 $VS->verbose("Reading core config");
-my $cfg_core_file = "$RealBin/../proovread.cfg"; 
+my $cfg_core_file = "$RealBin/../proovread.cfg";
 my %cfg = do $cfg_core_file;
 $V->exit("An error ocuured while processing the config file: $@") if $@; # capture do errors on cfg
 
@@ -120,7 +120,7 @@ if($cfg){
 		$VS->exit("Cannot find config file `$cfg`");
 	}
 	$VS->verbose("Reading custom config `$cfg`");
-	%cfg = (%cfg, do "$cfg"); 
+	%cfg = (%cfg, do "$cfg");
 	$V->exit("An error ocuured while processing the config file: $@") if $@; # capture do errors on cfg
 }
 
@@ -262,6 +262,14 @@ Run the sample data set to test installation.
 
 $opt{'sample-run:s'} = \(my $opt_sample);
 
+=item [--haplo-coverage]
+
+Adjust coverage for reads with low-coverage haplotype.
+
+=cut
+
+$opt{'haplo-coverage!'} = \(my $opt_haplo_coverage);
+
 =item [-h, --help]
 
 =item [-V, --version]
@@ -311,7 +319,7 @@ if(defined $opt_sample){
 	$opt_sr_qv_offset = 33;
         $opt_prefix = 'pr-Fa' unless $opt_prefix;
     }
-} 
+}
 
 @$opt_lr_file || pod2usage("--long-read file required");
 @$opt_sr_file || @$opt_utg_file || $opt_sam_file || $opt_bam_file ||
@@ -352,8 +360,8 @@ if(-e $opt_prefix){
 		}
 	}else{
 		$VS->exit("Output directory already exists, yet is no directory")
-	} 
-} 
+	}
+}
 make_path($opt_prefix);
 
 
@@ -379,7 +387,7 @@ print PARAM "Custom config parameter\n",$cfg_string;
 
 my $cmd_string = Dumper(\%opt);
 $cmd_string =~ s/^.*\n//;
-$cmd_string =~ s/\n.*$//; 
+$cmd_string =~ s/\n.*$//;
 print PARAM "Command line parameter\n",$cmd_string;
 
 close PARAM;
@@ -399,25 +407,25 @@ my $max_sr_dev;
 
 if(@$opt_sr_file){
 	$VS->verbose("Checking short read files");
-	
+
 	# short read files
 	foreach(@$opt_sr_file){
 		-e $_ || $VS->exit("Cannot find short read file `$_`");
-	
+
 		$V->verbose("\n".basename($_));
-		
+
 		# test if short reads are FASTQ/FASTA
 		my $fp;
 		my $sr_length;
 		my $sr_length_dev = '0';
 		my $sr_qv_offset;
 		my $sr_count;
-		
+
 		# FASTQ
-		if($fp = Fastq::Parser->new(file => $_)->check_format){ 
+		if($fp = Fastq::Parser->new(file => $_)->check_format){
 			# format
 			$V->verbose("Detected FASTQ format");
-			
+
 			# length
 			($sr_length, $sr_length_dev) = $fp->guess_seq_length;
 			$V->verbose(sprintf("Estimated short read length: %d +-%d", $sr_length, $sr_length_dev ));
@@ -429,34 +437,34 @@ if(@$opt_sr_file){
 					."you need to specify --ignore-sr-length"
 				);
 			}
-			
+
 			# offset
 			unless (defined $opt_sr_qv_offset){ # manual overwrite from config
-				$sr_qv_offset = $fp->guess_phred_offset; 
+				$sr_qv_offset = $fp->guess_phred_offset;
 				$V->exit(
 					"Estimating short read quality offset failed.\n"
 					."See 'sr-qv-offset' in the advanced section for manual overwrite"
 				) unless defined $sr_qv_offset;
 				$V->verbose(sprintf("Etimated short read quality offset: %d", $sr_qv_offset));
-				
+
 				if(defined($sr_qv_offset_total)){
 					$sr_qv_offset_total == $sr_qv_offset || $VB->exit('Different formats/quality offsets in short read files not allowed');
 				}else{
 					$sr_qv_offset_total = $sr_qv_offset;
 				}
 			}
-			
+
 			# count
 			$sr_count = $fp->guess_seq_count();
 			$V->verbose(sprintf("Estimating approximate number of short reads: %s", Verbose->Humanize($sr_count)));
-		
-		
+
+
 		# FASTA
 		}elsif($fp = Fasta::Parser->new(file=> $_)->check_format){
 			# format
 			$V->verbose("Detected FASTA format");
-	
-			# length		
+
+			# length
 			($sr_length, $sr_length_dev) = $fp->guess_seq_length;
 			$V->verbose(sprintf("Estimating short read length: %d +-%d", $sr_length, $sr_length_dev));
 			if(!$opt_ignore_sr_length && $sr_length > 1000){
@@ -467,22 +475,22 @@ if(@$opt_sr_file){
 					."you need to specify --ignore-sr-length"
 				);
 			}
-			
+
 			if(defined($sr_qv_offset_total)){
 				$sr_qv_offset_total == 0 || $VB->exit('Different formats/quality offsets in short read files not allowed');
 			}else{
 				$sr_qv_offset_total = 0;
 			}
-	
+
 			# count
 			$sr_count = $fp->guess_seq_count();
 			$V->verbose(sprintf("Estimating approximate number of short reads: %s", Verbose->Humanize($sr_count)));
-	
-			
+
+
 		}else{
 			$V->exit("Short read file $_ neither FASTQ nor FASTA format");
 		}
-	
+
 		# push
 		push @sr_length, $sr_length;
 		push @sr_length_dev, $sr_length_dev;
@@ -490,13 +498,13 @@ if(@$opt_sr_file){
 		push @sr_bps, ($sr_count * $sr_length);
 		$sr_count_total+= $sr_count;
 	}
-	
+
 	$sr_qv_offset_total = $opt_sr_qv_offset unless defined $sr_qv_offset_total;
-	
+
 	if(@$opt_sr_file){
 		$min_sr_length = (sort{$a<=>$b}@sr_length)[0];
 		$max_sr_dev = (sort{$b<=>$a}@sr_length_dev)[0];
-		$min_sr_length+=$max_sr_dev; 
+		$min_sr_length+=$max_sr_dev;
 	}
 }
 
@@ -516,59 +524,59 @@ if($opt_utg_file && @$opt_utg_file){
 
     	$VS->nline;
   	$VS->verbose("Checking alternative read files");
-	
+
 	# short read files
 	foreach(@$opt_utg_file){
 		-e $_ || $VS->exit("Cannot find alternative read file `$_`");
-	
+
 		$V->verbose("\n".basename($_));
-		
+
 		# test if short reads are FASTQ/FASTA
 		my $fp;
 		my $or_length;
 		my $or_length_dev = '0';
 		my $or_qv_offset;
 		my $or_count;
-		
+
 		# # FASTQ
-		# if($fp = Fastq::Parser->new(file => $_)->check_format){ 
+		# if($fp = Fastq::Parser->new(file => $_)->check_format){
 		# 	# format
 		# 	$V->verbose("Detected FASTQ format");
-		# 	
+		#
 		# 	# length
 		# 	($or_length, $or_length_dev) = $fp->guess_seq_length;
 		# 	$V->verbose(sprintf("Estimated short read length: %d +-%d", $or_length, $or_length_dev ));
-                # 
+                #
                 #         # dont really care about length
 		# 	# dont care about offset
-		# 	
+		#
 		# 	# count
 		# 	$or_count = $fp->guess_seq_count();
 		# 	$V->verbose(sprintf("Estimating approximate number of alternative reads: %s", Verbose->Humanize($or_count)));
-	        # 
+	        #
 		# # FASTA
 		# }els
 
                 if($fp = Fasta::Parser->new(file=> $_)->check_format){
 			# format
 			$V->verbose("Detected FASTA format");
-	
-			# length		
+
+			# length
 			($or_length, $or_length_dev) = $fp->guess_seq_length;
 			$V->verbose(sprintf("Estimating fragment length: %d +-%d", $or_length, $or_length_dev));
-	
+
                         # dont really care about length
 			# dont care about offset
 
 			# count
 			$or_count = $fp->guess_seq_count();
 			$V->verbose(sprintf("Estimating approximate number of fragments: %s", Verbose->Humanize($or_count)));
-	
-			
+
+
 		}else{
 			$V->exit("Alternative read file needs to be in FASTA format. You can use `proovread/bin/SeqFilter --fasta --line-width 80 --out utg.fa utg.fq` to convert FASTQ");
 		}
-	
+
 		# push
 		push @or_length, $or_length;
 		push @or_length_dev, $or_length_dev;
@@ -576,11 +584,11 @@ if($opt_utg_file && @$opt_utg_file){
 		push @or_bps, ($or_count * $or_length);
 		$or_count_total+= $or_count;
 	}
-	
+
 	if(@$opt_utg_file){
 		$min_or_length = (sort{$a<=>$b}@or_length)[0];
 		$max_or_dev = (sort{$b<=>$a}@or_length_dev)[0];
-		$min_or_length+=$max_or_dev; 
+		$min_or_length+=$max_or_dev;
 	}
 }
 
@@ -681,12 +689,12 @@ while($TC < $#TASKS){
         my $task = $TASK = $TASKS[$TC];
 
 	if($TASK eq 'read-long'){
-		
+
 		# long read files
 		foreach(@$opt_lr_file){
 			-e $_ || $VS->exit("Cannot find long read file `$_`");
 		}
-		
+
 		$lr_chunk_offsets = read_long() if @$opt_lr_file; # 'external-sam does not require LR
 
         }elsif($TASK eq 'read-sam'){
@@ -726,16 +734,16 @@ while($TC < $#TASKS){
 		);
 
 	        create_sorted_bam();
-                
+
                 my $masked_frac;
 		($lr_chunk_offsets, $masked_frac) = correct_sr_mt($lr_chunk_offsets);
                 mask_shortcut_frac($masked_frac, \@masked_fracs);
-		
+
 	}elsif($TASK eq 'shrimp-finish'){
 		my $sr_finish_files;
 
 		$sr_finish_files = $opt_sr_file;
-	
+
 		# create a unmasked reference for finish run
 		seq_filter(
                            '--in' => task_file_name('.fq', task => $TASKS[$TC-1] ),
@@ -744,7 +752,7 @@ while($TC < $#TASKS){
                            '--quiet' => '',
                            '--phred-offset' => 33,
 		);
-		
+
 		run_shrimp(
 			sr_files => $sr_finish_files,
 			shrimp => {
@@ -755,14 +763,14 @@ while($TC < $#TASKS){
 				'--qv-offset' => $sr_qv_offset_total,
 			}
 		);
-		
+
 		create_sorted_bam();
 
 		$lr_chunk_offsets = correct_sr_mt($lr_chunk_offsets);
-		
+
 	}elsif($TASK eq 'blasr-utg'){
 
-                run_blasr(			
+                run_blasr(
 			or_files => $opt_utg_file,
                         blasr => {
 				cfg($TASK), # basic shrimp params from cfg
@@ -773,7 +781,7 @@ while($TC < $#TASKS){
 				'-nproc' => $opt_threads,
 			}
 		);
-                
+
 		create_sorted_bam();
 
 		$lr_chunk_offsets = correct_sr_mt($lr_chunk_offsets);
@@ -790,7 +798,7 @@ while($TC < $#TASKS){
 
 	}elsif($TASK eq 'bwa-utg'){
 
-                run_bwa(			
+                run_bwa(
 			or_files => $opt_utg_file,
                         bwa => {
 				cfg($TASK), # basic shrimp params from cfg
@@ -801,11 +809,11 @@ while($TC < $#TASKS){
 				'-t' => $opt_threads,
 			}
 		);
-                
+
 		create_sorted_bam();
 
 		$lr_chunk_offsets = correct_sr_mt($lr_chunk_offsets);
-		
+
 	}elsif($TASK =~ m/^bwa-/){
 
 		# cerate a unmasked reference for finish run
@@ -834,14 +842,14 @@ while($TC < $#TASKS){
 				'-t' => $opt_threads,
 			}
 		);
-		
+
 
                 create_sorted_bam();
 
                 my $masked_frac;
 		($lr_chunk_offsets, $masked_frac) = correct_sr_mt($lr_chunk_offsets);
                 mask_shortcut_frac($masked_frac, \@masked_fracs);
-                
+
         }elsif($TASK =~ m/^ccs-\d+/){
             my $fqi = task_file_name('.fq', task => $TASKS[$TC-1]);
             my $fqo = task_file_name('.fq', task => $TASKS[$TC]);
@@ -854,20 +862,20 @@ while($TC < $#TASKS){
 
             my $cmd = "$RealPerl/ccseq ".(cfg('debug') ? "--debug" : "").(cfg('bwa-path') ? "--bwa-path ".cfg('bwa-path') : "")." --threads $opt_threads --pre $opt_prefix/$TASK <$fqi | tee $fqo | "
               ."$RealPerl/SeqFilter --line-width 80 --phred-offset 33 --phred-mask $ccs_mask --fasta --out $fmo --base-content N --tsv - --quiet";
-            
+
             $VB->hline;
             $VB->verbose($cmd);
             my $re = qx($cmd);
             my ($bpt, $bpN) = (split(/\s/, $re))[1,6];
             $VB->hline;
-        
+
             $V->exit("ccseq failed: $?\n") if $?;
             # $VB->nline;
             # $VS->verbose(sprintf "Masked: %0.1f%%", $bpN/$bpt*100);
             # $VB->nline;
-            
+
             $lr_chunk_offsets = chunk_index($fqo);
-            
+
 	}else{
 		$VB->exit("unknown task: ".$TASK);
 	}
@@ -912,7 +920,7 @@ if(cfg('seq-filter')){
 			'--substr' => $opt_chim_fil,
 			'--in' => $opt_fq_raw,
 			'--out' => $opt_fq_fil,
-                        '--phred-offset' => 33,  
+                        '--phred-offset' => 33,
 		);
 	}
 }
@@ -925,7 +933,7 @@ if(cfg('seq-filter') && -s $opt_fq_fil){ # no need to create FASTA from empty FA
                    '--in' => $opt_fq_fil,
                    '--out' => $opt_fa_fil,
                    '--fasta' => '',
-                   '--phred-offset' => 33,  
+                   '--phred-offset' => 33,
 	);
 }
 
@@ -940,11 +948,11 @@ END{
 	if ($no_fatal){
 		unless ($opt_keep){
 			$VS->verbose("Cleaning up");
-			remove_tree(@tmp_dirs) 
+			remove_tree(@tmp_dirs)
 		};
 		$V->verbose("Total time spent", format => "{TIME_FULL}] {MESSAGE} {TIME_ELAPSED}\n");
 		$VS->verbose("Done");
-	} 
+	}
 }
 
 
@@ -965,26 +973,26 @@ END{
 =cut
 
 sub read_sam{
-	
+
 	my %LR;
-	
+
 	# init input stream parser
 	my $rsp = Sam::Parser->new(
 		file => $opt_sam_file
 	);
-	
+
 	$VS->verbose("Reading SAM file `$opt_sam_file`");
-	
+
 	# read sam header
 	while(my %h = $rsp->next_header_line('SQ|PG')){
             push @LR_IDS, $h{'SN'};
         }
-	
+
 	@LR_IDS = sort byfile keys %LR;
 
         my $bam_file = task_file_name("_tmp.bam");
 	$VS->verbose("Converting to BAM file `$bam_file`");
-	
+
         my $bam_cmd = cfg('samtools-path')."samtools view -@ $opt_threads -bS $opt_sam_file >".$bam_file;
 
         $VB->hline();
@@ -1013,16 +1021,16 @@ sub run_shrimp{
              tmp_bam => task_file_name("_tmp.bam"),
              @_
             };
-	
+
     $V->nline;
     $VS->verbose("Running task ".$TASK);
-	
+
     # Index genome file first and save projection for multiple short read
     #  files
     $VS->verbose("Indexing Long reads");
-	
+
     # init shrimp handler
-    my $shrimp_ldx = Shrimp->new( 
+    my $shrimp_ldx = Shrimp->new(
                                  %{$p->{shrimp}},
                                  bin => cfg('shrimp-path').'gmapper-ls',
                                  '--save' => task_file_name("_shrimp_idx"),
@@ -1032,16 +1040,16 @@ sub run_shrimp{
     $VB->hline();
     $VB->verbose($shrimp_ldx->command());
     $VB->hline();
-	
+
     # run shrimp
     $shrimp_ldx->run->finish;
 
     my $sr_files = "@{$p->{sr_files}}";
-	
+
     $VS->verbose("Mapping short reads `$sr_files`");
 
     # init shrimp handler
-    my $shrimp = Shrimp->new( 
+    my $shrimp = Shrimp->new(
                              %{$p->{shrimp}},
                              bin => cfg('shrimp-path').'gmapper-ls',
                              'ref' => undef,
@@ -1067,7 +1075,7 @@ sub run_shrimp{
     $VB->verbose($shrimp_cmd);
     $VB->hline();
     qx($shrimp_cmd);
-                
+
     $V->exit("shrimp failed: $?\n", do { local $/; local @ARGV = ("$shrimp_log") ; <> }) if $?;
 }
 
@@ -1084,12 +1092,12 @@ sub run_blasr{
              tmp_bam => task_file_name("_tmp.bam"),
              @_
             };
-	
+
     $V->nline;
     $VS->verbose("Running task ".$TASK);
-	
+
     my $or_files = "@{$p->{or_files}}";
-	
+
     $VS->verbose("Mapping reads `$or_files`");
 
     my @blasr_opts;
@@ -1215,29 +1223,29 @@ sub run_bwa{
              tmp_bam => task_file_name("_tmp.bam"),
              @_
             };
-	
+
     $V->nline;
     $VS->verbose("Running task ".$TASK);
-	
+
     # Index genome file first and save projection for multiple short read
     #  files
     $VS->verbose("Indexing Long reads");
-    
+
     my $bwa_index_cmd = cfg('bwa-path')."bwa-proovread index $p->{bwa}{ref} $p->{bwa}{ref} 2>$p->{bwa}{log}";
-    
+
     $VB->hline();
     $VB->verbose($bwa_index_cmd);
     $VB->hline();
-    
+
     qx($bwa_index_cmd);
     $V->exit("bwa failed: $?\n", do { local $/; local @ARGV = ("$p->{bwa}{log}") ; <> }) if $?;
-    
+
     my $pg_rsp;
     my $pg_step;
-	
-    ### foreach sr file read mappings	
+
+    ### foreach sr file read mappings
     my $or_files = "@{$p->{or_files}}";
-		
+
     $VS->verbose("Mapping reads `$or_files`");
 
     my @bwa_opts;
@@ -1324,35 +1332,35 @@ Read the pacbio long read file and create a new, indexed long read file,
 sub read_long{
 
 	$VS->verbose("Preparing long reads");
-        
+
 	# read fasta/fastq, write and sort by id
 	my %lr;
 
 	my $lrpw;
 
         my $noccs;
-        
+
 	foreach(@$opt_lr_file){
-		
+
 		my $lrpr;
 		$lrpr = Fasta::Parser->new(file => $_)->check_format();
 		$lrpr = Fastq::Parser->new(file => $_)->check_format() unless $lrpr;
 		$lrpr || $VS->exit("Unknown format in '--long-read' file `$_`");
-		
+
 		my $lr_count = $lrpr->guess_seq_count();
 		push @lr_count, $lr_count;
 		my ($lr_length, $lr_dev) =  $lrpr->guess_seq_length;
 		push @lr_length, $lr_length;
 		push @lr_bps, ($lr_length * $lr_count);
-		
 
-                $lrpw = Fastq::Parser->new( 
-                                           file => task_file_name(".fq", task => $TASKS[$TC] ), 
+
+                $lrpw = Fastq::Parser->new(
+                                           file => task_file_name(".fq", task => $TASKS[$TC] ),
                                            mode => '+>'
                                           );
 
 		if(ref $lrpr eq 'Fasta::Parser'){ # FASTA ref
-			
+
 			my $fi_file = task_file_name(suffix => ".ignored.tsv", task => '');
 			my $stubby_count = 0;
 			open(IGNORE, '>>', $fi_file) or $VS->exit($!." $fi_file");
@@ -1379,7 +1387,7 @@ sub read_long{
                         }
 			close IGNORE;
 			$V->verbose("Skipped $stubby_count stubby reads with length <".2*$min_sr_length) if $stubby_count;
-			
+
 		}else{ # FASTQ ref
 			if($opt_mode eq 'sam' or $opt_mode eq 'bam' ){
 				my $po = $lrpr->guess_phred_offset || $opt_lr_qv_offset;
@@ -1387,9 +1395,9 @@ sub read_long{
 					unless $po;
 				$V->exit("Only offset 33 and 64 are supported")
 					unless $po;
-					
+
 				$lrpr->phred_offset($po);
-				
+
 				while(my $lr = $lrpr->next_seq){
                                     	unless( my($id,$range) = $lr->id =~ m!^(m[^/]+/\d+)/(\d+_\d+)!){
                                             $noccs++;
@@ -1402,9 +1410,9 @@ sub read_long{
 					$lr->phred_transform if $po == 64;
 					$lr{$lr->id} = $lr;
                                 }
-				
+
 			}else{
-				
+
 				my $fi_file = task_file_name(suffix => ".ignored.tsv", task => '');
 				my $stubby_count = 0;
 				open(IGNORE, '>>', $fi_file) or $VS->exit($!." $fi_file");
@@ -1427,14 +1435,14 @@ sub read_long{
 				}
 				close IGNORE;
 				$V->verbose("Skipped $stubby_count stubby reads with length <".2*$min_sr_length) if $stubby_count;
-				
+
 			}
 		}
 	}
 
 
-        
-        
+
+
 	# write sorted/indexed fq/fa lr file for mapping/sam2cns
 	my @lr_idxs;
 	my $lr_c = 0;
@@ -1455,12 +1463,12 @@ sub read_long{
                   );
 
         if($opt_mode !~ /noccs/ &&$noccs && grep{$_ =~ /ccs/}@TASKS){
-            $opt_mode =~ s/^([^-]+)/$1-noccs/; 
+            $opt_mode =~ s/^([^-]+)/$1-noccs/;
             $VS->verbose("Read IDs don't look like proper PacBio subread IDs.\nFalling back to running mode: $opt_mode");
             $V->exit("unknown mode $opt_mode") unless exists $cfg{'mode-tasks'}{$opt_mode};
             @TASKS = @{$cfg{'mode-tasks'}{$opt_mode}};
         }
-        
+
         return \@lr_idxs;
 }
 
@@ -1472,7 +1480,7 @@ sub read_long{
 
 sub correct_sr_mt{
 	my ($lr_chunk_offsets) = @_;
-	
+
 	$V->nline;
 	$VS->verbose("Correcting Sequences (".@$lr_chunk_offsets." batches)");
 
@@ -1487,7 +1495,7 @@ sub correct_sr_mt{
             $bin_size = cfg('bin-size', $opt_mode);
         }
 
-        
+
 	# sam2cns
 	my %bam2cns_default = (
                 '--bam' => task_file_name(".bam"),
@@ -1495,23 +1503,25 @@ sub correct_sr_mt{
 		'--coverage' => $max_cov,
                 '--bin-size' => $bin_size,
 		'--append' => 1,
-		'--cfg'	=> $cfg || undef,		
+		'--cfg'	=> $cfg || undef,
 		'--mask-weak-reads' => cfg('mask-weak-reads', $TASK),
-		'--ignore-weak-reads' => cfg('ignore-weak-reads', $TASK), 
+		'--ignore-weak-reads' => cfg('ignore-weak-reads', $TASK),
                 '--max-ins-length' => cfg('max-ins-length', $TASK),
+
+                $opt_haplo_coverage ? ('--haplo-coverage' => '') : (),
 
                 defined(cfg('rep-coverage', $TASK)) ? ('--rep-coverage' => cfg('rep-coverage', $TASK)) : (),
                 defined(cfg('min-ncscore', $TASK)) ? ('--min-ncscore' => cfg('min-ncscore', $TASK)) : (),
-                           
-		cfg('detect-chimera', $TASK) ? ('--detect-chimera' => '') : (), 
+
+		cfg('detect-chimera', $TASK) ? ('--detect-chimera' => '') : (),
 		cfg('mcr-ignore', $TASK) ? ('--ignore-hcr' => '') : (),
-		 
+
                 ($TASK =~ /blasr/) # blasr has descending, negative scores!!
                     ? ('--invert-scores' => '') : (),
-                        
+
                 @$opt_lr_file
 			? ('--ref' => task_file_name(".fq", task => $TASKS[$TC-1] )) : (),
-			
+
                 ($TASK =~ /-finish/) # calculate hcrs on first iter for second iter
 			? (
                            '--max-ins-length' => 0,
@@ -1531,9 +1541,9 @@ sub correct_sr_mt{
 			? (@$opt_lr_file ? () : ('--ignore-hcr' => 1)) : (),
 
 	);
-	
+
 	my $bam2cns_cmds = '';
-	
+
 	# generate xargs statements foreach chunk
 	for(my $ci=0; $ci<@$lr_chunk_offsets; $ci++){
 		my %bam2cns_config = (
@@ -1542,27 +1552,27 @@ sub correct_sr_mt{
 			'--ref-offset' => $lr_chunk_offsets->[$ci],
 			'--qv-offset' => 33,
 		);
-		
+
 		# params
 		$bam2cns_cmds.= param_join(\%bam2cns_config)."\n";
 	}
-	
+
 	# write cmd file
-	
+
 	my $cfg_file = task_file_name(".cmds");
 	open(CFG, '>', $cfg_file) or $VS->exit($!);
 	print CFG $bam2cns_cmds;
 	close CFG;
-	
+
 	# xarg cmds, capture stderr;
         my $cns_bin = "bam2cns";
 
 	my $xgr;
 	open($xgr, "(cat $cfg_file | xargs -P $opt_threads -L 1 -t $RealPerl/$cns_bin) 2>&1 |")
 		or $VS->exit($!);
-	
+
 	$VB->hline();
-	# 
+	#
 	my $bc;
 	my $bs = "Batch %d/".@$lr_chunk_offsets;
 	while(<$xgr>){
@@ -1570,7 +1580,7 @@ sub correct_sr_mt{
 		if ($_ =~ /^perl /){
 			$VS->verbose(sprintf($bs, ++$bc));
 			$VB->verbose($_);
-			$VB->hline() 
+			$VB->hline()
 		}elsif(/^s/){ # stdout close error -1
                     # do nothing - this is a bug with the latest samtools version
                 }else{
@@ -1578,8 +1588,8 @@ sub correct_sr_mt{
                         $VS->exit("bam2cns unexpectedly returned");
 		}
 	}
-	
-	
+
+
 	$VS->verbose("Merging corrected output");
 	my $fq_file = task_file_name(".fq");
 	my $fq_glob = task_file_name(".[0-9]*.fq");
@@ -1591,7 +1601,7 @@ sub correct_sr_mt{
 	my $fi_glob = task_file_name(".[0-9]*.ignored.tsv");
 	my $fc_file = task_file_name(".chim.tsv");
 	my $fc_glob = task_file_name(".[0-9]*.chim.tsv");
-	
+
 	my @fq_glob = sort byfile glob $fq_glob;
 	my @tr_glob = sort byfile glob $tr_glob;
 	my @fi_glob = sort byfile glob $fi_glob;
@@ -1600,19 +1610,19 @@ sub correct_sr_mt{
 #	my $fa_glob_sorted = join(" ", @fa_glob);
 #	my $fi_glob_sorted = join(" ", @fi_glob);
 #	my $fc_glob_sorted = join(" ", @fc_glob);
-	
+
 	# create offset idx for reference
 	my @ref_idxs = (0);
 	my $offset = 0;
 	# get fq indexes
 	foreach(@fq_glob){
 		$offset+= -s $_;
-		push @ref_idxs, $offset;   
+		push @ref_idxs, $offset;
 	}
-	
+
 	# remove last one, its just the eof
 	pop(@ref_idxs);
-	
+
 	qx(>$fq_file); # create empty file, just to be safe
 	qx(>$tr_file) if @tr_glob > 0;
 	# $fi_file gets appended over iters
@@ -1628,7 +1638,7 @@ sub correct_sr_mt{
 	    system("cat ".join(" ", @fc_glob[$f..$t])." >>$fc_file") && die $!;
 	}
 
-	
+
 	unlink @fq_glob unless $opt_keep > 1;
 	unlink @tr_glob unless $opt_keep > 1;
 	unlink @fi_glob unless $opt_keep > 1;
@@ -1640,19 +1650,19 @@ sub correct_sr_mt{
         $hcr_mask[3] = int(($hcr_mask[3] * $min_sr_length  / 100 ) +.5);
         my $hcr_mask = join(",", @hcr_mask );
         my $cmd = "$RealPerl/SeqFilter $fq_file --line-width 80 --quiet --out $fa_file --phred-offset 33 --phred-mask $hcr_mask --fasta --base-content N --tsv -";
-        
+
         $VB->hline;
         $VB->verbose($cmd);
         my $re = qx($cmd);
         my ($bpt, $bpN) = (split(/\s/, $re))[1,6];
         $VB->hline;
-        
+
         $V->exit("SeqFilter failed to mask $fq_file: $?\n") if $?;
 
         my $bpN_frac = $bpN/$bpt;
         $VB->nline;
         $VS->verbose(sprintf "Masked : %0.1f%%", $bpN/$bpt*100);
-	
+
 	return wantarray ? (\@ref_idxs, $bpN_frac) : \@ref_idxs; # wantarray guarantees backward compatibility
 }
 
@@ -1678,7 +1688,7 @@ sub task_file_name{
 		suffix => (@_%2 ? shift : ''),
 		@_
 	};
-	
+
 	my $tfn = sprintf('%1$s/%2$s/%3$s%4$s', $p->{root}, $p->{task}, $p->{prefix}, $p->{suffix});
 	$tfn =~ tr{/}{}s;
 	return $tfn;
@@ -1696,7 +1706,7 @@ sub chunk_index{
     $fp = Fastq::Parser->new(file => $file)->check_format() unless $fp;
     $fp || $VS->exit("Unknown format in file `$file`");
 
-            
+
     # write sorted/indexed fq/fa lr file for mapping/sam2cns
     my @lr_idxs = (0);
     my $lr_c = 1;
@@ -1713,25 +1723,25 @@ sub chunk_index{
 =cut
 
 sub copy_custom_cfg{
-	my ($cfg_core_file, $cfg_custom_file) = @_;	
+	my ($cfg_core_file, $cfg_custom_file) = @_;
 	open(COR, $cfg_core_file) or $VS->exit($!);
 	open(CUS,'>',$cfg_custom_file) or $VS->exit("Couldn't create config file `$cfg_custom_file`");
-	
+
 	while(<COR>){
 		if(/^#/){
-			next unless /^##/; 
+			next unless /^##/;
 			print CUS $_;
 		}else{
 			if(/^\s*$/){
 				print CUS $_;
 			}else{
-				print CUS '#',$_; 
+				print CUS '#',$_;
 			}
 		}
 	}
-	
+
 	close COR;
-	close CUS;		
+	close CUS;
 }
 
 
@@ -1747,14 +1757,14 @@ sub chim_filter{
 	my $params = param_join(\%params);
 
 	my $cmd_chim_fil = "$RealPerl/ChimeraToSeqFilter.pl $params";
-	
+
 	$V->nline;
 	$VS->verbose("Filtering chimera annotations");
 	$VB->hline;
 	$VB->verbose($cmd_chim_fil);
 	qx($cmd_chim_fil);
 	$VB->hline;
-	
+
 }
 
 
@@ -1775,14 +1785,14 @@ sub seq_chunker{
 	while($_[0] && $_[0] !~ /^-/){
 		push @files, shift @_;
 	}
-	
+
 	my %params = @_;
 	my $params = param_join(\%params);
 	my $files = join(" ", @files);
 	my $cmd = "$RealBin/SeqChunker $params $files";
-	
+
 	return $cmd if $no_exec;
-	
+
 	$VB->hline;
 	$VB->verbose($cmd);
 	qx($cmd);
@@ -1801,7 +1811,7 @@ sub seq_filter{
 	my $params = param_join(\%params);
 
 	my $cmd = "$RealPerl/SeqFilter $params";
-	
+
 	$VB->hline;
 	$VB->verbose($cmd);
 	qx($cmd);
@@ -1823,7 +1833,7 @@ sub seq_and_siamaera_filter{
 	my $siam_params = param_join(\%siam_params);
 
 	my $cmd = "$RealPerl/SeqFilter $seq_params --out - | $RealPerl/siamaera".(cfg('blast-path') ? " --blast-path ".cfg('blast-path') : "")." $siam_params";
-	
+
 	$VB->hline;
 	$VB->verbose($cmd);
 	qx($cmd);
@@ -1870,7 +1880,7 @@ sub is_empty_dir {
 
 =head2 param_join (HASHREF, JOIN=STRING)
 
-Joins a HASHREF to a parameter string with JOIN [" "], ignoring keys with 
+Joins a HASHREF to a parameter string with JOIN [" "], ignoring keys with
  undef values and creating flag only values for ''.
 
   param_join(HASHREF); # join with space
@@ -1884,7 +1894,7 @@ sub param_join{
 		'join' => " ",
 		@_
 	};
-	
+
 	# params
 	my @params;
 	my $params;
@@ -1909,7 +1919,7 @@ Return parameter settings from %cfg w/r/t given task and global options
 	<TASK2> => 9, # task specific settings, overuling global
 	<TASK2> => 0, # task specific settings, overuling global
   }
-  
+
   $param = cfg(PARAM);        # 12
   $param = cfg(UNKNOWN_PARAM) # undef
   # by TASK_ID
@@ -1929,22 +1939,22 @@ sub cfg{
             $k =~ s/-\d+$//;
             return undef unless exists $cfg{$k};
         }
-        
+
 	return $cfg{$k} unless ref $cfg{$k};
-	
+
 	if(ref $cfg{$k} eq "ARRAY"){
 		return wantarray ?	@{$cfg{$k}} : $cfg{$k};
 	}
-	
+
 	if(! exists $cfg{$k}{DEF}){
 		return wantarray ?	%{$cfg{$k}} : $cfg{$k};
 	}
-	
+
 	my %p = %{$cfg{$k}};
 	return undef unless %p;
-	
+
 	my $v = exists $p{DEF} ? $p{DEF} : undef;
-	
+
 	if(defined $t){
 		if($t =~ /[^-0-9]/){ # task by id
                     if(exists $p{$t}){
@@ -2010,7 +2020,7 @@ sub check_binary{
        if(version->parse($v) < version->parse($ver->[1])){
            $VS->exit("Version $v of '$bin' < $v");
        }
-       
+
     }
 
     $VB->verbose(sprintf("  [ok] %-15s %s", $bin.($v ? "-$v" : ""), dirname($fbin)));
