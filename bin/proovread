@@ -262,13 +262,21 @@ Run the sample data set to test installation.
 
 $opt{'sample-run:s'} = \(my $opt_sample);
 
-=item [--haplo-coverage]
+=item [--haplo-coverage] [OFF]
 
 Adjust coverage for reads with low-coverage haplotype.
 
 =cut
 
 $opt{'haplo-coverage!'} = \(my $opt_haplo_coverage);
+
+=item [--no-sampling]
+
+Deactivate sampling, regardless of config settings.
+
+=cut
+
+$opt{'sampling!'} = \(my $opt_sampling = 1);
 
 =item [-h, --help]
 
@@ -2030,6 +2038,8 @@ sub check_binary{
 
 sub cov2seqchunker{
     my ($c, $tc) = @_;
+    return 0 unless $opt_sampling;
+
     # don't sample if target coverage is more than 80% of given coverage
     return 0 if ($c*0.8) < $tc;
 
