@@ -590,6 +590,35 @@ sub length{
 }
 
 
+=head2 seq_aligned
+
+Get the aligned sequence, with D as gaps and I/S removed from seq. This allows
+to correctly extract bases using reference positions.
+
+=cut
+
+sub seq_aligned{
+    my ($self) = @_;
+
+    return undef if $self->seq eq "*";
+
+    my $cigar = $self->cigar;
+    my $seq = $self->seq;
+    my $aseq = '';
+    my $pos = 0;
+    if ($cigar =~ /(\d+)S/) {
+        $pos+=$1; # account for softclip
+    }
+
+    while ($cigar =~ /(\d+)([MDI])/g) {
+        if ($2 eq "I") { $pos+= $1 };
+        if ($2 eq "M") { $aseq.= substr($seq, $pos, $1); $pos+=$1 }
+        if ($2 eq "D") { $aseq.= "-" x $1; }
+    };
+    return $aseq;
+}
+
+
 =head2 score/nscore/ncscore
 
 Get score (AS:i) / nscore (score/length) / ncscore (score/length * CF).
