@@ -280,6 +280,15 @@ if($debug){
     open($trh, $mode, $tr_out) || $v->exit("Can't open output read file: '$tr_out'");
 }
 
+# print filtered BAM for debug
+# my $bam_out = $opt_pre.'.bam'; 
+# my $bfh;
+# open($bfh, "| $samtools view -b - > $bam_out") or die $!;
+# 
+# open(SAM, "$samtools view -H $opt_bam_file |") or $v->exit($!);
+# while (<SAM>) {
+#     print $bfh $_;
+# }
 
 ##----------------------------------------------------------------------------##
 # read ref
@@ -345,11 +354,14 @@ foreach my $ref_id(@LR_IDS){
 
     generate_consensus($sso);
 
+    # print to filtered BAM for debug
+    # print $bfh $sso->string(sorted => 1);
+
     close SAM;
     $sp = undef;
 }
 
-
+# close $bfh;
 
 =head2 generate_consensus
 
