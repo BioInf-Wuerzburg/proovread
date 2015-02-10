@@ -1202,6 +1202,147 @@ sub filter_contained_alns{
     }
 }
 
+
+=head2 filter_by_coverage
+
+By default, add_aln_by_score will fill bins up to max_bin_bases, which is
+directly controlled by $MaxCoverage. However, on data sets with uneven coverage,
+e.g. meta-genomes or transcriptomic data, it might be necessary to adjust the
+coverage cutoff of a particular read and filter surplus alignments.
+
+=cut
+
+sub filter_by_coverage{
+    my ($self, $cov) = (@_);
+    die "coverage required" unless $cov;
+
+    if ($cov < $self->{max_coverage}) {
+        $self->{max_coverage} = $cov;
+        $self->{max_bin_bases} = $self->{max_coverage} * $self->BinSize;
+
+        for (my $i=0; $i<@{$self->{_bin_alns}}; $i++) {
+            my $iids = $self->{_bin_alns}[$i];
+            my $lens = $self->{_bin_lengths}[$i];
+            next unless @$iids;
+
+            my $alnc = @$iids;
+            my $rmc = 0;
+            while (1) {
+                my $tl = 0;
+                $tl += $_ for @$lens;
+                last if $tl <= $self->{max_bin_bases};
+                $self->remove_aln_by_iid($iids->[-1]);
+                $rmc++;
+            }
+        }
+    }
+}
+
+=head2 haplo_coverage
+
+This method tries to find discriminating SNPs in the state matrix, favouring the
+(underrepresented) most likely haplotype. It returns the estimated coverage of
+this haplotype.
+
+=cut
+
+sub haplo_coverage{
+    my ($self) = @_;
+
+    my @hpl_cov;
+
+    # compute all variants
+    $self->variants;
+
+    # parse variants for discriminating spots
+    for ( my $i=0; $i<@{$self->{vars}}; $i++) {
+        my $v = $self->{vars}[$i];
+        my $f = $self->{freqs}[$i];
+        my $c = $self->{covs}[$i];
+        my $p = $self->{probs}[$i];
+        next if scalar @$v < 2 || grep{length($_) > 1 || $_ =~ /[^ATGC]/}@$v;
+
+        # we are looking at 5 bins around snp
+        my $bidx = int($i / $self->{bin_size});
+        # don't do it at directly at ends
+        next if $bidx < 3 or $bidx > @{$self->{_bin_alns}}-4;
+
+        my @bins = $self->alns_by_bins($bidx-1,$bidx+1);
+        my @best;
+        foreach my $bin (@bins) {
+            next unless @$bin;  # empty bin
+            for (my $j=0; $j<2; $j++) {
+                my $aln = $bin->[$j];
+                next unless $aln;
+                my $o = $i-$aln->pos+1;
+                my $aseq = $aln->seq_aligned;          # best aln
+                next if $o < 0 || $o >= length($aseq); # aln not overlapping snp
+                my $b =  substr($aseq,$o,1);
+                push @best, $b;
+                # # print aln region with snp flanks
+                # print " " x 100, " *\n";
+                # foreach my $aln ( @$bin ) {
+                #     my $aseq = $aln->seq_aligned;
+                #     my $o = $i-$aln->pos+1;
+                #     next if $o < 0 || $o >= length($aseq); # aln not overlapping snp
+                #
+                #     my $b =  substr($aseq,$o,1);
+                #
+                #     my $f1 = substr($aseq,0,$o);
+                #     my $f2 = substr($aseq,$o+1);
+                #     print " " x (100-$o), $f1," ",$b," ",$f2," ",$aln->nscore,"\n" ;
+                # }
+            }
+        }
+
+        next unless @best;      # just to be sure
+
+        # orig ratios
+        my %orats;
+        $orats{$v->[$_]} = $p->[$_] for 0..@$v-1;
+
+        # best ratios
+        my %brats;
+        $brats{$_}++ for @best;
+        $brats{$_} = $brats{$_}/@best for keys %brats;
+
+        # delta ratios
+        my %drats;
+        foreach ( keys %orats) {
+            $drats{$_} = exists $brats{$_} ? $brats{$_} / $orats{$_} : 0;
+        }
+        # print "#$i [$c] -------------------------##\n";
+        # print "$_:$orats{$_} " for keys %orats;
+        # print "$_:$brats{$_} " for keys %brats;
+        # print "$_:$drats{$_} " for keys %drats;
+
+        # delta ratios show the winner
+        my $drats_max = (sort{$drats{$b} <=> $drats{$a}}keys %drats)[0];
+        if ($v->[0] ne $drats_max) {
+
+            my $idx;
+            for ($idx=0;$idx<@$v;$idx++) {
+                last if $drats_max eq $v->[$idx];
+            }
+            my $ob = $v->[0];
+            my $fc = $f->[$idx];
+            push @hpl_cov, $fc;
+            # print "$i\t$ob->$drats_max\t$fc\t$c\n";
+        }
+    }
+
+    return unless @hpl_cov;
+    my $hpl_cov = (sort{$a<=>$b}@hpl_cov)[int($#hpl_cov *.75)]; # 75% quantile
+
+    # significance of hpl_cov
+    my $high_cov = grep{defined $_ && $_ >= $hpl_cov * 1.5 }@{$self->{covs}};
+    my $df = $high_cov ? @hpl_cov / $high_cov : 0;
+
+    #print STDERR "$self->{id}\t$hpl_cov\t$high_cov\t$self->{len}\t$df\n";
+    return $df > 0.00015 ? $hpl_cov : undef;
+
+}
+
 ##------------------------------------------------------------------------##
 
 =head1 Accessor METHODS
@@ -1661,49 +1802,60 @@ sub _consensus{
 =cut
 
 sub _variants{
-	my $self = shift;
-	my %p = (
-		min_prob => 0.1,
-		accuracy => 5,
-		@_
-	);
+    my $self = shift;
+    my %p = (
+        min_prob => 0,
+        min_freq => 4,
+        @_
+    );
 
 
-	#print Dumper($self->{_state_matrix});
-	my @seq;
-	my %states_rev = reverse %{$self->{_states}}; # works since values are also unique
+    #print Dumper($self->{_state_matrix});
+    my @seq;
+    my %states_rev = reverse %{$self->{_states}}; # works since values are also unique
 
-	foreach my $col (@{$self->{_state_matrix}}){
-		# cov
-		unless($col){
-			push @{$self->{covs}}, 0;
-			push @{$self->{vars}}, ['?'];
-			push @{$self->{freqs}},[''];
-			push @{$self->{probs}},[''];
-			next;
-		}
-		my $cov;
-		my %vars;
-		# variants
-		for(my $i=0; $i<@$col; $i++){
-			if (defined(my $v = $col->[$i])){
-				$cov+= $v;
-				$vars{$states_rev{$i}} = $v;
-			};
-		};
-		push @{$self->{covs}}, $cov;
-		my @vars = sort{$vars{$b} <=> $vars{$a}}keys %vars;
-		my @freqs = @vars{@vars};
-		my @probs = map{sprintf("%0.".$p{accuracy}."f", $_/$cov)}@freqs;
-		my $k = grep{$_>= $p{min_prob}}@probs;
-		$k--;
-		push @{$self->{vars}}, $k >= 0 ? [@vars[0..$k]] : ['?'];
-		push @{$self->{freqs}}, $k >= 0 ? [@freqs[0..$k]] : [''];
-		push @{$self->{probs}}, $k >= 0 ? [@probs[0..$k]] : [''];
-	}
-	# rel freq
+    foreach my $col (@{$self->{_state_matrix}}) {
+        # cov
+        unless($col){
+            push @{$self->{covs}}, 0;
+            push @{$self->{vars}}, ['?'];
+            push @{$self->{freqs}},[''];
+            push @{$self->{probs}},[''];
+            next;
+        }
 
-	return $self;
+        my $cov;
+        my %vars;
+        # variants
+        for (my $i=0; $i<@$col; $i++) {
+            if (defined(my $v = $col->[$i])) {
+                $cov+= $v;
+                $vars{$states_rev{$i}} = $v;
+            }
+        }
+
+        push @{$self->{covs}}, $cov;
+        my @vars = sort{$vars{$b} <=> $vars{$a}}keys %vars;
+        my @freqs = @vars{@vars};
+        my @probs = map{$_/$cov}@freqs;
+        my $k = @vars;
+        if ($p{min_freq} ){
+            $k = grep{$_>= $p{min_freq}}@freqs;
+        }
+
+        if($p{min_prob}){
+            my $kp = grep{$_>= $p{min_prob}}@probs;
+            $k = $kp if $kp < $k;
+        }
+
+        $k--;
+        push @{$self->{vars}}, $k >= 0 ? [@vars[0..$k]] : ['?'];
+        push @{$self->{freqs}}, $k >= 0 ? [@freqs[0..$k]] : [''];
+        push @{$self->{probs}}, $k >= 0 ? [@probs[0..$k]] : [''];
+    }
+    # rel freq
+
+    return $self;
 }
 
 
