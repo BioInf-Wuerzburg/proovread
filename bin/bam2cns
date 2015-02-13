@@ -192,7 +192,7 @@ Toggle debug messages.
         'rep-coverage=i' => \(my $opt_rep_coverage = undef),
         'min-ncscore=f' => \(my $opt_min_ncscore = undef),
 
-        'haplo-coverage!' => \(my $opt_haplo_coverage = 1),
+        'haplo-coverage!' => \(my $opt_haplo_coverage = 0),
 
         'mask-weak-reads=i' => \(my $opt_mask_weak_reads = 20),
         'ignore-weak-reads=i' => \(my $opt_ignore_weak_reads = 20),
