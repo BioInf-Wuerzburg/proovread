@@ -46,7 +46,7 @@ to employ your own installed version of these mappers, have a look at the
 Test your installation by running proovread on the included sample data set.
 
 #+BEGIN_EXAMPLE
-  proovread --sample --pre /tmp/pr-sample
+  proovread --sample --pre pr-sample
 #+END_EXAMPLE
 
 *Don't run proovread on entire SMRT cells directly*, it will only blast your
