@@ -331,7 +331,7 @@ foreach my $ref_id(@LR_IDS){
 
     # create new block with $aln = first entry
 
-    open(SAM, "$samtools view $opt_bam_file $ref_id |") or $v->exit($!);
+    open(SAM, "$samtools view $opt_bam_file \"$ref_id\" |") or $v->exit($!);
     my $sp = Sam::Parser->new(fh => \*SAM);
 
     $sso = Sam::Seq->new(
