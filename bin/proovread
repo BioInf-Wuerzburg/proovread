@@ -41,7 +41,7 @@ use Time::HiRes qw(usleep);
 use Data::Dumper;
 $Data::Dumper::Sortkeys = 1;
 
-our $VERSION = '2.13';
+our $VERSION = '2.13.2';
 
 my $RealLib = "$RealBin/../lib/";
 my $RealPerl = "perl -I${RealLib} $RealBin";
@@ -1199,7 +1199,7 @@ sub run_dazzler{
     $V->exit("daligner failed: $?\n", do { local $/; local @ARGV = ($log) ; <> }) if $?;
 
     $VS->verbose("Converting to/sorting BAM");
-    $cmd = "($RealBin/dazz2sam"
+    $cmd = "($RealPerl/dazz2sam"
         . (cfg('dazz-db-path') ? "--dazz-db-path ".cfg('dazz-db-path') : "")
         . (cfg('daligner-path') ? " --daligner-path ".cfg('daligner-path') : "")
         ." --add-scores"
