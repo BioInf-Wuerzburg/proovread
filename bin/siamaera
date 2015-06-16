@@ -468,7 +468,7 @@ SEQ: while (my $fa=$fp->next_seq) {
         #}
         
     }else{
-        $L->warn("Unexpectedly dropped all alignments during processing: $id");
+        $L->debug("Unexpectedly dropped all alignments during processing: $id");
     }
     print "$fa";                # output possibly modified seq;
 }
