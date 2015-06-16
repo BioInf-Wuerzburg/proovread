@@ -12,6 +12,7 @@ use Log::Log4perl;
 use FindBin qw($RealBin);
 use lib "$RealBin/../lib/";
 
+use Cwd;
 use File::Basename;
 use File::Path qw(make_path remove_tree);
 use File::Copy;
@@ -348,14 +349,7 @@ $opt_bam_file && ! -f $opt_bam_file && pod2usage("Cannot find BAM file `$opt_bam
 
 $opt_prefix = 'proovread' unless $opt_prefix;
 $VS->exit("Bad chars in prefix: $opt_prefix") if $opt_prefix =~ '^-';
-
-# DEPRECATED
-#unless ($opt_prefix){
-#	my @time = (localtime(time))[reverse(0..5)];
-#	$time[0]+=1900;
-#	$time[1]++;
-#	$opt_prefix = 'pr_'.sprintf("%4d-%02d-%02d_%02d-%02d-%02d", @time)
-#}
+$opt_prefix =~ s/\/$//; # remove trailing /
 
 # create tmp folders
 if(-e $opt_prefix){
@@ -373,6 +367,15 @@ if(-e $opt_prefix){
 make_path($opt_prefix);
 
 
+# full path prefix support
+my $prefix_path;
+($opt_prefix, $prefix_path) = fileparse($opt_prefix);
+my $odir = getcwd;
+
+if ($prefix_path){
+    print Dumper($prefix_path, $opt_prefix);
+    chdir($prefix_path) || $VS->exit("$!: $prefix_path");
+}
 
 ##------------------------------------------------------------------------##
 
@@ -953,6 +956,7 @@ $no_fatal++;
 
 
 END{
+        chdir($odir) if $odir;
 	if ($no_fatal){
 		unless ($opt_keep){
 			$VS->verbose("Cleaning up");
