@@ -283,9 +283,13 @@ $opt{'sampling!'} = \(my $opt_sampling = 1);
 
 =item [-V, --version]
 
+=item [--debug]
+
 =cut
 
 $opt{'h|help'} = \(my $opt_help);
+
+$opt{'debug!'} = \(my $opt_debug = cfg('debug') );
 
 $opt{'V|version'} = \(my $opt_version);
 
@@ -871,7 +875,7 @@ while($TC < $#TASKS){
             $ccs_mask[3] = int(($ccs_mask[3] * $min_sr_length  / 100 ) +.5);
             my $ccs_mask = join(",", @ccs_mask );
 
-            my $cmd = "$RealPerl/ccseq ".(cfg('debug') ? "--debug" : "").(cfg('bwa-path') ? "--bwa-path ".cfg('bwa-path') : "")." --threads $opt_threads --pre $opt_prefix/$TASK <$fqi | tee $fqo | "
+            my $cmd = "$RealPerl/ccseq ".($opt_debug ? "--debug" : "").(cfg('bwa-path') ? "--bwa-path ".cfg('bwa-path') : "")." --threads $opt_threads --pre $opt_prefix/$TASK <$fqi | tee $fqo | "
               ."$RealPerl/SeqFilter --line-width 80 --phred-offset 33 --phred-mask $ccs_mask --fasta --out $fmo --base-content N --tsv - --quiet";
 
             $VB->hline;
@@ -1520,6 +1524,7 @@ sub correct_sr_mt{
 		'--ignore-weak-reads' => cfg('ignore-weak-reads', $TASK),
                 '--max-ins-length' => cfg('max-ins-length', $TASK),
 
+                $opt_debug ? ("--debug" => '') : (),
                 $opt_haplo_coverage ? ('--haplo-coverage' => '') : (),
 
                 defined(cfg('rep-coverage', $TASK)) ? ('--rep-coverage' => cfg('rep-coverage', $TASK)) : (),
@@ -1601,23 +1606,25 @@ sub correct_sr_mt{
 		}
 	}
 
-
 	$VS->verbose("Merging corrected output");
 	my $fq_file = task_file_name(".fq");
 	my $fq_glob = task_file_name(".[0-9]*.fq");
 	my $fa_file = task_file_name(".masked.fa");
 
-	my $tr_file = task_file_name(".trace");
-	my $tr_glob = task_file_name(".[0-9]*.trace");
+	my $tr_file = task_file_name(".debug.trace");
+	my $tr_glob = task_file_name(".[0-9]*.debug.trace");
 	my $fi_file = task_file_name(suffix => ".ignored.tsv", task => '');
 	my $fi_glob = task_file_name(".[0-9]*.ignored.tsv");
 	my $fc_file = task_file_name(".chim.tsv");
 	my $fc_glob = task_file_name(".[0-9]*.chim.tsv");
+	my $db_file = task_file_name(".debug.bam");
+	my $db_glob = task_file_name(".[0-9]*.debug.bam");
 
 	my @fq_glob = sort byfile glob $fq_glob;
 	my @tr_glob = sort byfile glob $tr_glob;
 	my @fi_glob = sort byfile glob $fi_glob;
 	my @fc_glob = sort byfile glob $fc_glob;
+        my @db_glob = sort byfile glob $db_glob;
 #	my $fq_glob_sorted = join(" ", @fq_glob);
 #	my $fa_glob_sorted = join(" ", @fa_glob);
 #	my $fi_glob_sorted = join(" ", @fi_glob);
@@ -1650,11 +1657,15 @@ sub correct_sr_mt{
 	    system("cat ".join(" ", @fc_glob[$f..$t])." >>$fc_file") && die $!;
 	}
 
+        if ( @db_glob ){
+            system(cfg('samtools-path')."samtools merge $db_file @db_glob");
+        }
 
 	unlink @fq_glob unless $opt_keep > 1;
 	unlink @tr_glob unless $opt_keep > 1;
 	unlink @fi_glob unless $opt_keep > 1;
 	unlink @fc_glob unless $opt_keep > 1;
+	unlink @db_glob unless $opt_keep > 1;
 
         # Masking
         my @hcr_mask = split(",", cfg('hcr-mask', $TASK));
