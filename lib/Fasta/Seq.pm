@@ -3,19 +3,15 @@ package Fasta::Seq;
 use warnings;
 use strict;
 
-# $Id$
-
 # preference libs in same folder over @INC
 use lib '../';
-
-use Verbose;
 
 use overload
 	'.' => \&cat,
 	'""' => \&string;
 
 
-our $VERSION = '0.07';
+our $VERSION = '0.08';
 our ($REVISION) = '$Revision$' =~ /(\d+)/;
 our ($MODIFIED) = '$Date$' =~ /Date: (\S+\s\S+)/;
 
@@ -31,89 +27,7 @@ Class for handling FASTA sequences.
 
 =head1 SYNOPSIS
 
-=cut
-
-=head1 CHANGELOG
-
-=head2 0.06
-
-=over
-
-=item [BugFix] Methods C<< $fa->reverse_complement >> and C<< $fa->complement >>
- now return the object after transformation and not the sequence string itself.
-
-=item [BugFix] Regex to parse FASTA record doesn't fail anymore on 
- entries without description.
-
-=item [BugFix] C<< $fa->substr_seq >> dies on no arguments
-
-=item [Change] Refactored C<new()>. Handles creation of "empty" objects and 
- has some adjustments to head/id/desc parsing/generation.
-
-=item [Change] Removed C<< $fa->clone >>. Functionality is provided by
- C<< $fa->new >>.
-
-=item [Feature] C<< Fasta::Seq->Cat >> concatenates seq objects, "." and ".="
- are overloaded with this method
-
-=item [Change] C<< $fq->substr_seq >> replaces C<< $fq->slice_seq >>. It 
- fully supports the syntax of perls C<substr> including replacements.
- It appends the id by  .COUNTER and adds the coordinates as attribute 
- SUBSTR:OFFSET,LENGTH to the description and allows multiple operations at
- once provided a LIST of ARRAYREFs containing the coordinates.
-
-=back
-
-=item [Feature] Added "cloning" behaviour to C<< $fa->new >>.
-
-=item [Feature] Added class methods C<< Fastq::Seq->Reverse_complement >> 
- and C<< Fastq::Seq->Complement >>, as well as object methods 
- C<< $fa->reverse_complement >> and C<< $fa->complement >>.
-
-=back
-
-=head2 0.05
-
-=over
-
-=item [Change] Preference libs in same folder over @INC
-
-=item [Change] Added svn:keywords
-
-=back
-
-=over 12
-
-=item 0.04 [Thomas Hackl 2012-10-31]
-
-Change C<< Fastq::Seq->new >> parameter. Takes still a single string
- or additionally now a complete key => value construct.
-
-=item 0.03 [Thomas Hackl 2012-10-28]
-
-POD correction, C<< Fasta::Seq->new >> Synopsis.
-
-=item 0.02 [Thomas Hackl 2012-10-24]
-
-Added C<< byte_offset >> attribute to Fasta::Seq.
-
-=item 0.01
-
-Initial module. Provides Constructor and generic accessor 
- methods.
-
-=back
-
-=cut
-
-
-=head1 TODO
-
-=over
-
-=item Synopsis
-
-=item Tests
+  my $fa = Fasta::Seq->new(">id\natgc);
 
 =back
 
@@ -126,16 +40,6 @@ Initial module. Provides Constructor and generic accessor
 =head1 Class Attributes
 
 =cut
-
-=head2 $V
-
-Verbose messages are handled using the Verbose.pm module. To 
- customize verbose message behaviour, overwrite the attribute with
- another Verbose object created with the Verbose module.
-
-=cut
-
-our $V = Verbose->new();
 
 our $Base_content_scans = {
 	'N' => sub{	return $_[0] =~ tr/'N'// },
@@ -492,14 +396,21 @@ Get entire sequence as FASTA string. Provide optional line width.
 =cut
 
 sub string{
-	my ($self, $lw) = @_;
-	my $s = $self->{seq};
-	if($lw){
-		$lw++;
-		my $o=-1;
-		substr($s, $o, 0, "\n") while (($o+=$lw) < length($s));
-	}
-	return sprintf("%s\n%s\n", $self->{seq_head}, $s);
+    my ($self, $lw) = @_;
+    
+    # my $s = $self->{seq};
+    # if($lw){
+    # 	$lw++;
+    # 	my $o=-1;
+    # 	substr($s, $o, 0, "\n") while (($o+=$lw) < length($s));
+    # }
+    if($lw){
+        my $s = "";
+        $s.= $_."\n" for unpack "(A$lw)*", $self->{seq};
+        return $self->{seq_head}."\n".$s;
+    }else{
+        return $self->{seq_head}."\n".$self->{seq}."\n";
+    }
 }
 
 
