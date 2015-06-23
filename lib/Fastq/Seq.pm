@@ -11,10 +11,9 @@ use overload
 	
 # preference libs in same folder over @INC
 use lib '../';
-use Verbose;
 
 	
-our $VERSION = '0.13';
+our $VERSION = '0.13'; #.1
 our ($REVISION) = '$Revision$' =~ /(\d+)/;
 our ($MODIFIED) = '$Date$' =~ /Date: (\S+\s\S+)/;
 
@@ -213,16 +212,6 @@ Initial Alignment module. Provides Constructor and generic accessor
 =head1 Class Attributes
 
 =cut
-
-=head2 $V
-
-Verbose messages are handled using the Verbose.pm module. To 
- customize verbose message behaviour, overwrite the attribute with
- another Verbose object created with the Verbose module.
-
-=cut
-
-our $V = Verbose->new();
 
 our $Base_content_scans = {
 	'N' => sub{	return $_[0] =~ tr/'N'// },
