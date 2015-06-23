@@ -875,7 +875,7 @@ while($TC < $#TASKS){
             $ccs_mask[3] = int(($ccs_mask[3] * $min_sr_length  / 100 ) +.5);
             my $ccs_mask = join(",", @ccs_mask );
 
-            my $cmd = "$RealPerl/ccseq ".($opt_debug ? "--debug" : "").(cfg('bwa-path') ? "--bwa-path ".cfg('bwa-path') : "")." --threads $opt_threads --pre $opt_prefix/$TASK <$fqi | tee $fqo | "
+            my $cmd = "$RealPerl/ccseq ".($opt_debug ? "--debug " : "").(cfg('bwa-path') ? "--bwa-path ".cfg('bwa-path') : "")." --threads $opt_threads --pre $opt_prefix/$TASK <$fqi | tee $fqo | "
               ."$RealPerl/SeqFilter --line-width 80 --phred-offset 33 --phred-mask $ccs_mask --fasta --out $fmo --base-content N --tsv - --quiet";
 
             $VB->hline;
