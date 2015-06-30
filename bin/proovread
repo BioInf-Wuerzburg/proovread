@@ -42,7 +42,7 @@ use Time::HiRes qw(usleep);
 use Data::Dumper;
 $Data::Dumper::Sortkeys = 1;
 
-our $VERSION = '2.13.6';
+our $VERSION = '2.13.7';
 
 my $RealLib = "$RealBin/../lib/";
 my $RealPerl = "perl -I${RealLib} $RealBin";
@@ -1394,6 +1394,8 @@ sub read_long{
 					$VS->exit('Non-unique long read id ('. $lr->id .') in '. $_);
 				}
 
+                                $lr->{seq} =~ tr/ATGCNatgcn/N/c;  # remove iupac chars
+
 				$lr{$lr->id} = Fastq::Seq->new(
                                                                '@'.substr($lr->seq_head,1),
                                                                uc($lr->seq),
@@ -1424,6 +1426,9 @@ sub read_long{
 					}
 					# convert seq to lower case, allow HCRs in external-sam
 					$lr->phred_transform if $po == 64;
+
+                                        $lr->{seq} =~ tr/ATGCNatgcn/N/c;  # remove iupac chars
+
 					$lr{$lr->id} = $lr;
                                 }
 
@@ -1447,6 +1452,9 @@ sub read_long{
 					}
 
                                         $lr->seq(uc($lr->seq()));
+
+                                        $lr->{seq} =~ tr/ATGCNatgcn/N/c;  # remove iupac chars
+
 					$lr{$lr->id} = $lr;
 				}
 				close IGNORE;
