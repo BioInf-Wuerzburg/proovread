@@ -57,9 +57,9 @@ Query DAZZ_DB .db/.dam if available.
 =item [-S/--add-scores]
 
 Compute a score for each alignment and add AS:i:<SCORE> tag to SAM. Default
-scoring scheme is derived from proovreads pacbio scoring scheme, also used for
-bwa mappings. Costs are defined in the scripts constants sections and can be
-adjusted if needed.
+scoring scheme is derived from proovreads
+(https://github.com/BioInf-Wuerzburg/proovread) pacbio scoring scheme. Costs are
+defined in the scripts constants sections and can be adjusted if needed.
 
 =item [-c/--config <PATH PATH ...>]
 
@@ -291,9 +291,9 @@ sub las2sam{
     #print Dumper($head, $riid, $qiid, $dir, $rfrom, $rto, $qfrom, $qto);
 
     tr/,//d for ($riid, $qiid, $rstart, $rend, $qstart, $qend);
-    my $sec = $sec{$qiid} ? 0x10 : 0;
+    my $rev = $dir eq "c" ? 0x10 : 0;
+    my $sec = $sec{$qiid} ? 0x100 : 0;
     $sec{$qiid}++;
-    my $rev = $dir eq "c" ? 0x100 : 0;
     
     $qname = $qdb->{$qiid};
     $flag = 0 | $sec | $rev;
@@ -452,3 +452,10 @@ sub map_db{
     
     return \%db, \%len, \@ids;
 }
+
+
+=head1 AUTHORS
+
+Thomas Hackl - S<thackl@lim4.de>
+
+=cut
