@@ -89,6 +89,7 @@ my $VB = Verbose->new(
 );
 
 
+$VS->verbose("Running proovread-$VERSION");
 
 ##------------------------------------------------------------------------##
 ## Config
@@ -377,7 +378,6 @@ my $prefix_path;
 my $odir = getcwd;
 
 if ($prefix_path){
-    print Dumper($prefix_path, $opt_prefix);
     chdir($prefix_path) || $VS->exit("$!: $prefix_path");
 }
 
