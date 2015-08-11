@@ -1,6 +1,6 @@
 #!/usr/bin/env perl
 
-# $Id: 01fasta_seq.t 55 2013-05-15 11:41:39Z s187512 $
+# $Id$
 
 use strict;
 use warnings;
@@ -231,13 +231,13 @@ subtest '$obj->cat' => sub{
 subtest '$obj->complement' => sub{
 	can_ok($class, 'complement');
 	$fa->seq('ATGCatgcAATTT');
-	is($fa->complement(), 'TACGtacgTTAAA', 'complement()');
+	is($fa->complement->seq, 'TACGtacgTTAAA', 'complement()');
 };
 
 subtest '$obj->reverse_complement' => sub{
 	can_ok($class, 'reverse_complement');
 	$fa->seq('ATGCatgcAATTT');
-	is($fa->reverse_complement(), 'AAATTgcatGCAT', 'reverse_complement()');
+	is($fa->reverse_complement->seq, 'AAATTgcatGCAT', 'reverse_complement()');
 };
 
 
