@@ -31,7 +31,7 @@ use constant {
 
 use Storable qw(dclone);
 
-our $VERSION  = '0.10';
+our $VERSION  = '0.10.1';
 
 
 
@@ -235,7 +235,6 @@ Sam::Seq->MinNCScore($opt_min_ncscore) if defined $opt_min_ncscore;
 
 Sam::Alignment->InvertScores(1) if $opt_invert_scores;
 
-
 # use glob, to allow glob pattern instead of full filename (fa/fq is decided by parser)
 my $opt_ref_file;
 my $rpr;
@@ -255,7 +254,8 @@ if($opt_ref_pat){
 
 	}else{
 		$rpr = Fasta::Parser->new(file => $opt_ref_file)->check_format;
-		unless ($opt_ignore_mcr){
+                $opt_use_ref_qual = 0; # does not make sense with fasta
+                unless ($opt_ignore_mcr){
 			$opt_ignore_mcr++;
 			# $v->verbose('Cannot restore MCR information from FASTA, --ignore-mcr set to TRUE');
 		}
@@ -332,7 +332,7 @@ foreach my $ref_id(@LR_IDS){
 
     # create new block with $aln = first entry
 
-    open(SAM, "$samtools view $opt_bam_file \"$ref_id\" |") or $v->exit($!);
+    open(SAM, "$samtools view $opt_bam_file \"$ref_id:\" |") or $v->exit($!);
     my $sp = Sam::Parser->new(fh => \*SAM);
 
     $sso = Sam::Seq->new(
