@@ -6,14 +6,15 @@ use warnings;
 use strict;
 
 use overload
-	'""' => \&string,
-	'.' => \&cat;
+    'bool' => sub{1},
+    '""' => \&string,
+    '.' => \&cat;
 	
 # preference libs in same folder over @INC
 use lib '../';
 
 	
-our $VERSION = '0.13'; #.1
+our $VERSION = '0.13.3';
 our ($REVISION) = '$Revision$' =~ /(\d+)/;
 our ($MODIFIED) = '$Date$' =~ /Date: (\S+\s\S+)/;
 
@@ -1261,13 +1262,32 @@ sub phred_offset{
 
 =head2 string
 
-Get entire sequence as FASTQ string.
+Get entire sequence as FASTQ string. Return FASTA by setting fasta =>
+1 and optionally adjust line_width => INT, default is 80.
 
 =cut
 
 sub string{
-	my ($self) = @_;
-	return sprintf("%s\n%s\n%s\n%s\n", @$self{qw(seq_head seq qual_head qual)});
+    my ($self) = @_;
+    return "$self->{seq_head}\n".
+        "$self->{seq}\n".
+        "$self->{qual_head}\n".
+        "$self->{qual}\n" unless (@_>1 && defined $_[1]); # overload second argument for "" is undef.
+
+    my %p = (line_width => 80, @_[1..$#_]); 
+    if ($p{fasta}) {
+        my $sh = $self->{seq_head};
+        substr($sh, 0, 1, '>');
+        if($p{line_width}){
+            my $s = "";
+            $s.= $_."\n" for unpack "(A$p{line_width})*", $self->{seq};
+            return $sh."\n".$s;
+        }else{
+            return $sh."\n".$self->{seq}."\n";
+        }
+    }else {
+        die (((caller 3)[0]).": unknown options: @_\n");
+    }
 }
 
 =head2 id

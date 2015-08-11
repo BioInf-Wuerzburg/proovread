@@ -10,10 +10,10 @@ use List::Util;
 # preference libs in same folder over @INC
 use lib '../';
 
-use Fastq::Seq 0.10;
+use Fastq::Seq 0.13.0;
 
 
-our $VERSION = '0.10';
+our $VERSION = '0.09';
 
 
 
@@ -351,7 +351,6 @@ sub check_format{
 	die sprintf("%s: %s",(caller 0)[3],"Format checking only works at the start of the file") 
 		if tell($fh);
 	my $c =$fh->getc(); # read first char
-        return undef unless $c;
 	# unread first char
 	$self->is_fh('GZIP') 
 		? $fh->ungetc($c)		# IO::Uncompress::Gunzip->ungetc pushes back string 
