@@ -393,19 +393,6 @@ sub generate_consensus{
         # run filter
         $sso->filter_by_ncscore if defined $opt_min_ncscore;
         $sso->filter_rep_region_alns if defined $opt_rep_coverage;
-        if ($opt_haplo_coverage) {
-            # determine haplocov
-            $hpl_cov = $sso->haplo_coverage();
-
-            # compare with prev. determined cov (take max)
-            if ($hpl_cov && @hpl_covs) {
-                $hpl_cov = (sort{$b <=> $a}($hpl_cov, @hpl_covs))[0];
-            }elsif (@hpl_covs) {
-                $hpl_cov = (sort{$b <=> $a}(@hpl_covs))[0];
-            }
-
-            $sso->filter_by_coverage($hpl_cov) if $hpl_cov;
-        }
 
         # filter contained alignments and add overlap regions to ignore_coords
         my @owin;
@@ -434,20 +421,26 @@ sub generate_consensus{
             $owin[$#owin][1] = @cov - $owin[$#owin][0] if $high;
         }
 
+        my $con;
 
-	my $con = $sso->consensus(
-                                  use_ref_qual => $opt_use_ref_qual,
-                                  ignore_coords => [@mcrs, @owin],
-                                  qual_weighted => $opt_qual_weighted,
-                                 );
-
-        if ($hpl_cov) {
-            $con->desc_append("HPL:$hpl_cov");
+        if ($opt_haplo_coverage) {
+            $sso->call_variants(
+                min_prob => .2,
+                min_freq => 3,
+                or_min => 1,
+            );
+            die "haploc_consensus??";
+        } else {
+            $con = $sso->consensus(
+                use_ref_qual => $opt_use_ref_qual,
+                ignore_coords => [@mcrs, @owin],
+                qual_weighted => $opt_qual_weighted,
+            );
         }
 
         if($debug){
             print $trh "$con";
-            print $trh $con->{trace},"\n";
+            print $trh $con->{trace},"\n" if $con->{trace}; # no trace for haplo_cov
         }
 
 	# chimera
