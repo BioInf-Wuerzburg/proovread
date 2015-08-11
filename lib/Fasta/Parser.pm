@@ -1,7 +1,5 @@
 package Fasta::Parser;
 
-# $Id$
-
 use warnings;
 use strict;
 
@@ -11,14 +9,9 @@ use List::Util;
 # preference libs in same folder over @INC
 use lib '../';
 
-use Fasta::Seq 0.06;
+use Fasta::Seq 0.9.0;
 
-
-our $VERSION = '0.09';
-our ($REVISION) = '$Revision$' =~ /(\d+)/;
-our ($MODIFIED) = '$Date$' =~ /Date: (\S+\s\S+)/;
-
-
+our $VERSION = '1.0.0';
 
 ##------------------------------------------------------------------------##
 
@@ -32,99 +25,7 @@ Parser module for Fasta format files.
 
 =head1 SYNOPSIS
 
-TODO
-
 =cut
-
-=head1 CHANGELOG
-
-=head2 0.08
-
-=over
-
-=item [BugFix] Changed C<< $fh->tell >> to C<< tell($fh) >>. 
- C<< IO::Handle->tell >> is only supported in latest module version.
-
-=item [Change] STDIN is not dupped anymore. Dupped STDIN prevents subsequent
- reading of STDIN in main.
-
-=item [Feature] << $fp->check_format >> now reads and B<unreads> the first
- char form input to determine format. Unreading makes it safe to use on 
- STDIN without using up stuff from the stream.
-
-=item [BugFix] Filehandle to pipe can be -p or -t.
-
-=item [Feature] C<< $fp->guess_seq_length >>
-
-=item [Feature] C<< $fp->guess_seq_count >>
-
-=item [Feature] C<< $fp->sample_seqs >> returns randomly drawn seq objects 
- from parsed file.
-
-=item [Change] Preference libs in same folder over @INC
-
-=item [Change] Added svn:keywords
-
-=back
-
-=over
-
-=item 0.07 [Thomas Hackl 2012/11/13]
-
-Bugfix. C<< $fp->next_seq >> now correctly runs tell on 
- C<< $fp->fh >> and not latest selected FILEHANDLE (STDIN).
-
-=item 0.06 [Thomas Hackl 2012/10/25]
-
-Added C<< $fp->seek >> to set the filehandle to a specific position.
-
-=item 0.05 [Thomas Hackl 2012-10-24]
-
-Check format only reads the first char of the input and returns
- success it it matches '>'. Only reading the '>' makes _buffer 
- obsolete since C<< Fastq::Seq->new() >> does not require a leading '>'.
-
-Removed the _buffer feature.
-
-C<< $fap->next_seq() >> now also stores the byte offset of the 
- sequence returned in the object.
-
-=item 0.04 [Thomas Hackl 2012/10/01]
-
-Added C<< $fp->check_format >>. Determines whether input looks like FASTQ.
-
-=item 0.03 [Thomas Hackl 2012/09/02]
-
-Modified to use Fastq:Seq 0.03+
-
-=item 0.02 [Thomas Hackl]
-
-Added C<next_raw_seq()>.
-
-=item 0.01 [Thomas Hackl]
-
-Initial Parser module. Provides Constructor and generic accessor
- methods
-
-=back
-
-=cut
-
-=head1 TODO
-
-=over
-
-=item Synopsis
-
-=item Tests
-
-=item empty file currently throws "NOT FASTA" exception
-
-=back
-
-=cut
-
-
 
 
 ##------------------------------------------------------------------------##

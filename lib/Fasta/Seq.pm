@@ -7,11 +7,12 @@ use strict;
 use lib '../';
 
 use overload
-	'.' => \&cat,
-	'""' => \&string;
+    'bool' => sub{1},
+    '.' => \&cat,
+    '""' => \&string;
 
 
-our $VERSION = '0.08';
+our $VERSION = '0.9.0';
 our ($REVISION) = '$Revision$' =~ /(\d+)/;
 our ($MODIFIED) = '$Date$' =~ /Date: (\S+\s\S+)/;
 
