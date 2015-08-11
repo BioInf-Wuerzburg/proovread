@@ -16,13 +16,13 @@ use Verbose::ProgressBar;
 
 use Sam::Parser 0.11;
 use Sam::Alignment 0.10 ':flags';
-use Sam::Seq 0.16;
+use Sam::Seq 1.0.0;
 
 use Fasta::Parser;
 use Fasta::Seq;
 
 use Fastq::Parser;
-use Fastq::Seq 0.08;
+use Fastq::Seq 0.13.0;
 
 use constant {
 	OFFSET => 0,
@@ -218,13 +218,14 @@ $opt_bam_file || pod2usage(msg => 'BAM file required');
 
 my $v = Verbose->new();
 
+# TODO: samtools-path <-> bwa_path
 my $samtools = ($opt{bwa_path} ? $opt{bwa_path}."/" : '')."samtools";
 # init sam parser
 open(SAM, "$samtools view -H $opt_bam_file |") or $v->exit($!);
 my $sp = Sam::Parser->new(fh => \*SAM);
 
 Sam::Seq->Trim($cfg{'sr-trim'});
-Sam::Seq->InDelTabooLength($cfg{'sr-indel-taboo-length'}, 1);
+Sam::Seq->InDelTabooLength($cfg{'sr-indel-taboo-length'});
 Sam::Seq->InDelTaboo($cfg{'sr-indel-taboo'});
 Sam::Seq->MaxCoverage($opt_cov);
 Sam::Seq->BinSize($opt_bin_size);
