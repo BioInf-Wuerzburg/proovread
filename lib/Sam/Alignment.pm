@@ -3,16 +3,15 @@ package Sam::Alignment;
 use warnings;
 use strict;
 
-use overload '""' => \&string;
+use overload
+    'bool' => sub{1},
+    '""' => \&string;
 
-# preference libs in same folder over @INC
-use lib '../';
-
-our $VERSION = '0.10';
+our $VERSION = '1.1.3';
 
 =head1 NAME
 
-Sam::Alignment.pm
+Sam::Alignment
 
 =head1 DESCRIPTION
 
@@ -24,11 +23,8 @@ Class for handling sam alignments.
 
   use Sam::Alignment;
 
-  # directly build sam aln object
-  $aln = Sam::Alignment->new();
-
-  # get object from parser
-  $sp = Sam::Parser->new(file => <SAMFILE>);
+  # usually get object from parser
+  $sp = Sam::Parser->new(file => <SAM>);
   $aln = $sp->next_aln;
 
   # get values
@@ -36,31 +32,14 @@ Class for handling sam alignments.
   $aln->raw       # entry raw string
   $aln->opt('XX') # value of optional field with tag 'XX'
 
-  # test alns bit mask
-  $aln->is_paired
-  $aln->is(SAM::Alignment->PAIRED);
-  $aln->is($aln->PAIRED);
-
   use Sam::Alingment ':flags'
-
-  $sam_aln_obj->is(PAIRED);
 
   # true if read is paired and unmapped
   $aln->is(PAIRED, UNMAPPED);
   # true if reads is either duplicate or bad quality
-  $aln->is(DUPLICATE & BAD_QUALITY);
-
-=cut
-
-# alias for backward comp.
-*raw = \&string;
+  $aln->is(PCR_DUPLICATE & VENDOR_FAIL);
 
 =head1 Class ATTRIBUTES
-
-=cut
-
-our @_Fieldsnames = qw(qname flag rname pos mapq cigar rnext pnext tlen seq qual opt);
-
 
 =head2 $InvertScores;
 
@@ -93,14 +72,17 @@ sub InvertScores{
 Create a sam alignment object. Takes either a sam entry as as string (one
  line of a sam file) or a key => value representation of the sam fields
  C<qname flag rname pos mapq cigar rnext pnext tlen seq qual opt>.
- While the first eleven fields are regular, C<opt> contains a string of all
- the optional fields added to the line.
 
 Returns a sam alignment object. For more informations on the sam format see
  L<http://samtools.sourceforge.net/SAM1.pdf>.
 
-
 =cut
+
+my @ATTR_SCALAR = qw(qname flag rname pos mapq cigar rnext pnext tlen seq qual opt);
+my @ATTR_SCALAR_def = (qw(* 0 * 0 255 * * 0 0 * *), undef);
+
+my %SELF;
+@SELF{@ATTR_SCALAR} = @ATTR_SCALAR_def;
 
 sub new{
 	my $class = shift;
@@ -110,125 +92,158 @@ sub new{
 		my $sam = $_[0];
 		chomp($sam);
 		my %sam;
-		@sam{@Sam::Alignment::_Fieldsnames} = split("\t",$sam, 12);
+		@sam{@ATTR_SCALAR} = split("\t",$sam, 12);
 		$self = \%sam;
+                $self->{qual} //= "*";
+
 	}else{ # input is key -> hash structure
-		$self = {
-			qname => undef,
-			flag => undef,
-			rname => undef,
-			'pos' => undef,
-			mapq => undef,
-			cigar => undef,
-			rnext => undef,
-			pnext => undef,
-			tlen => undef,
-			seq => undef,
-			qual => undef,
-			opt => undef,
-			@_,
-			_opt => undef
-		};
+            $self = {
+                %SELF,
+                @_,
+                _opt => undef
+            };
 	}
 	# overwrite defaults
+
 
 	return bless $self, $class;
 }
 
+
 =head1 Object METHODS
+
+=head2 qname, flag, rname, pos, mapq, cigar, rnext, pnext, tlen, seq, qual
+
+Get/Set ...
+
+  my $id = $aln->qname();
+  $aln->seq("AATTATA");
 
 =cut
 
-=head2 is / is_<property>
+# called at eof
+sub _init_accessors{
+    no strict 'refs';
 
-Test generic alignment properties encoded in the sam bitmask flag.
- Takes bitmasks, returns 1 or 0 accordingly.
- If you test multipe bitmasks, there are two different things you  might
- want to see. a) all bitmasks have to match (AND linked) or b) at
- least one bitmask has to match (OR linked). The achieve a) simply provide
- the bitmasks as array to the method. For b) provide combined bitmasks
- C<MASK_1or2 = (MASK_1 & MASK_2)>.
+    # generate accessors for cache affecting attributes
+    foreach my $attr ( qw(pos cigar tlen seq) ) {
+        next if $_[0]->can($attr); # don't overwrite explicitly created subs
+        *{__PACKAGE__ . "::$attr"} = sub {
+            if (@_ == 2){
+                $_[0]->_reset_cached_values();
+                $_[0]->{$attr} = $_[1];
+            }
+            return $_[0]->{$attr};
+        }
+    }
 
-Named bitmask (property masks) for specific properties are provided for
- better readability and consistency. The usage of these constants instead of
- actual bitmasks is recommended. The properties are read-only constants.
- They can be exported individually by name or all at once with
- C<use Sam::Alignment ':flags'>
+    # generate simple accessors closure style
+    foreach my $attr ( @ATTR_SCALAR ) {
+        next if $_[0]->can($attr); # don't overwrite explicitly created subs
+        *{__PACKAGE__ . "::$attr"} = sub {
+            $_[0]->{$attr} = $_[1] if @_ == 2;
+            return $_[0]->{$attr};
+        }
+    }
+}
 
-  #property => bitmask value
-  PAIRED => 0x1,
-  MAPPED_BOTH => 0x2,
-  UNMAPPED => 0x4,
-  SECOND_READ_UNMAPPED => 0x8,
-  REVERSE_COMPLEMENT => 0x10,
-  SECOND_READ_REVERSE_COMPLEMENT => 0x20,
-  FIRST => 0x40,
-  SECOND => 0x80,
-  SECONDARY_ALIGNMENT => 0x100,
-  BAD_QUALITY => 0x200,
-  DUPLICATE => 0x400
+
+=head2 string
+
+Get stringified alignment.
+
+=cut
+
+sub string{
+    my ($self) = @_;
+    my $s = join("\t", @$self{@ATTR_SCALAR[0..$#ATTR_SCALAR-1]});
+    $s.= "\t".$self->{opt} if $self->{opt};
+    return $s."\n";
+}
+
+=head2 is
+
+Test flag encoded alignment properties. Takes bitmasks, returns 1 or 0
+ accordingly. For OR testing of multiple bitmasks, provide maskes as array. For
+ AND testing of bitmasks combine bitmasks C<(MASK_1 & MASK_2)>. Export named
+ bitmasks with C<use Sam::Alignment ':flags'>
 
   # Property bitmasks
-  $sam_aln_obj -> is(SAM::Alignment->PAIRED);
-  $sam_aln_obj -> is($sam_aln_obj->PAIRED);
   use Sam::Alingment ':flags'
-  $sam_aln_obj -> is(PAIRED);
 
   # true if read is paired and unmapped
   is(PAIRED, UNMAPPED);
   # true if reads is either duplicate or bad quality
   is(DUPLICATE & BAD_QUALITY);
 
-The C<is_<property>> methods are convenience functions, mainly equivalent to
- C<is(<property>)>. The main advantage is that apart from 0 and 1 they
- return undef in case the test itself does not make sence, that is if a
- unpaired read is tested for paired read properties like
- C<FIRST, SECOND, BOTH_MAPPED> or a non-first read is tested for
- C<SECOND_READ_UNMAPPED, SECOND_READ_REVERSE_COMPLEMENT>.
-
-  is_paired()
-  is_mapped_both()
-  is_first()
-  is_second()
-  is_unmapped()
-  is_second_read_unmapped()
-  is_reverse_complement()
-  is_second_read_reverse_complement()
-  is_secondary_alignment()
-  is_bad_quality()
-  is_duplicate()
+  #property => bitmask value
+  PAIRED =>          0x1
+  PROPER_PAIR =>     0x2
+  UNMAP =>           0x4
+  MUNMAP =>          0x8
+  REVERSE =>        0x10
+  MREVERSE =>       0x20
+  READ1 =>          0x40
+  READ2 =>          0x80
+  SECONDARY =>     0x100
+  QCFAIL =>        0x200
+  DUP =>           0x400
+  SUPPLEMENTARY => 0x800
 
 =cut
 
+# deprecated
+# The C<is_<property>> methods are convenience functions, mainly equivalent to
+#  C<is(<property>)>. The main advantage is that apart from 0 and 1 they
+#  return undef in case the test itself does not make sence, that is if a
+#  unpaired read is tested for paired read properties like
+#  C<FIRST, SECOND, BOTH_MAPPED> or a non-first read is tested for
+#  C<SECOND_READ_UNMAPPED, SECOND_READ_REVERSE_COMPLEMENT>.
+#
+#   is_paired()
+#   is_mapped_both()
+#   is_first()
+#   is_second()
+#   is_unmapped()
+#   is_second_read_unmapped()
+#   is_reverse_complement()
+#   is_second_read_reverse_complement()
+#   is_secondary_alignment()
+#   is_bad_quality()
+#   is_duplicate()
+
+
 our @flag_names = qw(
 	PAIRED
-	MAPPED_BOTH
-	UNMAPPED
-	SECOND_READ_UNMAPPED
-	REVERSE_COMPLEMENT
-	SECOND_READ_REVERSE_COMPLEMENT
-	FIRST
-	SECOND
-	SECONDARY_ALIGNMENT
-	BAD_QUALITY
-	DUPLICATE
+	PROPER_PAIR           MAPPED_BOTH
+        UNMAP                 UNMAPPED
+	MUNMAP                SECOND_READ_UNMAPPED
+	REVERSE               REVERSE_COMPLEMENT
+        MREVERSE              SECOND_READ_REVERSE_COMPLEMENT
+	READ1                 FIRST
+	READ2                 SECOND
+	SECONDARY             SECONDARY_ALIGNMENT
+	QCFAIL                BAD_QUALITY
+	DUP                   DUPLICATE
+        SUPPLEMENTARY
 );
 
 # declare property flags as constants
 use constant {
-	PAIRED => 0x1,
-	MAPPED_BOTH => 0x2,
-	UNMAPPED => 0x4,
-	SECOND_READ_UNMAPPED => 0x8,
-	REVERSE_COMPLEMENT => 0x10,
-	SECOND_READ_REVERSE_COMPLEMENT => 0x20,
-	FIRST => 0x40,
-	SECOND => 0x80,
-	SECONDARY_ALIGNMENT => 0x100,
-	BAD_QUALITY => 0x200,
-	DUPLICATE => 0x400,
-        # drives ncscoring penality for short alns, see _ncscore for details
-        NCSCORE_CONSTANT => 40,
+    PAIRED => 0x1,
+    PROPER_PAIR => 0x2,     MAPPED_BOTH => 0x2,
+    UNMAP => 0x4,           UNMAPPED => 0x4,
+    MUNMAP => 0x8,          SECOND_READ_UNMAPPED => 0x8,
+    REVERSE => 0x10,        REVERSE_COMPLEMENT => 0x10,
+    MREVERSE => 0x20,       SECOND_READ_REVERSE_COMPLEMENT => 0x20,
+    READ1 => 0x40,          FIRST => 0x40,
+    READ2 => 0x80,          SECOND => 0x80,
+    SECONDARY => 0x100,     SECONDARY_ALIGNMENT => 0x100,
+    QCFAIL => 0x200,        BAD_QUALITY => 0x200,
+    DUP => 0x400,           DUPLICATE => 0x400,
+    SUPPLEMENTARY => 0x800,
+    # drives ncscoring penality for short alns, see _ncscore for details
+    NCSCORE_CONSTANT => 40,
 };
 
 
@@ -303,180 +318,6 @@ sub is_bad_quality{
 sub is_duplicate{
 	my $self = shift;
 	return $self->is(DUPLICATE);
-}
-
-=head1 Accessor METHODS
-
-=head2 qname
-
-Get/Set the qname.
-
-=cut
-
-sub qname{
-	my ($self, $qname, $force) = @_;
-        if(defined $qname || $force){
-            $self->{qname} = $qname;
-        }
-	return $self->{qname};
-}
-
-=head2 flag
-
-Get/Set the flag.
-
-=cut
-
-sub flag{
-	my ($self, $flag, $force) = @_;
-        if(defined $flag || $force){
-            $self->{flag} = $flag;
-        }
-	return $self->{flag};
-}
-
-=head2 rname
-
-Get/Set the rname.
-
-=cut
-
-sub rname{
-	my ($self, $rname, $force) = @_;
-        if(defined $rname || $force){
-            $self->{rname} = $rname;
-        }
-	return $self->{rname};
-}
-
-=head2 pos
-
-Get/Set the pos.
-
-=cut
-
-sub pos{
-	my ($self, $pos, $force) = @_;
-        if(defined $pos || $force){
-            $self->_reset_cached_values();
-            $self->{pos} = $pos;
-        }
-	return $self->{pos};
-}
-
-=head2 mapq
-
-Get/Set the mapq.
-
-=cut
-
-sub mapq{
-	my ($self, $mapq, $force) = @_;
-        if(defined $mapq || $force){
-            $self->{mapq} = $mapq;
-        }
-	return $self->{mapq};
-}
-
-=head2 cigar
-
-Get/Set the cigar.
-
-=cut
-
-sub cigar{
-	my ($self, $cigar, $force) = @_;
-        if(defined $cigar || $force){
-            $self->_reset_cached_values();
-            $self->{cigar} = $cigar;
-        }
-	return $self->{cigar};
-}
-
-=head2 rnext
-
-Get/Set the rnext.
-
-=cut
-
-sub rnext{
-	my ($self, $rnext, $force) = @_;
-        if(defined $rnext || $force){
-            $self->{rnext} = $rnext;
-        }
-	return $self->{rnext};
-}
-
-=head2 pnext
-
-Get/Set the pnext.
-
-=cut
-
-sub pnext{
-	my ($self, $pnext, $force) = @_;
-        if(defined $pnext || $force){
-            $self->{pnext} = $pnext;
-        }
-	return $self->{pnext};
-}
-
-=head2 tlen
-
-Get/Set the tlen.
-
-=cut
-
-sub tlen{
-	my ($self, $tlen, $force) = @_;
-        if(defined $tlen || $force){
-            $self->_reset_cached_values();
-            $self->{tlen} = $tlen;
-        }
-	return $self->{tlen};
-}
-
-=head2 seq
-
-Get/Set the seq.
-
-=cut
-
-sub seq{
-	my ($self, $seq, $force) = @_;
-        if(defined $seq || $force){
-            $self->_reset_cached_values();
-            $self->{seq} = $seq;
-        }
-	return $self->{seq};
-}
-
-=head2 qual
-
-Get/Set the seq.
-
-=cut
-
-sub qual{
-	my ($self, $qual, $force) = @_;
-        if(defined $qual || $force){
-            $self->{qual} = $qual;
-        }
-	return $self->{qual};
-}
-
-
-=head2 string
-
-Get stringified alignment.
-
-=cut
-
-sub string{
-    my ($self) = @_;
-    my $s = join("\t", @$self{qw(qname flag rname pos mapq cigar rnext pnext tlen seq qual)});
-    $s.= "\t".$self->{opt} if $self->{opt};
-    return $s."\n";
 }
 
 
@@ -618,10 +459,44 @@ sub seq_aligned{
     return $aseq;
 }
 
+=head2 seq_states
 
-=head2 score/nscore/ncscore
+Get the states of a sequence based on cigar.
 
-Get score (AS:i) / nscore (score/length) / ncscore (score/length * CF).
+=cut
+
+sub seq_states{
+    my ($self) = @_;
+
+    return undef if $self->seq eq "*";
+
+    my $cigar = $self->cigar;
+    my $seq = $self->seq;
+    my @s = ();
+    my $pos = 0;
+    if ($cigar =~ /^(\d+)S/) {
+        $pos+=$1; # account for softclip
+    }
+
+    while ($cigar =~ /(\d+)([MDIX=])/g) {
+        if ($2 eq "I") {
+            $s[-1].= substr($seq, $pos, $1) if @s;
+            $pos+=$1;
+        } elsif ($2 eq "D") {
+            push @s, ('-') x $1;
+        } else {
+            push @s, split(//, substr($seq, $pos, $1));
+            $pos+=$1;
+        }
+    };
+    return @s;
+}
+
+=head2 score, nscore, ncscore
+
+  score:    AS:i
+  nscore:   score/length
+  ncscore:  score/length * CF
 
 If $InvertScore is true, scores are multipled by -1. That way one can work
 with/filter scores where originally smaller values are better, e.g. blasr
@@ -658,7 +533,7 @@ sub nscore{
     my ($self) = @_;
     my $score = $self->score;
     return unless defined $score;
-    
+
     return $score / $self->length;
 }
 
@@ -683,12 +558,27 @@ sub _reset_cached_values{
     $_[0]->{full_length} = undef;
 }
 
+=head1 Aliases
+
+=head2 raw = string
+
+For backward compatibility or lazyness.
+
+=cut
+
+{ # alias for backward comp.
+    no warnings 'once';
+    *raw = \&string;
+}
+
+# init auto-accessors at eof to prevent any overwrites
+__PACKAGE__->_init_accessors();
+
+
 =head1 AUTHOR
 
 Thomas Hackl S<thomas.hackl@uni-wuerzburg.de>
 
 =cut
-
-
 
 1;
