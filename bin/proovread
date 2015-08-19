@@ -24,7 +24,7 @@ use Verbose;
 use Verbose::ProgressBar;
 
 use Fastq::Parser 0.09;
-use Fastq::Seq 0.13;
+use Fastq::Seq 0.13.3;
 
 use Fasta::Parser 0.09;
 use Fasta::Seq 0.9.0;
