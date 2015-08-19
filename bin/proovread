@@ -28,7 +28,6 @@ use Fastq::Seq 0.13.3;
 
 use Fasta::Parser 0.09;
 use Fasta::Seq 0.9.0;
-use Fasta::Store;
 
 use Sam::Parser 0.11;
 use Sam::Alignment 0.10 ':flags';
