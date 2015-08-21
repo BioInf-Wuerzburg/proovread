@@ -1,0 +1,631 @@
+#!/usr/bin/env perl
+# Created: 06 Aug 2015
+
+use warnings;
+use strict;
+
+use Pod::Usage;
+use Getopt::Long;
+use Log::Log4perl qw(:no_extra_logdie_message);
+use Log::Log4perl::Level;
+
+use FindBin qw($RealBin $Script);
+use lib "$RealBin/../lib/";
+use File::Basename;
+use File::Path qw(make_path remove_tree);
+use Cwd;
+
+use Cfg;
+
+## Debug
+use Data::Dumper;
+$Data::Dumper::Sortkeys=1;
+
+use Fasta::Parser;
+use Fasta::Store;
+
+use Sam::Alignment ':flags';
+use Sam::Parser;
+use Sam::Seq;
+
+use String::Similarity;
+
+=head1 NAME
+
+refine
+
+=head1 SYNOPSIS
+
+refine [options] args
+
+=head1 OPTIONS
+
+=over
+
+=item
+
+=back
+
+=head1 MAIN
+
+=cut
+
+
+##----------------------------------------------------------------------------##
+# Globals
+##----------------------------------------------------------------------------##
+
+our $VERSION = 0.1.0;
+
+Log::Log4perl->init( \(q(
+        log4perl.rootLogger                     = INFO, Screen
+        log4perl.appender.Screen                = Log::Log4perl::Appender::Screen
+        log4perl.appender.Screen.stderr         = 1
+        log4perl.appender.Screen.layout         = PatternLayout
+        log4perl.appender.Screen.layout.ConversionPattern = [%d{yy-MM-dd HH:mm:ss}] [).$Script.q(] %m%n
+)));
+
+my $L = Log::Log4perl->get_logger();
+
+
+##----------------------------------------------------------------------------##
+# Main
+##----------------------------------------------------------------------------##
+
+my %opt = init();
+
+my $ref_fa_file = glob("../*/$opt{prefix}.unmasked.fa");
+my $unc_fa_file = -e "../ccs-1/$opt{prefix}.masked.fa" ? "../ccs-1/$opt{prefix}.masked.fa" : "../read-long/$opt{prefix}.masked.fa";
+my @bams = grep{!/finish|refine/}glob("../*/$opt{prefix}.bam");
+my $bam = $opt{prefix}.'-refine.bam';
+
+my $fq_untrimmed = $opt{prefix}.'.untrimmed.fq';
+my $fq_trimmed = $opt{prefix}.'.trimmed.fq';
+my $fa_trimmed = $opt{prefix}.'.trimmed.fa';
+
+open(OUT, '>', $fq_untrimmed) or $L->logdie($!);
+    
+my $bwa_ref_tmp = $opt{prefix}.'-bwa-qry.fa';
+my $bwa_qry_tmp = $opt{prefix}.'-bwa-ref.fa';
+
+my $rfp = Fasta::Parser->new(file => $ref_fa_file);
+my $ufs = Fasta::Store->new(
+    file => $unc_fa_file,
+    samtools_path => $opt{samtools_path},
+);
+
+Sam::Seq->BinSize(50);
+Sam::Seq->MaxCoverage(1000);
+Sam::Seq->StateMatrixMinAlnLength(50);
+my $c = 0;
+
+while (my $rfa = $rfp->next_seq) {
+    my $rid = $rfa->id;
+    print '>',$rid,"\n";
+    my $ufa = $ufs->fetch($rid);
+    my $rfa_tmp = "/tmp/rfa_tmp.fa";
+
+    # remap
+    open(FA, '>', $rfa_tmp) or die "$!: $rfa_tmp";
+    print FA $rfa;
+    close FA;
+
+    # TODO: bwa-proovread
+    qx(bwa index $rfa_tmp >/dev/null 2>&1);
+
+    my $bwa_cmd = "perl -I$RealBin/../lib/ $RealBin/bam2fq --no-unique --region $rid @bams | ".
+        "bwa mem $rfa_tmp /dev/fd/0 2>/dev/null | $RealBin/sam2bam-sorted $bam";
+    # no tmp bam
+    #my $bwa_cmd = "perl -I$RealBin/../lib/ $RealBin/bam2fq --no-unique --region $rid @bams | ".
+    #    "bwa mem $rfa_tmp /dev/fd/0 2>/dev/null |";
+
+    # qx($RealBin/$opt{'bwa-path'}/bwa-proovread index $rfa_tmp >/dev/null 2>&1);
+    # my $bwa_cmd = "$RealBin/bam2fq --region $rid @bams | ".
+    #     "$RealBin/$opt{'bwa-path'}/bwa-proovread mem $rfa_tmp /dev/fd/0 2>/dev/null |";
+
+    # no tmp bam
+    # open(my $bwa, $bwa_cmd) or $L->logdie("$!: $bwa_cmd");
+    # my $sp = Sam::Parser->new(fh => $bwa);
+
+    qx($bwa_cmd);
+    my $sp = Sam::Parser->new(file => $bam);
+
+    my $ss = Sam::Seq->new(
+        id => $rid,
+        len => length($rfa->seq),
+        ref => $rfa
+    );
+
+    while ( my $aln = $sp->next_aln ) {
+        next if $aln->is(UNMAP);
+        #print $aln->score,"\n";
+        $ss->add_aln_by_score($aln);
+    }
+
+    $ss->call_variants(
+        min_prob => .2,
+        min_freq => 3,
+        or_min => 1,
+    );
+
+    $ss->stabilize_variants(
+        var_dist => 4
+    );
+    
+    $ss->fix_haplo_variants(orig_seq => $ufa);
+    
+    my $con = $ss->variant_consensus();
+
+    print OUT $con;
+    exit if ++$c >= 1;
+}
+
+close OUT;
+
+
+
+
+##----------------------------------------------------------------------------##
+# subs
+##----------------------------------------------------------------------------##
+
+=head2 prep
+
+=cut
+
+sub init{
+    no warnings 'qw';
+
+    my (%p) = @_;
+
+    # GetOptions
+    my $argv = join(" ", @ARGV);
+
+    my %def = ();
+    my %opt = (config => []);
+
+    GetOptions(
+        \%opt, qw(
+                     mode=s
+                     prefix=s
+                     config=s{,}
+                     version|V!
+                     debug|D!
+                     help|h!
+             )
+    ) or $L->logcroak('Failed to "GetOptions"');
+
+    $opt{argv} = $argv; # store it just in case
+
+    # help
+    $opt{help} && pod2usage(1);
+
+    # version
+    if ($opt{version}) {
+        print "$VERSION\n";
+        exit 0;
+    }
+
+    # Config + Opt
+    my %cfg;
+
+    # core
+    my $core_cfg = "$RealBin/../proovread.cfg";
+
+    if ( -e $core_cfg) {
+        $opt{core_config} = File::Spec->rel2abs($core_cfg);
+        %cfg = (%cfg, Cfg->Read($opt{core_config}));#, $Script));
+    }
+
+    # read all configs
+    if (@{$opt{config}}) {
+        foreach my $cfg ( @{$opt{config}} ) {
+            $cfg=File::Spec->rel2abs($cfg);
+            %cfg = (%cfg, Cfg->Read($cfg));#, $Script));
+        }
+    }
+
+    $L->logdie("unused argument: @ARGV") if @ARGV;
+
+    %opt = (%def, %cfg, %opt);
+
+    # required stuff  
+    for (qw(mode prefix)) {
+        if (ref $opt{$_} eq 'ARRAY') {
+            pod2usage("required: --$_") unless @{$opt{$_}}
+        } else {
+            pod2usage("required: --$_") unless defined ($opt{$_})
+        }
+    }
+
+    # full path prefix support
+    my $prefix_path;
+    ($opt{prefix}, $opt{prefix_path}) = fileparse($opt{prefix});
+    my $odir = getcwd;
+    
+    if ($opt{prefix_path}){
+        chdir($opt{prefix_path}) || $L->logdie("$!: $opt{prefix_path}");
+    }
+
+    mkdir("$opt{prefix}/refine") unless -e "$opt{prefix}/refine";
+    chdir "$opt{prefix}/refine";
+
+    # debug level
+    $L->level($DEBUG) if $opt{debug};
+    $L->debug('Verbose level set to DEBUG');
+
+    $L->debug(Dumper(\%opt));
+    
+    return %opt;
+}
+
+=head2 Sam::Seq::fix_haplo_variants
+
+=cut
+
+sub Sam::Seq::fix_haplo_variants{
+    my $self = shift;
+    my %p = (
+        orig_seq => undef,
+        min_freq => 2,
+        @_
+    );
+
+    die  (((caller 0)[3]).": orig_seq required\n") unless $p{orig_seq};
+
+    ##my $term_ignore_len = 15; # ignore terminal variants
+    my $v = $self->{vars};
+    my $f = $self->{freqs};
+    my $vc = $self->{vcigar};
+
+    my @v0_pos;
+    my @v1_seq;
+    my @v2_seq;
+
+    for (my $i=0; $i<@$v; $i++) {
+        if ( @{$v->[$i]} < 1 ){ # uncovered pos
+            my $r = substr($self->ref->seq, $i, 1);
+            push @v1_seq, $r;
+            push @v2_seq, $r;
+        } elsif (@{$v->[$i]} == 1) {
+            push @v1_seq, $v->[$i][0];
+            push @v2_seq, $v->[$i][0];
+        } else { # var pos
+            push @v1_seq, $v->[$i][0];
+            push @v2_seq, $v->[$i][1];
+            push @v0_pos, $i;
+        }
+    }
+    
+    return unless @v0_pos;
+
+    # cigar
+    my $v1_cig = v_seq_cigar(\@v1_seq);
+    my $v2_cig = v_seq_cigar(\@v2_seq);
+
+    # unpadded seqs
+    my $s1 = join("", @v1_seq);
+    my $v1_seq = Fasta::Seq->new(
+        id => $self->id()."-1",
+        seq => $s1
+    );
+
+    my $s2 = join("", @v2_seq);
+    my $v2_seq = Fasta::Seq->new(
+        id => $self->id()."-2",
+        seq => $s2,
+    );
+
+    # realign
+    my $aln1 = bwa_align($v1_seq, $p{orig_seq}, print=>1);
+    my $aln2 = bwa_align($v2_seq, $p{orig_seq}, print=>0);
+    
+    my @ori1 = $aln1->seq_states;
+    my $v1_len = length($v1_seq->seq);
+    if ( $aln1->pos > 1 ) {
+        unshift @ori1, ('.') x ($aln1->pos - 1)
+    }
+    if ( @ori1 < $v1_len ) { # prematurely terminated local aln
+        push @ori1, ('.') x ($v1_len - @ori1)
+    }
+
+    @ori1 = cigar_transpose(\@ori1, $v1_cig);
+    
+    my @ori2 = $aln2->seq_states;
+    if ( $aln2->pos > 1 ) {
+        unshift @ori2, ('.') x ($aln2->pos - 1)
+    }
+    if ( @ori2 < $v1_len ) { # prematurely terminated local aln
+        push @ori2, ('.') x ( $v1_len - @ori2)
+    }
+
+    # transpose ori2ref_comp states into ref coord space
+    @ori2 = cigar_transpose(\@ori2, $v2_cig);
+
+    my @hpl_probs;
+    my @ambg_pos; # decide by cov
+
+    my @v1_tra = @{cigar2trace($v1_cig)};
+    my @v2_tra = @{cigar2trace($v2_cig)};
+    
+    # foreach (@v0_pos) {
+    #     for (my $i=$_-5; $i<$_+26; $i++) {
+    #         my @v = @{$v->[$i]};
+    #         print  $i == $_ ? "* $i  " : "  $i  ", substr($self->ref->seq, $i, 1), "  @v \t$v1_seq[$i] $v2_seq[$i] \t$ori1[$i] $ori2[$i]";
+    #         #print "\t$v1_tra[$i] $v2_tra[$i]";
+    #         print "\n";
+    #     }
+    #     print "\n";
+    # }
+    # exit;
+    
+    foreach ( @v0_pos ) {
+        my @v = @{$self->{vars}[$_]};
+        my @f = @{$self->{freqs}[$_]};
+        my @p = @{$self->{probs}[$_]};
+        
+        my %v;
+        @v{@v} = (1) x @v;
+
+        my $ori1 = $ori1[$_];
+        my $ori2 = $ori2[$_];
+
+        print "$_ \t$v1_seq[$_] \t@v \t@f \t$ori1 $ori2 \t";
+       
+        # DONE: long similar states => identical (fuzzy match):
+        #  TTAAG->TTAAAG
+
+        # DONE: use cov instead of rand for x and !
+
+        unless ( exists $v{$ori1} || exists $v{$ori2}){ # unknown (!)
+            my $max_len;
+            if ( ($max_len = List::Util::max(length($ori1), length($ori2))) > 1 ){ # try fuzzy
+
+                my @s1 = map{ similarity($ori1, $_) }@v;
+                my @i1 = sort { $s1[$b] <=> $s1[$a] }(0..$#v);
+  
+                if ( $ori1 eq $ori2 ) {
+                    $self->{vars}[$_] = [@v[@i1]];
+                    $self->{freqs}[$_] = [@f[@i1]];
+                    $self->{probs}[$_] = [@p[@i1]];
+
+                    push @hpl_probs, $self->{probs}[$_][0];
+                    print " ~\t$self->{vars}[$_][0]\n";
+                    next;
+                }
+
+                my @s2 = map{ similarity($ori2, $_) }@v;
+                my @i2 = sort { $s2[$b] <=> $s2[$a] }(0..$#v);
+                
+                my $m1 = $s1[$i1[0]];
+                my $m2 = $s2[$i2[0]];
+
+                #print " \t@s1[@i1]\t$m1\t@s2[@i2]\t$m2";
+                
+                if ( $m1 == $m2 ){
+                    print " ~\t?\n";
+                    push @ambg_pos, $_;
+                    next;
+                } elsif ( $m1 > $m2 ) {
+                    $self->{vars}[$_] = [@v[@i1]];
+                    $self->{freqs}[$_] = [@f[@i1]];
+                    $self->{probs}[$_] = [@p[@i1]];
+
+                    push @hpl_probs, $self->{probs}[$_][0]; 
+                } else {
+                    $self->{vars}[$_] = [@v[@i2]];
+                    $self->{freqs}[$_] = [@f[@i2]];
+                    $self->{probs}[$_] = [@p[@i1]];
+                    
+                    push @hpl_probs, $self->{probs}[$_][0]; 
+                }
+                print " ~\t$self->{vars}[$_][0]\n";
+            }else {
+                #$self->{vars}[$_] = [$v[rand($#v)]];
+                print " !\t?\n";
+                push @ambg_pos, $_;
+                next;
+            }
+        } elsif ( $ori1 eq $ori2 ) { # unanimous (=)
+            $self->{vars}[$_] = [$ori1];
+            my $p;
+            for ($p=0; $p<@v; $p++) {
+                last if $v[$p] eq $ori1;
+            }
+            push @hpl_probs, $p[$p];
+            print "=\t$ori1\n";
+        } elsif ( exists $v{$ori1} && exists $v{$ori2} ) { # ambigiuos (x)
+            #$self->{vars}[$_] = [($ori1, $ori2)[rand(2)]];
+            print " x\t?\n";
+            push @ambg_pos, $_;
+            next;
+        } elsif ( exists $v{$ori1} ) { # v1 support (-)
+            $self->{vars}[$_] = [$ori1];
+            push @hpl_probs, $p[0]; 
+            print "-\t$ori1\n";
+        } elsif ( exists $v{$ori2} ) { # v2 support (-)
+            $self->{vars}[$_] = [$ori2];
+            push @hpl_probs, $p[1]; 
+            print "-\t$ori2\n";
+        } else {
+            print "~\tuummm..\n";
+            next;
+        }
+    }
+
+    if ( @ambg_pos && @hpl_probs) {
+        my $med_cov = median(\@hpl_probs);
+        print "--ambg: $med_cov\n";
+
+        foreach ( @ambg_pos ) {
+            my @v = @{$self->{vars}[$_]};
+            my @f = @{$self->{freqs}[$_]};
+            my @p = @{$self->{probs}[$_]};
+
+            # minimum delta to hpl
+            my @i = sort { abs($p[$a] - $med_cov) <=> abs($p[$b] - $med_cov) }(0..$#v);
+            $self->{vars}[$_] = [@v[@i]];
+            $self->{freqs}[$_] = [@f[@i]];
+            $self->{probs}[$_] = [@p[@i]];
+
+            print "$_ \t$v1_seq[$_] \t@v \t@f \t@i \t$self->{vars}[$_][0]\n";
+        }
+    }
+}
+
+=head2 bwa_align
+
+=cut
+
+sub bwa_align{
+    my ($ref, $qry) = @_;
+    my %p;
+    %p = (%p, @_[2..$#_]) if @_ > 2;
+    
+    open(FA, '>', $bwa_ref_tmp) or die $!;
+    print FA $ref;#->string(width => 80);
+    close FA;
+    open(QRY, '>', $bwa_qry_tmp) or die $!;
+    print QRY $qry;#->string(width => 80);
+    close QRY;
+
+    # realign scoring scheme
+    # if D is not penalized enough, the alignments will crunch together instead of being global
+    #my $bwa_00 = "-A 5 -B 16 -O 2,1 -E 4,3 -k 12";
+    my $bwa_01 = "-A 5 -B 4 -O 2,3 -E 5,6 -k 12";
+    my $bwa_02 = "-A 7 -B 4 -O 2,3 -E 5,6 -k 12";
+
+    qx(bwa index $bwa_ref_tmp >/dev/null 2>&1);
+    open (my $bwa, "bwa mem $bwa_01 $bwa_ref_tmp $bwa_qry_tmp 2>/dev/null |") or die $!;
+    my $sp = Sam::Parser->new(fh => $bwa);
+    my $aln = $sp->next_aln;
+    close $bwa;
+    return $aln;
+    #return qx(mapPacBio.sh ref=$ref_fa in=$fq out=stdout.sam);
+    #return qx(blasr -noSplitSubreads -sam $qry_fa $ref_fa);
+}
+
+=head2 v_seq_cigar
+
+=cut
+
+sub v_seq_cigar{
+    my ($seq) = @_;
+    
+    my $k = -1;
+    my $cig = '';    
+    my ($m, $d) = (0,0);
+
+    for (my $i=0; $i<@$seq; $i++) {
+        if ( my $z = length($seq->[$i]) -1 ){
+            if ($z<0) {
+                $d++;
+            }else {
+                $m++;
+                $cig.= $m."M".$z."I";
+                $m = 0;
+            }
+        }else {
+            # check d
+            if ( $d ) {
+                $cig.= $m."M".$d."D";
+                $d = 0;
+                $m = 0;
+            } 
+            $m++;
+        }
+    }
+
+
+    # all pos after last var
+    if ( $d ) {
+        $cig.= $m."M".$d."D";
+        $d = 0;
+        $m = 0;
+    } 
+    $cig.=$m."M" if $m;
+    $cig =~ s/\d+[ID]$//; # can't have terminal D/I in cigar!
+
+    return $cig;
+}
+
+=head cigar2trace
+
+=cut
+
+sub cigar2trace{
+    my $cigar = shift;
+    my @s = ();
+    while ($cigar =~ /(\d+)([MDIX=])/g) {
+        if ($2 eq "I") {
+            $s[-1].= "I" x $1;
+        }else {
+            push @s, ($2) x $1;
+        }
+    }
+    return \@s;
+}
+
+=head2 cigar_transpose
+
+=cut
+
+sub cigar_transpose{
+    my ($seq, $cigar) = @_;
+
+    die (((caller 3)[0]).": 2 args (seq,cigar) required\n") unless @_ == 2;
+
+    unless (ref $seq){
+        chomp($seq);
+        $seq = [split('', $seq)]
+    }
+    
+    my @s = ();
+    my $pos = 0;
+    if ($cigar =~ /^(\d+)S/) {
+        $pos+=$1; # account for softclip
+    }
+
+    while ($cigar =~ /(\d+)([MDIX=])/g) {
+        if ($2 eq "I") {
+            if (@s){
+
+                if ( grep{! defined $_}@$seq[$pos..$pos+$1-1] ){
+                    use Data::Dumper;
+                    print Dumper({
+                        pos => $pos,
+                        to => $pos+$1-1,
+                        len => scalar @$seq,
+                        cigar => $cigar,
+                        seq => $seq,
+                    });
+                        
+                }
+                my $ins = join("", @$seq[$pos..$pos+$1-1]);
+                $s[-1].= $ins;
+            }
+            $pos+=$1;
+        } elsif ($2 eq "D") {
+            push @s, ('') x $1;
+        } else {
+            push @s, @$seq[$pos..$pos+$1-1];
+            $pos+=$1;
+        }
+    };
+    return @s;
+}
+
+=head2 median
+
+=cut
+
+sub median{
+    return (sort{$a<=>$b}@{$_[0]})[ @{$_[0]}/2 ];
+}
+
+
+=head1 AUTHOR
+
+Thomas Hackl, E<lt>thackl@lim4.deE<gt>
+
+=cut

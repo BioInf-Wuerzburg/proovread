@@ -1,0 +1,225 @@
+#!/usr/bin/env perl
+# Created: 06 Aug 2015
+
+use warnings;
+use strict;
+
+use Pod::Usage;
+use Getopt::Long;
+use Log::Log4perl qw(:no_extra_logdie_message);
+use Log::Log4perl::Level;
+use FindBin qw($Script);
+
+## Debug
+use Data::Dumper;
+$Data::Dumper::Sortkeys=1;
+
+use Sam::Alignment ':flags';
+use Sam::Parser;
+
+=head1 NAME
+
+bam2fq
+
+=head1 SYNOPSIS
+
+bam2fq [options] A.bam [B.bam C.bam ...]
+
+=head1 OPTIONS
+
+=over
+
+=item --out [-]
+
+Output file.
+
+=item --region
+
+Limit read extraction to BAM region.
+
+=item --samtools-opt
+
+Samtools path-through filter options as single string, e.g.  '-f 16 -q 20' to
+only extract reverse reads with mapping qual >20.
+
+=item --unique [ON]
+
+Only output a read once even if it occurs multiple times within one / across
+multiple BAM files.
+
+=item --fasta [OFF]
+
+Output FASTA instead of FASTQ.
+
+=item --dummy [I]
+
+Use this dummy character for quality line if qual is missing.
+
+=item --samtools-path
+
+Path to samtools executable.
+
+=back
+
+=head1 MAIN
+
+=cut
+
+
+##----------------------------------------------------------------------------##
+# Globals
+##----------------------------------------------------------------------------##
+
+our $VERSION = '0.1.0';
+
+Log::Log4perl->init( \(q(
+        log4perl.rootLogger                     = INFO, Screen
+        log4perl.appender.Screen                = Log::Log4perl::Appender::Screen
+        log4perl.appender.Screen.stderr         = 1
+        log4perl.appender.Screen.layout         = PatternLayout
+        log4perl.appender.Screen.layout.ConversionPattern = [%d{yy-MM-dd HH:mm:ss}] [).$Script.q(] %m%n
+)));
+
+my $L = Log::Log4perl->get_logger();
+
+
+##----------------------------------------------------------------------------##
+# Main
+##----------------------------------------------------------------------------##
+
+my %opt = init();
+
+my $samtools_cmd = '(';
+$samtools_cmd.= "$opt{samtools} view $opt{samtools_opt} $_ $opt{region}; " for @{$opt{bam}};
+$samtools_cmd.= ') |';
+
+$L->debug($samtools_cmd);
+
+open(my $fh, $samtools_cmd) or $L->logdie($!);
+my $sp = Sam::Parser->new(fh => $fh);
+
+my %seen1;
+my %seen2;
+
+
+while (my $aln = $sp->next_aln) {
+    if ( $opt{unique} ){
+        if ( $aln->is(READ2) ) {
+            print "READ2\n";
+            next if $seen2{$aln->qname}++;
+        }else {
+            next if $seen1{$aln->qname}++;
+        }
+    }
+    
+    if ($opt{fasta}) {
+        print '>', $aln->qname, "\n",
+            $aln->seq, "\n";
+    }else {
+        print '@', $aln->qname, "\n",
+            $aln->seq, "\n+\n",
+            $aln->qual eq "*" ? $opt{dummy_fq} x length($aln->seq) : $aln->qual, "\n";
+    }
+}
+
+    
+##----------------------------------------------------------------------------##
+# subs
+##----------------------------------------------------------------------------##
+
+sub init{
+    my (%p) = @_;
+
+    # GetOptions
+    my $argv = join(" ", @ARGV);
+
+    my %opt = (
+        samtools_path => undef,
+        samtools_opt => '',
+        region => '',
+        unique => 1,
+        dummy_fq => 'I',
+    );
+
+    GetOptions(
+        \%opt, qw(
+                     out=s
+                     bam=s@
+                     samtools-path|samtools_path=s
+                     samtools-opt|samtools-opt=s
+                     region=s
+                     unique!
+                     fasta!
+                     version|V!
+                     debug|D!
+                     help|h!
+             )
+    ) or $L->logcroak('Failed to "GetOptions"');
+
+   $opt{argv} = $argv; # store it just in case
+
+    # help
+    $opt{help} && pod2usage(1);
+
+    # version
+    if ($opt{version}) {
+        print "$VERSION\n";
+        exit 0;
+    }
+
+    if(@ARGV && ! $opt{bam}){
+        $opt{bam} = [@ARGV];
+        @ARGV = ();
+    }
+    $L->logdie("unused argument: @ARGV") if @ARGV;
+
+    if ( $opt{out} && $opt{out} ne '-' ){
+        open(my $ofh, '>', $opt{out}) or $L->logdie("$!: $opt{out}");
+        $opt{ofh} = $ofh;
+    }else {
+        $opt{ofh} = \*STDOUT;
+    }
+
+    # required stuff
+    for (qw(bam)) {
+       if (ref $opt{$_} eq 'ARRAY') {
+           pod2usage("required: --$_") unless @{$opt{$_}}
+       } else {
+           pod2usage("required: --$_") unless defined ($opt{$_})
+       }
+    }
+
+    opt_bin(\%opt, "samtools");
+
+    # debug level
+    $L->level($DEBUG) if $opt{debug};
+    $L->debug('Verbose level set to DEBUG');
+
+    $L->debug(Dumper(\%opt));
+
+    return %opt;
+}
+
+
+=head2 bin
+
+Return full binary path based on $opt{<bin_path}.
+
+=cut
+
+sub opt_bin{
+    my ($opt, $bin) = @_;
+    if (exists $opt->{$bin."_path"} && $opt->{$bin."_path"}) {
+        $opt->{$bin} = $opt->{$bin."_path"}."/".$bin;
+    } else {
+        $opt->{$bin} = $bin;
+    }
+    return $opt->{$bin};
+}
+
+
+=head1 AUTHOR
+
+Thomas Hackl, E<lt>thackl@lim4.deE<gt>
+
+=cut
