@@ -33,6 +33,8 @@ use Sam::Parser 0.11;
 use Sam::Alignment 0.10 ':flags';
 use Sam::Seq 0.16;
 
+use String::Similarity;
+
 use Shrimp 0.08;
 
 use threads;

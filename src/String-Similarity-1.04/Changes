@@ -1,0 +1,31 @@
+Revision history for Perl extension String::Similarity
+
+1.04 Fri Jul  3 15:48:09 CEST 2009
+	- work around atrocious bugs in activestate windows, which pollutes
+          the namespace with nonstandard symbols, equalling only the bush junta
+          in brokenness.
+
+1.03 Mon Jun 11 23:15:35 CEST 2007
+	- bump the version number, seems cpan ignored the 1.02 upload.
+
+1.02 Mon Feb 12 16:26:08 CET 2007
+	- add missing use Exporter, add use DynaLoader for symmetry and
+          because I was told some bug in bleadperl might require that.
+        - add 'no warnings' to testsuite. If your perl is too old, remove
+          it.
+
+1.01 Thu Mar  3 18:00:52 CET 2005
+	- change of contact address.
+
+1.0  Fri Jan 30 15:16:16 CET 2004
+        - Fixed correctness in the presence of non-latin1-characters, at a
+          small speed penalty. Based on an idea by Dave Evans.
+        - perl 5.8.x+ required.
+
+0.02  Thu Nov 16 01:30:16 CET 2000
+	- added minimum_similarity limit to speed up some searches
+        - last version to work with perls <5.8.x.
+
+0.01  Fri Apr  7 08:03:08 CEST 2000
+	- original version; leftover "garbage" from the PApp module
+
