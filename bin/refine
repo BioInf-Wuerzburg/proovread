@@ -157,7 +157,7 @@ while (my $rfa = $rfp->next_seq) {
     my $con = $ss->variant_consensus();
 
     print OUT $con;
-    exit if ++$c >= 1;
+    #exit if ++$c >= 1;
 }
 
 close OUT;
