@@ -1688,7 +1688,10 @@ sub correct_sr_mt{
 	}
 
         if ( @db_glob ){
-            system(cfg('samtools-path')."samtools merge $db_file @db_glob");
+            @db_glob > 1
+                ? system(cfg('samtools-path')."samtools merge $db_file @db_glob")
+                : system("mv @db_glob $db_file");
+            system(cfg('samtools-path')."samtools index $db_file");
         }
 
 	unlink @fq_glob unless $opt_keep > 1;
