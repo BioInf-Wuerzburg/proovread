@@ -223,6 +223,7 @@ my @sr_cache; # subread cache
 my @ids;
 my @ccs_ids;
 my $fq;
+
 my %stats = (
              single => 0,
              primary => 0,
@@ -298,12 +299,10 @@ if(@sr_cache > 1){
 
 $R = ccs_chunk($R, \@ccs_ids) if @ccs_ids;
 
-my $sam_tmp;
 foreach (@ids) {
 #    print STDERR "$_: ".($R->{$_}{CCS}),"\n";
     if ($R->{$_}{CCS} eq 'primary') { # if there are alignments, compute and print ccs
         $stats{primary}++;
-        $sam_tmp = $R->{$_}{sam}{file};
         my $con = $R->{$_}->consensus(
                                       use_ref_qual => 1,
                                       qual_weighted => 1,
@@ -317,9 +316,6 @@ foreach (@ids) {
         $stats{secondary}++;
     }
 }
-
-# reset
-unlink $sam_tmp if $sam_tmp && ! $opt{debug};
 
 my $src = $stats{single} + $stats{primary} + $stats{secondary};
 my $rc = $stats{single} + $stats{primary};
@@ -371,12 +367,6 @@ sub ccs_chunk{
     my $srf_base = $srf;
     $srf_base =~ s/.fq$//;
 
-    # init temporary sam writer
-    my $tsp = Sam::Parser->new(
-                               file => $srf_base.".sam",
-                               mode => '+>',
-                              );
-
     my $sam_cmd;
     
     # index chunk
@@ -398,10 +388,8 @@ sub ccs_chunk{
     my $PG_line;
     # read SAM header
     while (my %h = $rsp->next_header_line('SQ|PG')) {
-        $tsp->append_aln($h{raw});
         next if $h{tag} eq '@PG';
 
-        $SR->{$h{'SN'}}{sam} = $tsp; # indexed sam file, containing aln data
         $SR->{$h{'SN'}}{CCS} = "primary";
     }
 
@@ -443,9 +431,7 @@ sub ccs_chunk{
         next unless $qid eq $rid;
         
         # try to add aln, if sufficient score, add to temporary sam file
-        if ($SR->{$aln->rname}->add_aln($aln)) {
-            $tsp->append_aln($aln);
-        }
+        $SR->{$aln->rname}->add_aln($aln);
     }
 
     close $sam_oh;
