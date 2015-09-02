@@ -8,3 +8,15 @@ README.tex
 sample/Ec-utg-rand-02.fa
 sample/F.antasticus_ms_1.fq
 sample/F.antasticus_ms_2.fq
+lib/String/
+lib/auto/
+lib/man/
+lib/perllocal.pod
+src/String-Similarity-1.04/MYMETA.json
+src/String-Similarity-1.04/MYMETA.yml
+src/String-Similarity-1.04/Makefile
+src/String-Similarity-1.04/Similarity.bs
+src/String-Similarity-1.04/Similarity.c
+src/String-Similarity-1.04/Similarity.o
+src/String-Similarity-1.04/blib/
+src/String-Similarity-1.04/pm_to_blib
