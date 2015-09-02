@@ -7,7 +7,11 @@ use overload
     'bool' => sub{1},
     '""' => \&string;
 
-our $VERSION = '1.1.3';
+use constant {
+    GAP => '', # or '-'
+};
+
+our $VERSION = '1.1.5';
 
 =head1 NAME
 
@@ -451,24 +455,31 @@ sub seq_aligned{
         $pos+=$1; # account for softclip
     }
 
-    while ($cigar =~ /(\d+)([MDI])/g) {
-        if ($2 eq "I") { $pos+= $1 };
-        if ($2 eq "M") { $aseq.= substr($seq, $pos, $1); $pos+=$1 }
-        if ($2 eq "D") { $aseq.= "-" x $1; }
+    while ($cigar =~ /(\d+)([MDIX=])/g) {
+        if ($2 eq "I") {
+            $pos+= $1
+        } elsif ($2 eq "D") {
+            $aseq.= "-" x $1;
+        }  else {
+            $aseq.= substr($seq, $pos, $1); $pos+=$1
+        }
     };
     return $aseq;
 }
 
 =head2 seq_states
 
-Get the states of a sequence based on cigar.
+Get the states of a sequence based on cigar. By default gaps are represented by
+char defined with GAP constant (''), can be overwritten with (gap => '-');
 
 =cut
 
 sub seq_states{
-    my ($self) = @_;
+    my $self = shift;
 
     return undef if $self->seq eq "*";
+
+    my %p = (gap => GAP, @_);
 
     my $cigar = $self->cigar;
     my $seq = $self->seq;
@@ -483,7 +494,7 @@ sub seq_states{
             $s[-1].= substr($seq, $pos, $1) if @s;
             $pos+=$1;
         } elsif ($2 eq "D") {
-            push @s, ('-') x $1;
+            push @s, ($p{gap}) x $1;
         } else {
             push @s, split(//, substr($seq, $pos, $1));
             $pos+=$1;

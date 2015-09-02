@@ -22,6 +22,8 @@ use constant {
     # the value, the more trust is put into frequency (proovread-1.01: 50)
     PROOVREAD_CONSTANT => 120,
 
+    GAP => '', # or '-'
+
     # pacbio scoring scheme - aln2score
     # bwa (-A 5 -B 11 -O 2,1 -E 4,3)
     MA => 0, # use 0 not prevent just having the longer alignment win
@@ -32,7 +34,7 @@ use constant {
     QGE => -3,
 };
 
-our $VERSION = '1.4.1';
+our $VERSION = '1.5.0';
 
 
 
@@ -399,7 +401,7 @@ sub State_matrix{
                         push @squals, split(//,substr($qua,$qpos,$cigar[$i])) if $p{qual_weighted};
                         $qpos += $cigar[$i];
                     } elsif ($cigar[$i+1] eq 'D') {
-                        push @states, ('-') x $cigar[$i];
+                        push @states, (GAP) x $cigar[$i];
                         if($p{qual_weighted}){
                             my $qbefore = $qpos > 1 ? substr($qua,$qpos-1,1) : substr($qua,$qpos,1);
                             my $qafter  = $qpos < length($qua) ? substr($qua,$qpos,1) : substr($qua,$qpos-1,1);
@@ -410,7 +412,7 @@ sub State_matrix{
                         if ($i) {
                             # append to prev state
                             #print STDERR "@cigar\n" unless @states;
-                            if ($states[$#states] eq '-') {
+                            if ($states[$#states] eq GAP) {
                                 # some mappers, e.g. bowtie2 produce 1D1I instead of
                                 # mismatchas (1M), as it is cheaper. This needs to be
                                 # corrected to a MM
@@ -533,7 +535,7 @@ sub new{
 			T => 1,
 			G => 2,
 			C => 3,
-			'-' => 4,
+			&GAP => 4,  # GAP is a constant
 			N => 5,
 			# .. complex states, dynamically added
 		}
@@ -1531,7 +1533,7 @@ sub variant_consensus{
         # TODO MaxInsertSize
         my $v = $vvars->[$i][0];
 
-        next if $v eq '-';
+        next if $v eq GAP;
 
         if (length($v) > 1) {
              $trace.= 'I' x length($v);
@@ -1687,11 +1689,11 @@ sub call_variants{
 
     foreach my $col (@{$self->{_state_matrix}}) {
         # cov
-        unless($col){
+        unless($col && @$col){
             push @{$self->{covs}}, 0;
-            push @{$self->{vars}}, ['?'];
-            push @{$self->{freqs}},[''];
-            push @{$self->{probs}},[''];
+            push @{$self->{vars}}, [];
+            push @{$self->{freqs}},[];
+            push @{$self->{probs}},[];
             next;
         }
 
@@ -1731,6 +1733,20 @@ sub call_variants{
     # rel freq
 
     return $self;
+}
+
+=head2 variant_positions
+
+Get a list of variant positions from called variants, 0-based.
+
+=cut
+
+sub variant_positions{
+    my $self = shift;
+
+    die (((caller 0)[3]).": ->call_variants() required\n") unless @{$self->{vars}};
+
+    return grep{ @{$self->{vars}[$_]} > 1 }(0..@{$self->{vars}}-1);
 }
 
 =head2 remap
@@ -1779,22 +1795,25 @@ sub stabilize_variants{
     my %p = (
         min_freq => 2,
         var_dist => 4,
+        sticky_dist => 1,
         @_
     );
 
-    my @vpos;
     my $min_freq = $p{min_freq};
     my $var_dist = $p{var_dist};
+    my $sticky_dist = $p{sticky_dist};
 
     # call variants
     my $vars = $self->{vars};
     my $vcigars = $self->{vcigars};
 
-    for (my $i=0; $i<@$vars; $i++) {
-        if ( @{$self->{freqs}[$i]} > 1) {
-            push @vpos, $i;
-        }
-    }
+    my @vpos = $self->variant_positions;
+
+    #for (my $i=0; $i<@$vars; $i++) {
+    #    if ( @{$self->{freqs}[$i]} > 1) {
+    #        push @vpos, $i;
+    #    }
+    #}
     return unless @vpos; # nothing to do
 
     # get close variants
@@ -1811,14 +1830,17 @@ sub stabilize_variants{
     push @vgroups, [@vg] if @vg >1;
 
     # get variant group substring coordinates
-    my @vranges = map{ [$_->[0], $_->[@$_-1] - $_->[0] + 1] }@vgroups;
-    # my @vranges = map{
-    #     my $o = $_->[0] > $var_dist ? $_->[0] - $var_dist : 0;
-    #     my $l = $_->[@$_-1] - $_->[0] + 1 + 2*$var_dist;
-    #     my $excess = @$vars - 1 - ($o+$l);
-    #     $l-=$excess if $excess < 0;
-    #     [$o, $l];
-    # }@vgroups;
+    #  my @vranges = map{ [$_->[0], $_->[@$_-1] - $_->[0] + 1] }@vgroups;
+    # sticky vranges
+    my @vranges = map{
+         my $o = $_->[0] > $sticky_dist ? $_->[0] - $sticky_dist : 0;
+         my $l = $_->[@$_-1] - $_->[0] + 1 + 2*$sticky_dist;
+         my $excess = @$vars - 1 - ($o+$l);
+         $l-=$excess if $excess < 0;
+         [$o, $l];
+    }@vgroups;
+
+    $self->{var_stabilize_ranges} = \@vranges;
 
     my %vars;
     #@vars{@vpos} = map{{}}@vpos;
@@ -1902,7 +1924,7 @@ sub stabilize_variants{
         $self->{probs}[$f] = [map{$_/$cov}@{$self->{freqs}[$f]}];
 
         foreach (($f+1)..$t) {
-            $self->{vars}[$_] = ['-'];
+            $self->{vars}[$_] = [GAP];
             $self->{freqs}[$_] = [$cov];
             $self->{covs}[$_] = $cov;
         }
@@ -1957,6 +1979,22 @@ sub stabilize_variants{
 
 }
 
+=head2 stable_ref_states
+
+=cut
+
+sub stable_ref_states{
+    my $self = shift;
+    die (((caller 0)[3]).": ref required\n") unless $self->ref;
+
+    my @s = split(//, $self->ref->seq);
+
+    foreach ( @{$self->{var_stabilize_ranges}} ) {
+        $s[$_->[0]] = join("", @s[$_->[0] .. $_->[0]+$_->[1]-1]);
+        @s[$_->[0]+1 .. $_->[0]+$_->[1]-1] = ('') x $_->[1];
+    }
+    return @s;
+}
 
 =head2 aln2score
 
