@@ -31,7 +31,7 @@ use constant {
 
 use Storable qw(dclone);
 
-our $VERSION  = '0.10.1';
+our $VERSION  = '0.10.2';
 
 
 
@@ -464,7 +464,7 @@ sub detect_chimera{
 
     if (@coords) {
         my $i;
-        my %cigar = (M=>0, I=>0, D=>0);
+        my %cigar = ("=" => 0, X=>0, M=>0, I=>0, D=>0);
         for ($i=0; $i<@coords; $i++) {
 
             my $fr = $coords[$i]{col_range}[0];
@@ -476,7 +476,7 @@ sub detect_chimera{
             # get read cigar, eg 80M2D3M
             # /g remembers position even between multiple calls to while on same cigar
             # hence we can just always add to %cigar outside the for loop
-            while ($con->{cigar} =~ m/(\d+)(\w)/g && ($cigar{M}+$cigar{I} < $fr)) {
+            while ($con->{cigar} =~ m/(\d+)(.)/g && ($cigar{'='}+$cigar{X}+$cigar{M}+$cigar{I} < $fr)) {
                 $cigar{$2}+=$1;
             }
 
