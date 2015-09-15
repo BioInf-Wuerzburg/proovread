@@ -55,7 +55,7 @@ refine [options] args
 # Globals
 ##----------------------------------------------------------------------------##
 
-our $VERSION = 0.1.0;
+our $VERSION = 0.2.0;
 
 Log::Log4perl->init( \(q(
         log4perl.rootLogger                     = INFO, Screen
@@ -82,8 +82,10 @@ my $bam = $opt{prefix}.'-refine.bam';
 my $fq_untrimmed = $opt{prefix}.'.untrimmed.fq';
 my $fq_trimmed = $opt{prefix}.'.trimmed.fq';
 my $fa_trimmed = $opt{prefix}.'.trimmed.fa';
+my $var_coords = $opt{prefix}.'-var.tsv';
 
 open(OUT, '>', $fq_untrimmed) or $L->logdie($!);
+open(VAR, '>', $var_coords) or $L->logdie($!);
     
 my $bwa_ref_tmp = $opt{prefix}.'-bwa-qry.fa';
 my $bwa_qry_tmp = $opt{prefix}.'-bwa-ref.fa';
@@ -153,15 +155,17 @@ while (my $rfa = $rfp->next_seq) {
     );
     
     $ss->fix_haplo_variants(orig_seq => $ufa);
-    
+
     my $con = $ss->variant_consensus();
 
+    # report vars in consensus coord space
+    print VAR $rid, "\t", $_->[0], "\t", $_->[1], "\t", join(",", @{$_->[2]}), "\t", join(",", @{$_->[3]}),"\n" for @{$con->{variants}};
     print OUT $con;
     #exit if ++$c >= 1;
 }
 
 close OUT;
-
+close VAR;
 
 
 
@@ -348,29 +352,18 @@ sub Sam::Seq::fix_haplo_variants{
     my @v1_tra = @{cigar2trace($v1_cig)};
     my @v2_tra = @{cigar2trace($v2_cig)};
     
-    # foreach (@v0_pos) {
-    #     for (my $i=$_-5; $i<$_+26; $i++) {
-    #         my @v = @{$v->[$i]};
-    #         print  $i == $_ ? "* $i  " : "  $i  ", substr($self->ref->seq, $i, 1), "  @v \t$v1_seq[$i] $v2_seq[$i] \t$ori1[$i] $ori2[$i]";
-    #         #print "\t$v1_tra[$i] $v2_tra[$i]";
-    #         print "\n";
-    #     }
-    #     print "\n";
-    # }
-    # exit;
-    
-    foreach ( @v0_pos ) {
+    foreach ( @v0_pos ) { # loop all variant positions
         my @v = @{$self->{vars}[$_]};
         my @f = @{$self->{freqs}[$_]};
         my @p = @{$self->{probs}[$_]};
-        
+
         my %v;
         @v{@v} = (1) x @v;
 
         my $ori1 = $ori1[$_];
         my $ori2 = $ori2[$_];
 
-        print "$_ \t$v1_seq[$_] \t@v \t@f \t$ori1 $ori2 \t";
+        #print "$_ \t$v1_seq[$_] \t@v \t@f \t$ori1 $ori2 \t";
        
         # DONE: long similar states => identical (fuzzy match):
         #  TTAAG->TTAAAG
@@ -390,7 +383,7 @@ sub Sam::Seq::fix_haplo_variants{
                     $self->{probs}[$_] = [@p[@i1]];
 
                     push @hpl_probs, $self->{probs}[$_][0];
-                    print " ~\t$self->{vars}[$_][0]\n";
+                    #print " ~\t$self->{vars}[$_][0]\n";
                     next;
                 }
 
@@ -403,7 +396,7 @@ sub Sam::Seq::fix_haplo_variants{
                 #print " \t@s1[@i1]\t$m1\t@s2[@i2]\t$m2";
                 
                 if ( $m1 == $m2 ){
-                    print " ~\t?\n";
+                    #print " ~\t?\n";
                     push @ambg_pos, $_;
                     next;
                 } elsif ( $m1 > $m2 ) {
@@ -419,43 +412,45 @@ sub Sam::Seq::fix_haplo_variants{
                     
                     push @hpl_probs, $self->{probs}[$_][0]; 
                 }
-                print " ~\t$self->{vars}[$_][0]\n";
+                #print " ~\t$self->{vars}[$_][0]\n";
             }else {
                 #$self->{vars}[$_] = [$v[rand($#v)]];
-                print " !\t?\n";
+                #print " !\t?\n";
                 push @ambg_pos, $_;
                 next;
             }
-        } elsif ( $ori1 eq $ori2 ) { # unanimous (=)
-            $self->{vars}[$_] = [$ori1];
+        } elsif ( $ori1 eq $ori2 ) { # unanimous (=) and $v1 or $v2 eq $ori1/2
             my $p;
             for ($p=0; $p<@v; $p++) {
                 last if $v[$p] eq $ori1;
             }
+
+            $self->{vars}[$_] = [$ori1, grep{$_ ne $ori1}@v];
+
             push @hpl_probs, $p[$p];
-            print "=\t$ori1\n";
+            #print "=\t$ori1\n";
         } elsif ( exists $v{$ori1} && exists $v{$ori2} ) { # ambigiuos (x)
             #$self->{vars}[$_] = [($ori1, $ori2)[rand(2)]];
-            print " x\t?\n";
+            #print " x\t?\n";
             push @ambg_pos, $_;
             next;
         } elsif ( exists $v{$ori1} ) { # v1 support (-)
-            $self->{vars}[$_] = [$ori1];
+            $self->{vars}[$_] = [$ori1, grep{$_ ne $ori1}@v];
             push @hpl_probs, $p[0]; 
-            print "-\t$ori1\n";
+            #print "-\t$ori1\n";
         } elsif ( exists $v{$ori2} ) { # v2 support (-)
-            $self->{vars}[$_] = [$ori2];
+            $self->{vars}[$_] = [$ori2, grep{$_ ne $ori2}@v];
             push @hpl_probs, $p[1]; 
-            print "-\t$ori2\n";
+            #print "-\t$ori2\n";
         } else {
-            print "~\tuummm..\n";
+            #print "~\tuummm..\n";
             next;
         }
     }
 
     if ( @ambg_pos && @hpl_probs) {
         my $med_cov = median(\@hpl_probs);
-        print "--ambg: $med_cov\n";
+        #print "--ambg: $med_cov\n";
 
         foreach ( @ambg_pos ) {
             my @v = @{$self->{vars}[$_]};
@@ -468,7 +463,7 @@ sub Sam::Seq::fix_haplo_variants{
             $self->{freqs}[$_] = [@f[@i]];
             $self->{probs}[$_] = [@p[@i]];
 
-            print "$_ \t$v1_seq[$_] \t@v \t@f \t@i \t$self->{vars}[$_][0]\n";
+            #print "$_ \t$v1_seq[$_] \t@v \t@f \t@i \t$self->{vars}[$_][0]\n";
         }
     }
 }
