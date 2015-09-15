@@ -1557,7 +1557,10 @@ sub correct_sr_mt{
                 '--max-ins-length' => cfg('max-ins-length', $TASK),
 
                 $opt_debug ? ("--debug" => '') : (),
-                $opt_haplo_coverage ? ('--haplo-coverage' => '') : (),
+                $opt_haplo_coverage && ($TASK =~ /-finish/) ? (
+#                    '--haplo-coverage' => '',
+#                    '--orig-fasta' => task_file_name('.masked.fa', task => $TASKS[0] )
+                ) : (),
 
                 defined(cfg('rep-coverage', $TASK)) ? ('--rep-coverage' => cfg('rep-coverage', $TASK)) : (),
                 defined(cfg('min-ncscore', $TASK)) ? ('--min-ncscore' => cfg('min-ncscore', $TASK)) : (),
