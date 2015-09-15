@@ -5,7 +5,7 @@ use warnings;
 use strict;
 
 use Pod::Usage;
-use Getopt::Long;
+use Getopt::Long qw(:config no_ignore_case);
 use Log::Log4perl qw(:no_extra_logdie_message);
 use Log::Log4perl::Level;
 
@@ -52,6 +52,11 @@ Reads to polish (proovread UNtrimmed reads).
 Reads to use for polishing (proovread TRIMMED reads). Defaults to
 self-polishing of reads
 
+=item [-v/--variants]
+
+Use externally computed variant coordinates for phasing - e.g. derived from
+other data, like high coverage short reads.
+
 =back
 
 =head1 MAIN
@@ -63,7 +68,7 @@ self-polishing of reads
 # Globals
 ##----------------------------------------------------------------------------##
 
-our $VERSION = 0.1.0;
+our $VERSION = "0.2.0";
 
 Log::Log4perl->init( \(q(
         log4perl.rootLogger                     = INFO, Screen
@@ -98,7 +103,13 @@ if($rfp = Fastq::Parser->new(file => $opt{targets})->check_format){
     $ref_chunk = $opt{prefix}.'.chunk.fa';
 }else {
     $L->logdie("$opt{targets} neither FASTQ nor FASTA format");
-}       
+}
+
+my $vh;
+my $var_buffer = ''; # buffer for var file line reading
+if ($opt{variants}) {
+    open ($vh, '<', $opt{variants}) or $L->logdie("$!: $opt{variants}");
+}
 
 
 Sam::Seq->BinSize(50);
@@ -132,13 +143,14 @@ polish_chunk() if $c % $opt{chunk_seqs}; # at least one new seq
 sub polish_chunk{
 
     # TODO: bwa-proovread
-    qx(bwa index $ref_chunk >/dev/null 2>&1);
+    my $err = qx(bwa index $ref_chunk 2>&1);
+    $? && $L->logdie("bwa index failed:\n$err");
 
     my $bwa_cmd = "bwa mem $ref_chunk $opt{queries} | $RealBin/sam2bam-sorted $bam_chunk";
     qx($bwa_cmd);
-    
+
     my $cfp = Fastq::Parser->new(file => $ref_chunk);
-    
+
     while (my $seq = $cfp->next_seq) {
 
         my $sp = Sam::Parser->new(
@@ -149,11 +161,10 @@ sub polish_chunk{
         my $ss = $sp->next_seq();
         $ss->{ref} = $seq;
 
-        # TODO: if PBs are low cov and actual allel is < 2-3X,
-        # or TODO: if PBs are from one allel only, 
+        # DONE: if PBs are low cov and actual allel is < 2-3X,
+        # or DONE: if PBs are from one allel only,
         # I need to get vars from short reads - otherwise most vars are
         # invisible, which makes phasing hard
-
         # Could also use vcf (or analog) generated during proovread refine step
 
         $ss->call_variants(
@@ -162,31 +173,66 @@ sub polish_chunk{
             or_min => 1,
         );
 
-        $ss->stabilize_variants(
-            var_dist => 4
-        );
+        if ($vh) { # reads external vars
+            $ss->call_variants(
+                min_prob => .2,
+                min_freq => 3,
+                or_min => 1,
+            );
 
-        # use Data::Dumper;
-        # my $vars = $ss->{vars};
-        # for (my $i=0; $i<@$vars; $i++) {
-        #     if ( @{$vars->[$i]} > 1) {
-        #         print "$i\t@{$vars->[$i]}\n";
-        #     }
-        # }
-        #print "@$_\n" for grep{@$_>1}@{$ss->{vars}};
-        #polish: $ss->fix_haplo_variants(orig_seq => $ufa);
+            # DONE: multiple reads
+            # DONE: reads w/o vars
+            # add stabilized vars and stabilze called vars
+            while (my $r = $var_buffer || <$vh>) {
+                chomp($r);
+                my ($id, $pos, $len, $vars, $freqs) = split("\t", $r);
+
+                # load/clear line buffer
+                if($id ne $seq->id){
+                    $var_buffer = $r;
+                    last;
+                }elsif ($var_buffer) {
+                    $var_buffer = '';
+                }
+
+                my @vars = split(",", $vars);
+                my @freqs = split(",", $freqs);
+                #print $pos+1, "\t", join("", map{$_->[0]}@{$ss->{vars}}[$pos..$pos+$len-1]), "\t", join(",",@vars),"\n";
+
+                $ss->{vars}[$pos] = [@vars];
+                $ss->{freqs}[$pos] = [@freqs];
+                my $cov = 0;
+                $cov+=$_ for @freqs;
+                $ss->{probs}[$pos] = [map{$_/$cov}@freqs];
+                $ss->{covs}[$pos] = $cov;
+
+                if ($len > 1) {# replace pacbio vars entirely by prestabilized sr vars
+                    foreach (($pos+1) .. ($pos+$len-1)) {
+                        $ss->{vars}[$_] = [''];
+                        $ss->{freqs}[$_] = [$cov];
+                        $ss->{probs}[$_] = [1];
+                        $ss->{covs}[$_] = $cov;
+                    }
+                    push @{$ss->{var_stabilize_ranges}}, [$pos, $len];
+                }elsif ($len < 1 ){
+                    die "cannot handle gap state in reference sequence\n";
+                }
+            }
+        }else {
+            $ss->stabilize_variants(
+                var_dist => 4
+            );
+        }
 
         print "\nPhasing ..\n";
         # polish
         $ss->phase_variants;
         print $ss->{haplotype},"\n";
-        
         $ss->haplotype_variants;
-        
+
         my $con = $ss->variant_consensus();
 
         print OUT $con;
-        #exit;
     }
 }
 close OUT;
@@ -212,6 +258,7 @@ sub init{
         \%opt, qw(
                      targets|t=s
                      queries|q=s
+                     variants|v=s
                      prefix=s
                      config=s{,}
                      version|V!
@@ -254,7 +301,7 @@ sub init{
 
     %opt = (%def, %cfg, %opt);
 
-    # required stuff  
+    # required stuff
     for (qw(prefix targets)) {
         if (ref $opt{$_} eq 'ARRAY') {
             pod2usage("required: --$_") unless @{$opt{$_}}
@@ -266,12 +313,12 @@ sub init{
     if ( ! defined($opt{queries}) || ! length($opt{queries})){
         $opt{queries} = $opt{targets}; # self polish
     }
-    
+
     # full path prefix support
     my $prefix_path;
     ($opt{prefix}, $opt{prefix_path}) = fileparse($opt{prefix});
     my $odir = getcwd;
-    
+
     if ($opt{prefix_path}){
         chdir($opt{prefix_path}) || $L->logdie("$!: $opt{prefix_path}");
     }
@@ -284,7 +331,7 @@ sub init{
     $L->debug('Verbose level set to DEBUG');
 
     $L->debug(Dumper(\%opt));
-    
+
     return %opt;
 }
 
@@ -325,7 +372,7 @@ sub Sam::Seq::fix_haplo_variants{
             push @v0_pos, $i;
         }
     }
-    
+
     return unless @v0_pos;
 
     # cigar
@@ -348,7 +395,7 @@ sub Sam::Seq::fix_haplo_variants{
     # realign
     my $aln1 = bwa_align($v1_seq, $p{orig_seq}, print=>1);
     my $aln2 = bwa_align($v2_seq, $p{orig_seq}, print=>0);
-    
+
     my @ori1 = $aln1->seq_states;
     my $v1_len = length($v1_seq->seq);
     if ( $aln1->pos > 1 ) {
@@ -359,7 +406,7 @@ sub Sam::Seq::fix_haplo_variants{
     }
 
     @ori1 = cigar_transpose(\@ori1, $v1_cig);
-    
+
     my @ori2 = $aln2->seq_states;
     if ( $aln2->pos > 1 ) {
         unshift @ori2, ('.') x ($aln2->pos - 1)
@@ -376,7 +423,7 @@ sub Sam::Seq::fix_haplo_variants{
 
     my @v1_tra = @{cigar2trace($v1_cig)};
     my @v2_tra = @{cigar2trace($v2_cig)};
-    
+
     # foreach (@v0_pos) {
     #     for (my $i=$_-5; $i<$_+26; $i++) {
     #         my @v = @{$v->[$i]};
@@ -387,12 +434,12 @@ sub Sam::Seq::fix_haplo_variants{
     #     print "\n";
     # }
     # exit;
-    
+
     foreach ( @v0_pos ) {
         my @v = @{$self->{vars}[$_]};
         my @f = @{$self->{freqs}[$_]};
         my @p = @{$self->{probs}[$_]};
-        
+
         my %v;
         @v{@v} = (1) x @v;
 
@@ -400,7 +447,7 @@ sub Sam::Seq::fix_haplo_variants{
         my $ori2 = $ori2[$_];
 
         print "$_ \t$v1_seq[$_] \t@v \t@f \t$ori1 $ori2 \t";
-       
+
         # DONE: long similar states => identical (fuzzy match):
         #  TTAAG->TTAAAG
 
@@ -412,7 +459,7 @@ sub Sam::Seq::fix_haplo_variants{
 
                 my @s1 = map{ similarity($ori1, $_) }@v;
                 my @i1 = sort { $s1[$b] <=> $s1[$a] }(0..$#v);
-  
+
                 if ( $ori1 eq $ori2 ) {
                     $self->{vars}[$_] = [@v[@i1]];
                     $self->{freqs}[$_] = [@f[@i1]];
@@ -425,12 +472,12 @@ sub Sam::Seq::fix_haplo_variants{
 
                 my @s2 = map{ similarity($ori2, $_) }@v;
                 my @i2 = sort { $s2[$b] <=> $s2[$a] }(0..$#v);
-                
+
                 my $m1 = $s1[$i1[0]];
                 my $m2 = $s2[$i2[0]];
 
                 #print " \t@s1[@i1]\t$m1\t@s2[@i2]\t$m2";
-                
+
                 if ( $m1 == $m2 ){
                     print " ~\t?\n";
                     push @ambg_pos, $_;
@@ -440,13 +487,13 @@ sub Sam::Seq::fix_haplo_variants{
                     $self->{freqs}[$_] = [@f[@i1]];
                     $self->{probs}[$_] = [@p[@i1]];
 
-                    push @hpl_probs, $self->{probs}[$_][0]; 
+                    push @hpl_probs, $self->{probs}[$_][0];
                 } else {
                     $self->{vars}[$_] = [@v[@i2]];
                     $self->{freqs}[$_] = [@f[@i2]];
                     $self->{probs}[$_] = [@p[@i1]];
-                    
-                    push @hpl_probs, $self->{probs}[$_][0]; 
+
+                    push @hpl_probs, $self->{probs}[$_][0];
                 }
                 print " ~\t$self->{vars}[$_][0]\n";
             }else {
@@ -470,11 +517,11 @@ sub Sam::Seq::fix_haplo_variants{
             next;
         } elsif ( exists $v{$ori1} ) { # v1 support (-)
             $self->{vars}[$_] = [$ori1];
-            push @hpl_probs, $p[0]; 
+            push @hpl_probs, $p[0];
             print "-\t$ori1\n";
         } elsif ( exists $v{$ori2} ) { # v2 support (-)
             $self->{vars}[$_] = [$ori2];
-            push @hpl_probs, $p[1]; 
+            push @hpl_probs, $p[1];
             print "-\t$ori2\n";
         } else {
             print "~\tuummm..\n";
@@ -510,7 +557,7 @@ sub bwa_align{
     my ($ref, $qry) = @_;
     my %p;
     %p = (%p, @_[2..$#_]) if @_ > 2;
-    
+
     open(FA, '>', $bwa_ref_tmp) or die $!;
     print FA $ref;#->string(width => 80);
     close FA;
@@ -540,9 +587,9 @@ sub bwa_align{
 
 sub v_seq_cigar{
     my ($seq) = @_;
-    
+
     my $k = -1;
-    my $cig = '';    
+    my $cig = '';
     my ($m, $d) = (0,0);
 
     for (my $i=0; $i<@$seq; $i++) {
@@ -560,7 +607,7 @@ sub v_seq_cigar{
                 $cig.= $m."M".$d."D";
                 $d = 0;
                 $m = 0;
-            } 
+            }
             $m++;
         }
     }
@@ -571,7 +618,7 @@ sub v_seq_cigar{
         $cig.= $m."M".$d."D";
         $d = 0;
         $m = 0;
-    } 
+    }
     $cig.=$m."M" if $m;
     $cig =~ s/\d+[ID]$//; # can't have terminal D/I in cigar!
 
@@ -608,7 +655,7 @@ sub cigar_transpose{
         chomp($seq);
         $seq = [split('', $seq)]
     }
-    
+
     my @s = ();
     my $pos = 0;
     if ($cigar =~ /^(\d+)S/) {
@@ -628,7 +675,7 @@ sub cigar_transpose{
                         cigar => $cigar,
                         seq => $seq,
                     });
-                        
+
                 }
                 my $ins = join("", @$seq[$pos..$pos+$1-1]);
                 $s[-1].= $ins;
