@@ -328,10 +328,19 @@ if(defined $opt_sample){
             $opt_prefix = 'pr-Ec' unless $opt_prefix;
         }
     }else{
-        $opt_lr_file = ["$RealBin/../sample/F.antasticus_long_error.fq"]; #
-	$opt_sr_file = ["$RealBin/../sample/F.antasticus_short.fq"]; #
-	$opt_sr_qv_offset = 33;
-        $opt_prefix = 'pr-Fa' unless $opt_prefix;
+        if($opt_sample =~ /dazz/i){
+            $opt_lr_file = ["$RealBin/../sample/F.antasticus_long_error.fq"]; #
+            $opt_sr_file = ["$RealBin/../sample/F.antasticus_short.fq"]; #
+            $opt_utg_file = ["$RealBin/../sample/F.antasticus_utg.fa"]; #
+            $opt_sr_qv_offset = 33;
+            $opt_prefix = 'pr-Fa-utg' unless $opt_prefix;
+            $opt_mode = 'sr+dazz-utg-noccs';
+        }else {
+            $opt_lr_file = ["$RealBin/../sample/F.antasticus_long_error.fq"]; #
+            $opt_sr_file = ["$RealBin/../sample/F.antasticus_short.fq"]; #
+            $opt_sr_qv_offset = 33;
+            $opt_prefix = 'pr-Fa' unless $opt_prefix;
+        }
     }
 }
 
