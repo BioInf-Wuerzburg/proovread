@@ -1189,6 +1189,14 @@ sub run_dazzler{
     qx($cmd);
     $V->exit("fasta2DAM failed: $?\n", do { local $/; local @ARGV = ($log) ; <> }) if $?;
 
+    # fix short sequence error in daligner - yuragal #16
+    $VS->verbose("Filter DAMs");
+    $cmd = cfg('dazz-db-path')."DBsplit -x100 $qdb";
+    $VB->hline();
+    $VB->verbose($cmd);
+    $VB->hline();
+    qx($cmd);
+    $V->exit("DBsplit failed: $?\n", do { local $/; local @ARGV = ($log) ; <> }) if $?;
 
     $VS->verbose("Creating read database");
     $cmd = cfg('dazz-db-path')."fasta2DAM $rdb.dam $rfa 2>>$log";
@@ -1214,6 +1222,15 @@ sub run_dazzler{
     $VB->hline();
     qx($cmd);
     $V->exit("daligner failed: $?\n", do { local $/; local @ARGV = ($log) ; <> }) if $?;
+
+    # crutial fix for merging las files - yuragal #16
+    $VS->verbose("Combine .las files");
+    $cmd = cfg('dazz-db-path')."LAcat $opt_prefix.$opt_prefix-utg > $opt_prefix.$opt_prefix-utg.las";
+    $VB->hline();
+    $VB->verbose($cmd);
+    $VB->hline();
+    qx($cmd);
+    $V->exit("LAcat failed: $?\n", do { local $/; local @ARGV = ($log) ; <> }) if $?;
 
     $VS->verbose("Converting to/sorting BAM");
     $cmd = "($RealPerl/dazz2sam"
