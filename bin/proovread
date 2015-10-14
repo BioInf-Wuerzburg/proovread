@@ -1234,7 +1234,7 @@ sub run_dazzler{
 
     $VS->verbose("Converting to/sorting BAM");
     $cmd = "($RealPerl/dazz2sam"
-        . (cfg('dazz-db-path') ? "--dazz-db-path ".cfg('dazz-db-path') : "")
+        . (cfg('dazz-db-path') ? " --dazz-db-path ".cfg('dazz-db-path') : "")
         . (cfg('daligner-path') ? " --daligner-path ".cfg('daligner-path') : "")
         ." --add-scores"
         ." --las $opt_prefix.$opt_prefix-utg.las"
