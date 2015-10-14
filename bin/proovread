@@ -42,7 +42,7 @@ use Time::HiRes qw(usleep);
 use Data::Dumper;
 $Data::Dumper::Sortkeys = 1;
 
-our $VERSION = '2.13.9';
+our $VERSION = '2.13.10';
 
 my $RealLib = "$RealBin/../lib/";
 my $RealPerl = "perl -I${RealLib} $RealBin";
@@ -447,6 +447,8 @@ if(@$opt_sr_file){
 
 		# FASTQ
 		if($fp = Fastq::Parser->new(file => $_)->check_format){
+			$V->exit("Cannot handle gzipped files\n") if $fp->is_fh('GZIP');
+
 			# format
 			$V->verbose("Detected FASTQ format");
 
@@ -1383,6 +1385,7 @@ sub read_long{
 		$lrpr = Fasta::Parser->new(file => $_)->check_format();
 		$lrpr = Fastq::Parser->new(file => $_)->check_format() unless $lrpr;
 		$lrpr || $VS->exit("Unknown format in '--long-read' file `$_`");
+		$lrpr eq 'Fastq::Parser' && $lrpr->is_fh('GZIP') && $VS->exit("Cannot handle gzipped files");
 
 		my $lr_count = $lrpr->guess_seq_count();
 		push @lr_count, $lr_count;
