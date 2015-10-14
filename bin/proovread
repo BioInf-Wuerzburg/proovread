@@ -580,9 +580,17 @@ if($opt_utg_file && @$opt_utg_file){
 			$V->verbose(sprintf("Estimating approximate number of fragments: %s", Verbose->Humanize($or_count)));
 
                         # guess length of unitig IDs
-                        for ( $fp->sample_seqs ){ # samtools has limit of 256 for ids
-                            $V->exit("Unitig IDs too long (>256)\n>".($_->id)."\n") if length($_->id) > 256;
+                        # for ( $fp->sample_seqs ){ # samtools has limit of 256 for ids
+                        #     $V->exit("Unitig IDs too long (>256)\n>".($_->id)."\n") if length($_->id) > 256;
+                        # }
+
+                        # take the time and do the real thing
+                        open(UTG, "$_") or $V->exit("$!");
+                        while (<UTG>) {
+                            $V->exit("Unitig ID too long (>256)\n".$_) if /^>\S{256}/;
                         }
+                        close UTG;
+
 
 		}else{
 			$V->exit("Alternative read file needs to be in FASTA format. You can use `proovread/bin/SeqFilter --fasta --line-width 80 --out utg.fasta utg.fq` to convert FASTQ");
