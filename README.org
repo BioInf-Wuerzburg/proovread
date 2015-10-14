@@ -34,7 +34,8 @@ with a standard bwa built will fail.
 ** Dependencies
 
 - Perl 5.10 or later
-- Log::Log4perl
+  - Log::Log4perl
+  - File::Which (see #17)
 - [[ftp://ftp.ncbi.nlm.nih.gov/blast/executables/blast%2B/LATEST/][NCBI Blast-2.2.24+]] or later
 - [[http://sourceforge.net/projects/samtools/files/samtools/][samtools-1.1]] or later
 
