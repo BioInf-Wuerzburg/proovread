@@ -555,6 +555,8 @@ if($opt_utg_file && @$opt_utg_file){
 
 		$V->verbose("\n".basename($_));
 
+                /\.fasta$/ || $VS->exit("Unitig file needs to be FASTA and have '.fasta' suffix\n");
+
 		# test if short reads are FASTQ/FASTA
 		my $fp;
 		my $or_length;
