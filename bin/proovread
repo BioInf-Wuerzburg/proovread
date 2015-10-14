@@ -1227,7 +1227,7 @@ sub run_dazzler{
 
     # crutial fix for merging las files - yuragal #16
     $VS->verbose("Combine .las files");
-    $cmd = cfg('dazz-db-path')."LAcat $opt_prefix.$opt_prefix-utg > $opt_prefix.$opt_prefix-utg.las";
+    $cmd = cfg('daligner-path')."LAcat $opt_prefix.$opt_prefix-utg > $opt_prefix.$opt_prefix-utg.las";
     $VB->hline();
     $VB->verbose($cmd);
     $VB->hline();
