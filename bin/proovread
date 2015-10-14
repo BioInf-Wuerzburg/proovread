@@ -564,25 +564,6 @@ if($opt_utg_file && @$opt_utg_file){
 		my $or_qv_offset;
 		my $or_count;
 
-		# # FASTQ
-		# if($fp = Fastq::Parser->new(file => $_)->check_format){
-		# 	# format
-		# 	$V->verbose("Detected FASTQ format");
-		#
-		# 	# length
-		# 	($or_length, $or_length_dev) = $fp->guess_seq_length;
-		# 	$V->verbose(sprintf("Estimated short read length: %d +-%d", $or_length, $or_length_dev ));
-                #
-                #         # dont really care about length
-		# 	# dont care about offset
-		#
-		# 	# count
-		# 	$or_count = $fp->guess_seq_count();
-		# 	$V->verbose(sprintf("Estimating approximate number of alternative reads: %s", Verbose->Humanize($or_count)));
-	        #
-		# # FASTA
-		# }els
-
                 if($fp = Fasta::Parser->new(file=> $_)->check_format){
 			# format
 			$V->verbose("Detected FASTA format");
@@ -600,7 +581,7 @@ if($opt_utg_file && @$opt_utg_file){
 
 
 		}else{
-			$V->exit("Alternative read file needs to be in FASTA format. You can use `proovread/bin/SeqFilter --fasta --line-width 80 --out utg.fa utg.fq` to convert FASTQ");
+			$V->exit("Alternative read file needs to be in FASTA format. You can use `proovread/bin/SeqFilter --fasta --line-width 80 --out utg.fasta utg.fq` to convert FASTQ");
 		}
 
 		# push
