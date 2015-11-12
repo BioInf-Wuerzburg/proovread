@@ -547,17 +547,16 @@ my $max_or_dev;
 my $first_chunk = 1;
 
 if($opt_utg_file && @$opt_utg_file){
-
-    	$VS->nline;
-  	$VS->verbose("Checking alternative read files");
+	$VS->nline;
+	$VS->verbose("Checking alternative read files");
 
 	# short read files
-	foreach(@$opt_utg_file){
-		-e $_ || $VS->exit("Cannot find alternative read file `$_`");
+	foreach my $utg_file (@$opt_utg_file){
+		-e $utg_file || $VS->exit("Cannot find alternative read file `$utg_file`");
 
-		$V->verbose("\n".basename($_));
+		$V->verbose("\n".basename($utg_file));
 
-                /\.fasta$/ || $VS->exit("Unitig file needs to be FASTA and have '.fasta' suffix\n");
+                $utg_file =~ /\.fasta$/ || $VS->exit("Unitig file needs to be FASTA and have '.fasta' suffix\n");
 
 		# test if short reads are FASTQ/FASTA
 		my $fp;
@@ -566,7 +565,7 @@ if($opt_utg_file && @$opt_utg_file){
 		my $or_qv_offset;
 		my $or_count;
 
-                if($fp = Fasta::Parser->new(file=> $_)->check_format){
+                if($fp = Fasta::Parser->new(file=> $utg_file)->check_format){
 			# format
 			$V->verbose("Detected FASTA format");
 
@@ -587,12 +586,11 @@ if($opt_utg_file && @$opt_utg_file){
                         # }
 
                         # take the time and do the real thing
-                        open(UTG, "$_") or $V->exit("$!");
+                        open(UTG, "$utg_file") or $V->exit("$!");
                         while (<UTG>) {
-                            $V->exit("Unitig ID too long (>256)\n".$_) if /^>\S{256}/;
+                            $V->exit("Unitig ID too long (>256)\n".$utg_file) if /^>\S{256}/;
                         }
                         close UTG;
-
 
 		}else{
 			$V->exit("Alternative read file needs to be in FASTA format. You can use `proovread/bin/SeqFilter --fasta --line-width 80 --out utg.fasta utg.fq` to convert FASTQ");
