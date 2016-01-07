@@ -42,7 +42,7 @@ use Time::HiRes qw(usleep);
 use Data::Dumper;
 $Data::Dumper::Sortkeys = 1;
 
-our $VERSION = '2.13.10';
+our $VERSION = '2.13.11';
 
 my $RealLib = "$RealBin/../lib/";
 my $RealPerl = "perl -I${RealLib} $RealBin";
@@ -2107,5 +2107,6 @@ sub cov2seqchunker{
 =over
 
 =item * Thomas Hackl, thomas.hackl@uni-wuerzburg.de
+=item * Frank Foerster, frank.foerster@uni-wuerzburg.de
 
 =back
