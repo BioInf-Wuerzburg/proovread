@@ -33,7 +33,7 @@ with a standard bwa built will fail.
 
 ** Dependencies
 
-- Perl 5.10 or later
+- Perl 5.10.1 or later
   - Log::Log4perl
   - File::Which (see #17)
 - [[ftp://ftp.ncbi.nlm.nih.gov/blast/executables/blast%2B/LATEST/][NCBI Blast-2.2.24+]] or later
@@ -313,13 +313,13 @@ If you have any questions, encounter problems or potential bugs, don't hesitate
 to contact us. Either report [[https://github.com/BioInf-Wuerzburg/proovread/issues][issues]] on github or write an email to:
 
 - Thomas Hackl - thomas.hackl@uni.wuerzburg.de
-- Frank Foerster - frank.foerster@biozentrum.uni-wuerzburg.de
+- Frank Foerster - frank.foerster@uni-wuerzburg.de
 
 
 
 #+TITLE: proovread manual
-#+AUTHOR: Thomas Hackl
-#+EMAIL: thomas.hackl@uni-wuerzburg.de
+#+AUTHOR: Thomas Hackl, Frank Förster
+#+EMAIL: thomas.hackl@uni-wuerzburg.de, frank.foerster@uni-wuerzburg.de
 #+LANGUAGE: en
 #+OPTIONS: ^:nil date:nil H:2 todo:nil
 #+LaTeX_CLASS: scrartcl
