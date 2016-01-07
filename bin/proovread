@@ -3,7 +3,7 @@
 use warnings;
 use strict;
 
-use  5.010_000;
+use  5.010_001;
 
 use Getopt::Long;
 use Pod::Usage;
@@ -18,7 +18,7 @@ use File::Path qw(make_path remove_tree);
 use File::Copy;
 use File::Spec;
 use File::Which;
-use version;
+use version 0.77;
 
 use Verbose;
 use Verbose::ProgressBar;
