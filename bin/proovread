@@ -1336,7 +1336,7 @@ sub create_sorted_bam{
     $VS->verbose("Sorting BAM `$opt_bam_out.bam`");
 
     # restrict threads to prevent mem overflow
-    my $sam_sort_cmd = cfg('samtools-path')."samtools sort -m 2G -@ ".($opt_threads > 2 ? int(2 + ($opt_threads-2)/2) : $opt_threads)." $opt_bam $opt_bam_out";
+    my $sam_sort_cmd = cfg('samtools-path')."samtools sort -m 2G -@ ".($opt_threads > 2 ? int(2 + ($opt_threads-2)/2) : $opt_threads)." -o ".$opt_bam_out.".bam $opt_bam";
     $VB->hline();
     $VB->verbose($sam_sort_cmd);
     $VB->hline();
