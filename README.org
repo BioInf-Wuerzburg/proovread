@@ -1,9 +1,10 @@
 #+LATEX: \pagebreak
 
 ** Build status
-- Last build: [[https://api.travis-ci.org/BioInf-Wuerzburg/proovread.svg]]
-- Master branch: [[https://api.travis-ci.org/BioInf-Wuerzburg/proovread.svg?branch=master]]
-- Develop branch: [[https://api.travis-ci.org/BioInf-Wuerzburg/proovread.svg?branch=develop]]
+| Last build     | [[https://api.travis-ci.org/BioInf-Wuerzburg/proovread.svg]]                |
+| Master branch  | [[https://api.travis-ci.org/BioInf-Wuerzburg/proovread.svg?branch=master]]  |
+| Develop branch | [[https://api.travis-ci.org/BioInf-Wuerzburg/proovread.svg?branch=develop]] |
+
 ** What's new
 *** proovread-2.13.12
 - Added support for [[https://travis-ci.org/BioInf-Wuerzburg/proovread][Travis-CI]] builds
