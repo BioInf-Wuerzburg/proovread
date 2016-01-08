@@ -5,6 +5,8 @@
 | Master branch  | [[https://api.travis-ci.org/BioInf-Wuerzburg/proovread.svg?branch=master]]  |
 | Develop branch | [[https://api.travis-ci.org/BioInf-Wuerzburg/proovread.svg?branch=develop]] |
 
+The build tests proovread under different Perl versions (5.10.1, 5.12,
+5.14, 5.18, 5.20, 5.22) and samtools (1.2, 1.3).
 ** What's new
 *** proovread-2.13.12
 - Added support for [[https://travis-ci.org/BioInf-Wuerzburg/proovread][Travis-CI]] builds
@@ -41,8 +43,8 @@ with a standard bwa built will fail.
 ** Dependencies
 
 - Perl 5.10.1 or later
-  - Log::Log4perl
-  - File::Which (see #17)
+  - =Log::Log4perl=
+  - =File::Which= (see #17)
 - [[ftp://ftp.ncbi.nlm.nih.gov/blast/executables/blast%2B/LATEST/][NCBI Blast-2.2.24+]] or later
 - [[http://sourceforge.net/projects/samtools/files/samtools/][samtools-1.1]] or later
 
