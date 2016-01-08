@@ -1,6 +1,12 @@
 #+LATEX: \pagebreak
 
+** Build status
+- Last build: [[https://api.travis-ci.org/BioInf-Wuerzburg/proovread.svg]]
+- Master branch: https://api.travis-ci.org/BioInf-Wuerzburg/proovread.svg?branch=master
+- Develop branch: https://api.travis-ci.org/BioInf-Wuerzburg/proovread.svg?branch=develop
 ** What's new
+*** proovread-2.13.12
+- Added support for [[https://travis-ci.org/BioInf-Wuerzburg/proovread][Travis-CI]] builds
 *** proovread-2.12
 - revisited *unitig* mode with improved filter for repeat regions
 - *dazzling proovread* - experimental support for [[https://dazzlerblog.wordpress.com/2014/12/31/damapper-and-other-dazzler-upgrades/][DALIGNER]] as unitig mapper (faster/more sensitive than blasr)
