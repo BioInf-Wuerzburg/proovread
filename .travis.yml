@@ -6,6 +6,9 @@ perl:
   - "5.18.3-thr"
   - "5.20.1-thr"
   - "5.22.0-thr"
+cache:
+  directories:
+    - $HOME/samtools-$SAMTOOLSVERSION
 sudo:
   false
 addons:
