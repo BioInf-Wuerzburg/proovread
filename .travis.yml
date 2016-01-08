@@ -27,4 +27,4 @@ install:
     - tar xjf samtools-"$SAMTOOLSVERSION".tar.bz2
     - cd samtools-"$SAMTOOLSVERSION" && make && export PATH=$PWD:"$PATH" && ls && pwd && cd -
 script: 
-    - proovread --sample
+    - proovread --sample --threads 1
