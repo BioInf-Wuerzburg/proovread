@@ -32,7 +32,7 @@ $Data::Dumper::Sortkeys = 1;
 
 siamaera - detect and trim self-similar chimaeras.
 
-=head1q DESCRIPTION
+=head1 DESCRIPTION
 
 An artefact of the PacBio library constructions seems to the
 generation of reverse-complement self similar chimaeras. Read parts
