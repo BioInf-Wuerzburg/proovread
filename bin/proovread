@@ -45,7 +45,7 @@ $Data::Dumper::Sortkeys = 1;
 our $VERSION = '2.13.11';
 
 my $RealLib = "$RealBin/../lib/";
-my $RealPerl = "perl -I${RealLib} $RealBin";
+my $RealPerl = "$^X -I${RealLib} $RealBin";
 
 =head1 NAME
 
@@ -1624,7 +1624,7 @@ sub correct_sr_mt{
 	my $bs = "Batch %d/".@$lr_chunk_offsets;
 	while(<$xgr>){
 		chomp();
-		if ($_ =~ /^perl /){
+		if ($_ =~ /^$RealPerl /){
 			$VS->verbose(sprintf($bs, ++$bc));
 			$VB->verbose($_);
 			$VB->hline()
