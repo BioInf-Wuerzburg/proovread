@@ -1,6 +1,15 @@
 #+LATEX: \pagebreak
 
+** Build status
+| Last build     | [[https://api.travis-ci.org/BioInf-Wuerzburg/proovread.svg]]                |
+| Master branch  | [[https://api.travis-ci.org/BioInf-Wuerzburg/proovread.svg?branch=master]]  |
+| Develop branch | [[https://api.travis-ci.org/BioInf-Wuerzburg/proovread.svg?branch=develop]] |
+
+The build tests proovread under different Perl versions (5.10.1, 5.12,
+5.14, 5.18, 5.20, 5.22) and samtools (1.2, 1.3).
 ** What's new
+*** proovread-2.13.12
+- Added support for [[https://travis-ci.org/BioInf-Wuerzburg/proovread][Travis-CI]] builds
 *** proovread-2.12
 - revisited *unitig* mode with improved filter for repeat regions
 - *dazzling proovread* - experimental support for [[https://dazzlerblog.wordpress.com/2014/12/31/damapper-and-other-dazzler-upgrades/][DALIGNER]] as unitig mapper (faster/more sensitive than blasr)
@@ -34,8 +43,8 @@ with a standard bwa built will fail.
 ** Dependencies
 
 - Perl 5.10.1 or later
-  - Log::Log4perl
-  - File::Which (see #17)
+  - =Log::Log4perl=
+  - =File::Which= (see #17)
 - [[ftp://ftp.ncbi.nlm.nih.gov/blast/executables/blast%2B/LATEST/][NCBI Blast-2.2.24+]] or later
 - [[http://sourceforge.net/projects/samtools/files/samtools/][samtools-1.1]] or later
 

@@ -1,0 +1,33 @@
+language: perl
+perl:
+  - "5.10.1-thr"
+  - "5.12.0-thr"
+  - "5.14.4-thr"
+  - "5.18.3-thr"
+  - "5.20.1-thr"
+  - "5.22.0-thr"
+cache:
+  directories:
+    - $HOME/samtools-$SAMTOOLSVERSION
+sudo:
+  false
+addons:
+  apt:
+    packages:
+    - ncbi-blast+
+env:
+    - SAMTOOLSVERSION="1.3"
+    - SAMTOOLSVERSION="1.2"
+before_install:
+  - git clone git://github.com/travis-perl/helpers ~/travis-perl-helpers
+  - source ~/travis-perl-helpers/init
+  - build-perl
+  - perl -V
+  - cpanm --quiet --notest File::Which Log::Log4perl
+install:
+    - cd util/bwa && make && cd - && export PATH=$PWD/bin:"$PATH"
+    - cd $HOME && wget 'https://github.com/samtools/samtools/releases/download/'"$SAMTOOLSVERSION"'/samtools-'"$SAMTOOLSVERSION"'.tar.bz2'
+    - tar xjf samtools-"$SAMTOOLSVERSION".tar.bz2
+    - cd samtools-"$SAMTOOLSVERSION" && make && export PATH=$PWD:"$PATH" && ls && pwd && cd -
+script: 
+    - proovread --sample --threads 1

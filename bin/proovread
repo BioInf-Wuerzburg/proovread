@@ -18,7 +18,6 @@ use File::Path qw(make_path remove_tree);
 use File::Copy;
 use File::Spec;
 use File::Which;
-use version 0.77;
 
 use Verbose;
 use Verbose::ProgressBar;
@@ -42,7 +41,7 @@ use Time::HiRes qw(usleep);
 use Data::Dumper;
 $Data::Dumper::Sortkeys = 1;
 
-our $VERSION = '2.13.11';
+use version 0.77; our $VERSION = qv("2.13.12");
 
 my $RealLib = "$RealBin/../lib/";
 my $RealPerl = "perl -I${RealLib} $RealBin";
@@ -89,7 +88,7 @@ my $VB = Verbose->new(
 );
 
 
-$VS->verbose("Running proovread-$VERSION");
+$VS->verbose(sprintf("Running proovread-%vd under Perl %vd", $VERSION, $^V));
 
 ##------------------------------------------------------------------------##
 ## Config
