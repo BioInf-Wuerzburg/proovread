@@ -12,8 +12,8 @@ RUN wget -O /tmp/samtools.tar.bz2 https://github.com/samtools/samtools/releases/
 RUN cd /tmp/ && tar xjf samtools.tar.bz2 && cd samtools-1.2 && make && make install
 
 # getting the last proovread releas
-RUN yum install --assumeyes git cpan which
-RUN perl -MCPAN -e 'my $c = "CPAN::HandleConfig"; $c->load(doit => 1, autoconfig => 1); $c->edit(prerequisites_policy => "follow"); $c->edit(build_requires_install_policy => "yes"); $c->commit' && cpan Log::Log4perl && cpan File::Which && cpan Time::HiRes
+RUN yum install --assumeyes git cpan which perl-Time-HiRes perl-File-Which
+RUN perl -MCPAN -e 'my $c = "CPAN::HandleConfig"; $c->load(doit => 1, autoconfig => 1); $c->edit(prerequisites_policy => "follow"); $c->edit(build_requires_install_policy => "yes"); $c->commit' && cpan Log::Log4perl
 RUN cd ~ && git clone --recursive https://github.com/BioInf-Wuerzburg/proovread && cd proovread && git checkout proovread-2.12 && cd util/bwa && make
 
 
