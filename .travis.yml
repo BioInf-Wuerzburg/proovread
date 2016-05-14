@@ -1,3 +1,7 @@
+os:
+  - linux
+  - osx
+
 language: perl
 perl:
   - "5.10.1-thr"
