@@ -31,3 +31,6 @@ install:
     - cd samtools-"$SAMTOOLSVERSION" && make && export PATH=$PWD:"$PATH" && ls && pwd && cd -
 script: 
     - proovread --sample --threads 1
+notifications:
+    slack:
+        secure: Mu7v0562KyuYMc76eg+9UWtqdF25fH9+ZKBzDD19h41YkjzxCmdPvF+jyD0SJGTsMZh0lKXSt8Ftqb9EWk3JDqzrkNOsDQunNuFwOgT/kF9i0s69mYl7KYR8vUUFHZirJ2aEXrWkeM1kF/tcopmMp/YytALKDDSoW1/6jHRj/go=
