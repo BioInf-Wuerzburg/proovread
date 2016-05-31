@@ -41,7 +41,7 @@ use Time::HiRes qw(usleep);
 use Data::Dumper;
 $Data::Dumper::Sortkeys = 1;
 
-use version 0.77; our $VERSION = qv("2.13.12");
+use version 0.77; our $VERSION = qv("2.13.13");
 
 my $RealLib = "$RealBin/../lib/";
 my $RealPerl = "perl -I${RealLib} $RealBin";
@@ -2069,8 +2069,8 @@ sub check_binary{
 
        ($v) = $vs =~ /([0-9\.]+)/m;
 
-       if(version->parse($v) < version->parse($ver->[1])){
-           $VS->exit("Version $v of '$bin' < $v");
+       if(version->declare($v) < version->declare($ver->[1])){
+           $VS->exit("Version $v of '$bin' < $ver->[1]");
        }
 
     }
