@@ -8,14 +8,14 @@
 The build tests proovread under different Perl versions (5.10.1, 5.12,
 5.14, 5.18, 5.20, 5.22) and samtools (1.2, 1.3).
 ** What's new
-*** proovread-2.13.13
+***** proovread-2.13.13
 - Usage of SeqChunker v0.4, therefore support of MacOSX
-*** proovread-2.13.12
+***** proovread-2.13.12
 - Added support for [[https://travis-ci.org/BioInf-Wuerzburg/proovread][Travis-CI]] builds
-*** proovread-2.12
+***** proovread-2.12
 - revisited *unitig* mode with improved filter for repeat regions
 - *dazzling proovread* - experimental support for [[https://dazzlerblog.wordpress.com/2014/12/31/damapper-and-other-dazzler-upgrades/][DALIGNER]] as unitig mapper (faster/more sensitive than blasr)
-*** proovread-2.00
+***** proovread-2.00
 - much faster and more sensitive due to *bwa mem* as default mapper
 - increased speed and contiguity by using *unitigs* in correction
 - optimized for HiSeq & *MiSeq* reads
@@ -34,7 +34,7 @@ The build tests proovread under different Perl versions (5.10.1, 5.12,
   cd proovread/
   git pull
   git submodule update --recursive
-  cd /util/bwa
+  cd util/bwa
   make clean  # important for changes to bwa source code taking effect
   make
 #+END_EXAMPLE
@@ -46,7 +46,7 @@ with a standard bwa built will fail.
 
 - Perl 5.10.1 or later
   - =Log::Log4perl=
-  - =File::Which= (see #17)
+  - =File::Which= (see [[https://github.com/BioInf-Wuerzburg/proovread/issues/17][#17]])
 - [[ftp://ftp.ncbi.nlm.nih.gov/blast/executables/blast%2B/LATEST/][NCBI Blast-2.2.24+]] or later
 - [[http://sourceforge.net/projects/samtools/files/samtools/][samtools-1.1]] or later
 
@@ -61,44 +61,33 @@ Test your installation by running proovread on the included sample data set.
   proovread --sample --pre pr-sample
 #+END_EXAMPLE
 
-*Don't run proovread on entire SMRT cells directly*, it will only blast your
-memory and take forever. Split your data in handy chunks of a few Mbp first:
+Split long read data into chunks. See [[#getting-chunk-sizes-right][Getting chunk sizes right]] for details,
+recommendations have changed a bit for recent versions.
 
 #+BEGIN_EXAMPLE
-  # located in /path/to/proovread/bin
+  # small genome (10Mbp) or small memory machine or short runtime limit
   SeqChunker -s 20M -o pb-%03d.fq pb-subreads.fq
+
+  # large genome (>500Mbp) and >8 GB RAM, no runtime limit
+  # either go for one instance of proovread per SMRT cell or
+  SeqChunker -s 1G -o pb-%03d.fq pb-subreads.fq
 #+END_EXAMPLE
 
-Run proovread on one chunk first.
+Run proovread on one chunk first. See [[#log-and-statistics][Log and statistics]] for some notes on how to
+interpret logging information.
 
 #+BEGIN_EXAMPLE
   proovread -l pb-001.fq -s reads.fq [-u unitigs.fa] --pre pb-001
 #+END_EXAMPLE
 
-If things go smoothly, submit the rest. See [[#log-and-statistics][Log and statistics]] for some notes on how to
-interpret logging information.
-
-** Crunching numbers
-
-Just to give you a hands-on idea of what to expect from correction. Here are some stats of the latest correction
-I ran. It's from one PacBio cell of a 50Mb heterozygous eukaryote genome (I will add some more numbers on other
-data sets and correction tools soon) 
-
-|               |       raw   |   proovread |     lordec |
-|---------------+-------------+-------------+------------|
-| Sequences     |      56,877 |      55,493 |     53,676 |
-| Total (bp)    | 315,511,633 | 236,687,413 | 99,379,617 |
-| Longest (bp)  |      27,874 |      24,682 |     13,917 |
-| Shortest (bp) |       1,000 |       1,000 |      1,000 |
-| N50 (bp)      |       7,592 |       6,236 |      1,877 |
-| N90 (bp)      |       2,887 |       1,934 |      1,141 |
-
+If things went smoothly, submit the rest.
 
 ** Input
 *** long-reads
-Primarily proovread has been designed to correct /PacBio subreads/. You get
-these reads either from PacBio's SMRT-Portal or by using =dextract= from Gene
-Myers PacBio assembler [[http://dazzlerblog.wordpress.com/2014/03/22/the-dextractor-module-save-disk-space-for-your-pacbio-projects/][DAZZLER]], which I would recommend.
+Primarily proovread has been designed to correct /PacBio subreads/ (see for
+details on [[http://files.pacb.com/software/smrtanalysis/2.2.0/doc/smrtportal/help/!SSL!/Webhelp/Portal_PacBio_Glossary.htm][PacBio terminology]]). You get these reads either from PacBio's
+SMRT-Portal or by using =dextract= from Gene Myers PacBio assembler [[http://dazzlerblog.wordpress.com/2014/03/22/the-dextractor-module-save-disk-space-for-your-pacbio-projects/][DAZZLER]],
+which I would recommend.
 
 In general, reads can be provided in FASTQ or FASTA format. Quality information
 is used, but only has minor advantages. More valuable are subread information
@@ -131,22 +120,24 @@ Internally, proovread will sample subsets for different iterations, by default
 see =sr-coverage= in proovread's config ([[#advanced-configuration][Advanced Configuration]]).
 
 *** unitigs
-In addition to short reads, [[http://wgs-assembler.sourceforge.net/wiki/index.php/Celera_Assembler_Terminology][unitigs]] can/should be used for correction in
-particular for large data sets (eukaryotes). Unitigs are high-confidence
-assembly fragments produced by for example ALLPATHS, Meraculous2 or the Celera
-Assembler. In contrast to contigs, unitigs don't extend past any conflict in the
-underlying short read data, making them highly reliable.
+In addition to short reads, [[http://wgs-assembler.sourceforge.net/wiki/index.php/Celera_Assembler_Terminology][unitigs]] can be used for correction in particular for
+large data sets (eukaryotes). Unitigs are high-confidence assembly fragments
+produced by for example ALLPATHS, Meraculous2 or the Celera Assembler. In
+contrast to contigs, unitigs don't extend past any conflict in the underlying
+short read data, making them highly reliable. 
 
-There are two huge advantages of using pre-computed unitigs: 
-1) Contiguity: unitigs are longer then corresponding short reads, which makes
-   them easier to align and give better chances to also correct difficult
-   regions.
-2) Speed: During unitig computation, all redundancy is removed from the data,
-   creating a minimal set which can be aligned much faster.
+Unitigs need to be used in combination with short read data for proovread to
+work properly. 
 
-However, unitigs only cover regions without conflicts in short read data
-space. To correct PacBio reads in full length these gaps need to be corrected
-with primary short read data.
+Unitigs can improve contiguity - they usually are longer than short reads and,
+thus, easier to align also in difficult regions - and decrease runtime - unitig
+computation removes most of the redundancy of the reads set. However, the
+effects of unitigs on accuracy and performance of proovread strongly varies
+between data sets. In particular on more complex data sets, i.e. large
+eukaryotic genomes with repeats, heterozygosity etc. use of unitigs can have a
+negative effect and reduce correction performance / quality. Unitigs, therefore,
+should be *used with caution* and the obtained results should be compared to
+runs without unitigs.
 
 **** dazzling proovread - dazz2sam
 Currently, support for DAZZLER/DALIGNER is considered experimental. To use
@@ -235,24 +226,74 @@ the algorithms core parameters. A custom configuration template can be generated
 with =--create-cfg=. Instructions on format etc. can be found inside the
 template file.
 
-** Hardware and Parallelization
-proovread has been designed with low memory node cluster architectures in
-mind. Peek memory is mainly controlled by the amount of long reads
-provided. With chunks of less than 20 Mbp it easily runs on a 8 GB RAM machine.
+** Algorithm and Implementation
+Algorithm and Implementation are described in detail in the [[http://dx.doi.org/10.1093/bioinformatics/btu392][proovread
+publication]]. An overview is given in on the [[https://github.com/BioInf-Wuerzburg/proovread/blob/master/media/proovread-poster.pdf][proovread mechanism poster]].
 
-In theory, proovread can be simply parallelized by increasing
-=--threads=. However, there are single thread steps and other bottlenecks, which
-at some point render it more efficient, to run e.g. 4 instances at 8 threads in
-parallel to make full use of a 32 CPU machine.
+*** bwa-proovread
 
-** FAQ / General Remarks
-**** Why do proovread results from two identical runs differ / Is proovread deterministic?
+
+proovread does local score comparison, rather than using a single hard
+cut-off. bwa-proovread is modified in the same fashion. =proovread.[ch]= extend
+bwa with an implementation of proovread's binning algorithm. Reporting of
+alignments is determined by score-comparison within bins. That way repeat
+alignments are filtered early on, increasing performance and largely reducing
+disk space requirements.
+
+** FAQs and general Remarks
+*** Getting chunk sizes right ([[https://github.com/BioInf-Wuerzburg/proovread/issues/48][#48]])
+Splitting your long read data into chunks of appropriate size is an important
+step to match your particular data set with proovread's correction procedure as
+well as with the computational hardware and infrastructure you are using.
+
+Splitting can be carried out with proovread's =SeqChunker= program. It accepts
+chunk sizes in bytes, megabytes, gigabytes, ... (see =SeqChunker --help= for
+more options). One byte equals one character. Fastq files use one character per
+base (bp) plus on character for the quality of the base, and a few more
+characters are required for the header of each read. Hence, for fastq 2 bytes
+roughly transfer to 1 bp.
+
+Rule of thumb for creating and running chunks: *Max size and threads for best
+performance, but with respect to the following limits:*
+
+- Genome size: chunks should not contain more than 1X coverage of the genome,
+  i.e. 10 Mbp genome: 20M chunk, 2GB genome: 4G chunks, ...
+- RAM of machines: chunk size directly correlates with memory consumption. Try 8GB: <400M, 16GB: <800, ...
+- Runtime limit: chunk size directly correlates with runtime. If you submit jobs
+  to a scheduling system with per job runtime limits, decrease chunk size to
+  match those limits if necessary. 
+
+Note, it always make sense, especially for large genomes/data sets to initially
+generate at least one small chunk and run proovread on this chunk to get an idea
+of overall performance.
+
+#+BEGIN_SRC 
+# generate a single <10Mbp chunk
+SeqChunker -s 20M -l 1 -o pb-%03d.fq pb-subreads.fq
+#+END_SRC
+
+*** What to expect from correction / Crunching numbers
+
+Just to give you a hands-on idea of what to expect from correction. Here are some stats of the latest correction
+I ran. It's from one PacBio cell of a 50Mb heterozygous eukaryote genome (I will add some more numbers on other
+data sets and correction tools soon) 
+
+|               |       raw   |   proovread |     lordec |
+|---------------+-------------+-------------+------------|
+| Sequences     |      56,877 |      55,493 |     53,676 |
+| Total (bp)    | 315,511,633 | 236,687,413 | 99,379,617 |
+| Longest (bp)  |      27,874 |      24,682 |     13,917 |
+| Shortest (bp) |       1,000 |       1,000 |      1,000 |
+| N50 (bp)      |       7,592 |       6,236 |      1,877 |
+| N90 (bp)      |       2,887 |       1,934 |      1,141 |
+
+*** Why do proovread results from two identical runs differ / Is proovread deterministic?
 
 One might expect that proovread results are deterministic - meaning reproducible
 in identical form if input data is identical. This, however, is not the case in
 a couple of steps:
 
-***** bwa mem mappings
+**** bwa mem mappings
 bwa employs heuristics that allow for slightly different
 results in repeated runs. In particular, one feature is prone to generate
 differences when employed in proovread's iterative strategy: for performance
@@ -274,33 +315,171 @@ in particular, effects alignments at the margins of masked regions:
    aln-02 |    AATTGGTTAAT
 #+END_EXAMPLE
 
-***** sorting with threshold
+**** sorting with threshold
 Whenever there are decisions to make for sorted list in combination with fixed 
 amount of items to keep/remove, things get non-deterministic if identical values in sorting
 fields occur. In proovread, this for example affects filtering of "best alignments" in
 bins (localized scoring context).
 
-***** consensus calling
+**** consensus calling
 50-50 ratios in base calling will result in one randomly
 chosen alternative, minimizing a particular bias.
 
-** Algorithm and Implementation
-Algorithm and Implementation are described in detail in the [[http://dx.doi.org/10.1093/bioinformatics/btu392][proovread]] paper.
+*** Read IDs don't look like proper PacBio subread IDs / no-ccs mode ([[https://github.com/BioInf-Wuerzburg/proovread/issues/27][#27]], [[https://github.com/BioInf-Wuerzburg/proovread/issues/76][#76]])
+proovread by default expects to work with PacBio subread data (see [[http://files.pacb.com/software/smrtanalysis/2.2.0/doc/smrtportal/help/!SSL!/Webhelp/Portal_PacBio_Glossary.htm][PacBio
+terminology]] / [[https://github.com/PacificBiosciences/SMRT-Analysis/wiki/Data-files-you-received-from-your-service-provider][PacBio SMRT data]]). The reads have a standardized header as shown
+below, that provide information about the relative location of an individual
+subread within the full polymerase read. proovread scans header based on this
+convention to parse the subread coordinates, which are required to generate
+circular consensus sequences.
 
-file:media/proovread-poster.pdf
-***                                                            :noexport:
-[[https://github.com/BioInf-Wuerzburg/proovread/blob/master/media/proovread-poster.pdf][view proovread mechanism poster]]
+A /Read IDs don't look like proper PacBio subread IDs/ warning will be thrown in
+case the provided data does not match this convention. *If your data are not
+PacBio subreads, you can ignore this warning*. proovread will simply skip the
+circular consensus step. If your data are subreads, then something is off with
+their format.
 
-*** bwa-proovread
 
+#+BEGIN_SRC
+ m140415_143853_42175_c100635972550000001823121909121417_s1_p0/553/3100_11230
+└1┘└────2─────┘ └─3─┘ └────────────────4────────────────┘└5┘└6┘└7┘ └───8────┘
+#+END_SRC
 
-proovread does local score comparison, rather than using a single hard
-cut-off. bwa-proovread is modified in the same fashion. =proovread.[ch]= extend
-bwa with an implementation of proovread's binning algorithm. Reporting of
-alignments is determined by score-comparison within bins. That way repeat
-alignments are filtered early on, increasing performance and largely reducing
-disk space requirements.
+1. =m= = movie
+2. Time of Run Start (=yymmdd_hhmmss=)
+3. Instrument Serial Number
+4. SMRT Cell Barcode
+5. Set Number (a.k.a. "Look Number". Deprecated field, used in earlier version of RS)
+6. Part Number (usually =p0=, =X0= when using expired reagents)
+7. ZMW hole number, unique read ID within cell
+8. Subread Region (=start_stop= using polymerase read coordinates)
 
+*** Chimeras, siamaeras and so on
+**** Chimeras in general
+OK, let's try to clarify terminology. PacBio generates two types of chimeric reads:
+
+***** 1. unsplit subreads, i.e. siamaera 
+Reads structure looks like this: =----R1--->--A--<--R1.rc--=. This happens quite
+frequently, however, it strongly depends on chemistry and particularly the
+quality of the libary prep. The more short DNA fragments make it through size
+selection, the more chances for having multiple subreads in one read... I've
+seen libraries form <1% to >5%.
+***** 2. random fusion chimeras
+I'm not exactly sure, when or how this happens, but there is a fraction of
+reads, where random sequences seem to be fused together. Probably some blunt end
+ligations during library prep, or similar effect ... This seems to happen quite
+rarely, and it is hard to quantify exactly, as there are other effects, that can
+cause reads to look like chimeras, although they aren't. For proper
+quantification, you would need a perfect reference (no collapsed copies, etc),
+your sample should not contain any structural variations, all reads would have
+to map uniquely, so no large genomes with repeats... And also correction itself
+can generate chimeras in-silico, e.g. if there are regions with multiple, yet
+slightly different copies in the sequenced genome, and this variation is lost in
+consensus steps.
+
+**** chimera detection (short read based)
+There are three cases one needs to consider when looking at proovread's chimera
+detection based in short reads mappings:
+
+***** 1. no alignments across breakpoint
+#+BEGIN_SRC
+:---->     <-----: short reads
+:----->   <------:
+:-------|--------: chimeric pacbio sequence
+#+END_SRC
+
+This happens often with siameras, because at the breakpoint, there is a
+(corrupted) adapter sequence that is not present in short read data. But also if
+original sequences and the sequence that was put their through fusion look
+rather different. In this case, it comes down to a) the sensitivity and scoring
+of the alignments and b) the mode of mapping (shrimp aligns global, bwa aligns
+local with a penalty on trimmed alignments, making breakpoint overlap alignments
+less likely.)
+
+In any case, it is not possible to detect the fusion event. However, these
+regions will be removed during trimming, since there is no coverage for the
+consensus, hence, at least trimmed reads won't be chimeric.
+
+***** 2. not enough inconsistencies in aligned reads
+#+BEGIN_SRC
+:-->  <A-G-------: short reads
+:------A-G>   <--:
+:------A|G-------: chimeric pacbio sequence
+#+END_SRC
+
+If original and fusion sequence look similar, you will get short read coverage
+at the breakpoint, but unless their are inconsistencies in the bases of aligned
+reads, the chimera will go undetected.
+
+***** 3. detectable chimera
+#+BEGIN_SRC
+:-->  <C-G-------: short reads
+:------A-T>   <--:
+:------A|G-------: chimeric pacbio sequence
+#+END_SRC
+
+If there is short read coverage at the breakpoint and there are differences in
+reads overlapping from either side, proovread will call the chimera, report it
+to *.chim.tsv and split the reads accordingly when writing trimmed output
+(=SeqFilter --substr *.chim.tsv=). Details of detection and assessment of
+"differences" are described in more detail in the paper. But basically, I
+compare whether splitting would decrease overall error rates at the location or
+not.
+
+**** siamaera detection (by long read structure)
+The siamaera module works independently of short read alignments and
+specifically targets improperly split subreads. This module wasn't part of the
+original publication, I added it, because in some of my data sets, quite a lot
+of this type of reads made it through correction, giving me trouble during
+assembly. It's neither pretty nor fast, but gets the job done. It works
+pretty reliable, however, there is a chance that palindromic regions get trimmed
+as well. 
+
+When I introduced this filter, I also decreased sensitivity of proovreads
+internal "detect-chimera" filter. Original settings were rather hypersensitive -
+better-safe-than-sorry - working well for the paper data, but producing quite a
+lot of false positives on complex and particularly heterozygous data sets.
+
+Siamaeric reads usually are separated by short joint sequences (corrupted
+adapter). Detection is based on blasting and identifying reads with reverse
+complement self hits. Reads are trimmed to the longest non-chimaeric subsequence
+without joint sequence.
+
+#+BEGIN_SRC
+      ----R--->--J--<--R.rc--  siamaeric read
+      ----R--->                trimmed read
+
+      --R->-J-<----R.rc-----   siameric read2
+              <----R.rc-----   trimmed read2
+#+END_SRC
+
+**** Running chimera and siamaera trimming stand-alone ([[https://github.com/BioInf-Wuerzburg/proovread/issues/75][#75]])
+After the iterative correction, proovread runs trimming of low-quality regions,
+potential chimera and siamaera breakpoints all in one step (=Quality trimming
+and siamaera filtering raw output= in the log). To run chimera/siamaera
+indepedently quality trimming, you can use the following commands:
+
+#+BEGIN_SRC 
+# setup environment
+export PATH=/path/to/proovread/bin:$PATH
+export PERL5LIB=/path/to/proovread/lib:$PERL5LIB
+
+# proovread run data
+PRE=/path/to/run-prefix/prefix
+
+# chimera trim only, no low-quality
+SeqFilter \
+ --in $PRE.untrimmed.fq \
+ --phred-offset 33 \
+ --min-length 500 `# proovread default` \
+ --substr $PRE.chim.tsv \
+ --out $PRE.chimera-only.fq 
+
+# siamaera trim only
+siamaera \
+ < $PRE.untrimmed.fq \
+ > $PRE.siamaera.fq
+#+END_SRC
 ** Citing proovread
 If you use proovread, please cite:
 
@@ -323,14 +502,13 @@ Lacroute; Adrian V. Dalca; Marc Fiume; Arend Sidow; Michael Brudno. (2009)
 If you have any questions, encounter problems or potential bugs, don't hesitate
 to contact us. Either report [[https://github.com/BioInf-Wuerzburg/proovread/issues][issues]] on github or write an email to:
 
-- Thomas Hackl - thomas.hackl@uni.wuerzburg.de
+- Thomas Hackl - thackl@lim4.de
 - Frank Foerster - frank.foerster@uni-wuerzburg.de
-
 
 
 #+TITLE: proovread manual
 #+AUTHOR: Thomas Hackl, Frank Förster
-#+EMAIL: thomas.hackl@uni-wuerzburg.de, frank.foerster@uni-wuerzburg.de
+#+EMAIL: thackl@lim4.de, frank.foerster@uni-wuerzburg.de
 #+LANGUAGE: en
 #+OPTIONS: ^:nil date:nil H:2 todo:nil
 #+LaTeX_CLASS: scrartcl
