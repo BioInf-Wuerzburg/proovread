@@ -25,18 +25,12 @@ The build tests proovread under different Perl versions (5.10.1, 5.12,
 ** Installation
 
 #+BEGIN_EXAMPLE
-  # fresh install
-  git clone --recursive https://github.com/BioInf-Wuerzburg/proovread
-  cd proovread/util/bwa
-  make
+  git clone https://github.com/BioInf-Wuerzburg/proovread
+  (cd proovread/util/bwa && make && make install)
+  # make install takes: PREFIX=/my/software/proovread
 
   # update existing install to latest version
-  cd proovread/
-  git pull
-  git submodule update --recursive
-  cd util/bwa
-  make clean  # important for changes to bwa source code taking effect
-  make
+  (cd proovread && make update)
 #+END_EXAMPLE
 
 NOTE: proovread comes with its own, modified version of [[#bwa-proovread][bwa]]. Using it
@@ -58,7 +52,7 @@ to employ your own installed version of these mappers, have a look at the
 Test your installation by running proovread on the included sample data set.
 
 #+BEGIN_EXAMPLE
-  proovread --sample --pre pr-sample
+  make sample
 #+END_EXAMPLE
 
 Split long read data into chunks. See [[#getting-chunk-sizes-right][Getting chunk sizes right]] for details,
