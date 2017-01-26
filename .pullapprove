@@ -6,5 +6,5 @@ author_approval: required
 reviewers:
   members: "all"
   name: default
-  required: 2
+  required: 1
 
