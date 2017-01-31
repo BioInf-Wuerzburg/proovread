@@ -11,8 +11,6 @@ ifneq ($(PREFIX),.)
 endif
 
 clean:
-	-rm -fr util/Seq*/*
-	-rm -fr util/bwa/*
 	-rm -fr sample-results
 
 util:
