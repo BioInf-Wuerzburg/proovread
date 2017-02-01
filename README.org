@@ -8,14 +8,11 @@
 The build tests proovread under different Perl versions (5.10.1, 5.12,
 5.14, 5.18, 5.20, 5.22) and samtools (1.2, 1.3).
 ** What's new
+***** proovread-2.14.0
+- Makefile install interface
 ***** proovread-2.13.13
 - Usage of SeqChunker v0.4, therefore support of MacOSX
-***** proovread-2.13.12
-- Added support for [[https://travis-ci.org/BioInf-Wuerzburg/proovread][Travis-CI]] builds
-***** proovread-2.12
-- revisited *unitig* mode with improved filter for repeat regions
-- *dazzling proovread* - experimental support for [[https://dazzlerblog.wordpress.com/2014/12/31/damapper-and-other-dazzler-upgrades/][DALIGNER]] as unitig mapper (faster/more sensitive than blasr)
-***** proovread-2.00
+***** proovread-2.0
 - much faster and more sensitive due to *bwa mem* as default mapper
 - increased speed and contiguity by using *unitigs* in correction
 - optimized for HiSeq & *MiSeq* reads
@@ -26,17 +23,15 @@ The build tests proovread under different Perl versions (5.10.1, 5.12,
 
 #+BEGIN_EXAMPLE
   # fresh install
-  git clone --recursive https://github.com/BioInf-Wuerzburg/proovread
-  cd proovread/util/bwa
-  make
+  git clone https://github.com/BioInf-Wuerzburg/proovread
+  (cd proovread && make && make install)
+  # make install takes: PREFIX=/my/software/proovread
+
+  # make a test run
+  (cd proovread && make sample)
 
   # update existing install to latest version
-  cd proovread/
-  git pull
-  git submodule update --recursive
-  cd util/bwa
-  make clean  # important for changes to bwa source code taking effect
-  make
+  (cd proovread && make update)
 #+END_EXAMPLE
 
 NOTE: proovread comes with its own, modified version of [[#bwa-proovread][bwa]]. Using it
@@ -58,7 +53,7 @@ to employ your own installed version of these mappers, have a look at the
 Test your installation by running proovread on the included sample data set.
 
 #+BEGIN_EXAMPLE
-  proovread --sample --pre pr-sample
+  (cd proovread && make sample)
 #+END_EXAMPLE
 
 Split long read data into chunks. See [[#getting-chunk-sizes-right][Getting chunk sizes right]] for details,
