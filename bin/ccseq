@@ -198,6 +198,10 @@ $L->info("Reading STDIN") unless $opt{reads};
 my $rpr = Fastq::Parser->new($opt{reads} ? (file => $opt{reads}) : ())->check_format;
 if ($rpr) {
     my $po = $rpr->guess_phred_offset();
+    if(!defined($po)){
+        $po=33;
+        $L->info("Couldn't guess phred offset, but assuming 33 for PacBio");
+    }
     $L->logdie("Expected phred offset 33") if $po && $po != 33;
     $rpr->phred_offset($po); # should be 33 for PacBio
 } else {
