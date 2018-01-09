@@ -241,7 +241,7 @@ my $opt_ref_file;
 my $rpr;
 
 if($opt_ref_pat){
-	($opt_ref_file) = glob($opt_ref_pat);
+	($opt_ref_file) = glob("'${opt_ref_pat}'");
 	$v->exit("Reference file not found ($opt_ref_pat)") unless $opt_ref_file;
 	# init fastq/fasta parser
 	$rpr = Fastq::Parser->new(file => $opt_ref_file)->check_format;
