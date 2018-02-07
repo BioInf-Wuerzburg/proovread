@@ -1708,14 +1708,15 @@ sub correct_sr_mt{
         $VB->hline;
         $VB->verbose($cmd);
         my $re = qx($cmd);
-        my ($bpt, $bpN) = (split(/\s/, $re))[1,6];
+	# extract the second field (total number of nucleotids) and the last field (number of N positions)
+        my ($bpt, $bpN) = (split(/\s/, $re))[1,-1];
         $VB->hline;
 
         $V->exit("SeqFilter failed to mask $fq_file: $?\n") if $?;
 
         my $bpN_frac = $bpN/$bpt;
         $VB->nline;
-        $VS->verbose(sprintf "Masked : %0.1f%%", $bpN/$bpt*100);
+        $VS->verbose(sprintf "Masked : %0.1f%%", $bpN_frac*100);
 
 	return wantarray ? (\@ref_idxs, $bpN_frac) : \@ref_idxs; # wantarray guarantees backward compatibility
 }
