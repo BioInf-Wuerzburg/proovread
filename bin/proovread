@@ -41,7 +41,7 @@ use Time::HiRes qw(usleep);
 use Data::Dumper;
 $Data::Dumper::Sortkeys = 1;
 
-use version 0.77; our $VERSION = qv("2.14.0");
+use version 0.77; our $VERSION = qv("2.14.1");
 
 my $RealLib = "$RealBin/../lib/";
 my $RealPerl = "$^X -I${RealLib} $RealBin";
@@ -1376,6 +1376,8 @@ sub read_long{
 
         my $noccs;
 
+        my $stubby_length = cfg('lr-min-length') // 2*$min_sr_length;
+
 	foreach(@$opt_lr_file){
 
 		my $lrpr;
@@ -1406,7 +1408,7 @@ sub read_long{
                                     $noccs++;
                                 }
 
-                                if(length($lr->seq) < 2*$min_sr_length){
+                                if(length($lr->seq) < $stubby_length){
 					$stubby_count++;
 					printf IGNORE "%s\t%s\n", $lr->id, "stubby";
 					next;
@@ -1425,7 +1427,7 @@ sub read_long{
                                                               );
                         }
 			close IGNORE;
-			$V->verbose("Skipped $stubby_count stubby reads with length <".2*$min_sr_length) if $stubby_count;
+			$V->verbose("Skipped $stubby_count stubby reads with length <".$stubby_length) if $stubby_count;
 
 		}else{ # FASTQ ref
 			if($opt_mode eq 'sam' or $opt_mode eq 'bam' ){
@@ -1463,7 +1465,7 @@ sub read_long{
                                             $noccs++;
                                         }
 
-                                        if(length($lr->seq) < 2*$min_sr_length){
+                                        if(length($lr->seq) < $stubby_length){
 						$stubby_count++;
 						printf IGNORE "%s\t%s\n", $lr->id, "stubby";
 						next;
@@ -1479,7 +1481,7 @@ sub read_long{
 					$lr{$lr->id} = $lr;
 				}
 				close IGNORE;
-				$V->verbose("Skipped $stubby_count stubby reads with length <".2*$min_sr_length) if $stubby_count;
+				$V->verbose("Skipped $stubby_count stubby reads with length <".$stubby_length) if $stubby_count;
 
 			}
 		}
