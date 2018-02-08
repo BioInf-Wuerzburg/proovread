@@ -31,7 +31,7 @@ install:
     - cd samtools-"$SAMTOOLSVERSION" && make && export PATH=$PWD:"$PATH" && ls && pwd && cd -
     - mkdir -p /tmp/shunit2 && cd /tmp/shunit2 && wget 'https://github.com/greatfireball/shunit2/archive/v2.1.7.tar.gz' -O - | tar xzf - --strip 1
 script: 
-    - cd $PROOVREADDIR/test && bash testInstallation.sh
+    - cd $PROOVREADDIR/test && bash testInstallation.sh && bash testSeqFilterError.sh
 notifications:
     slack:
         secure: Mu7v0562KyuYMc76eg+9UWtqdF25fH9+ZKBzDD19h41YkjzxCmdPvF+jyD0SJGTsMZh0lKXSt8Ftqb9EWk3JDqzrkNOsDQunNuFwOgT/kF9i0s69mYl7KYR8vUUFHZirJ2aEXrWkeM1kF/tcopmMp/YytALKDDSoW1/6jHRj/go=
