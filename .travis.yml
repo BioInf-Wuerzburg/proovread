@@ -6,6 +6,15 @@ perl:
   - "5.18.3-thr"
   - "5.20.1-thr"
   - "5.22.0-thr"
+env:
+    - SAMTOOLSVERSION="1.2"
+    - SAMTOOLSVERSION="1.3"
+    - SAMTOOLSVERSION="1.3.1"
+    - SAMTOOLSVERSION="1.4"
+    - SAMTOOLSVERSION="1.4.1"
+    - SAMTOOLSVERSION="1.5"
+    - SAMTOOLSVERSION="1.6"
+    - SAMTOOLSVERSION="1.7"
 cache:
   directories:
     - $HOME/samtools-$SAMTOOLSVERSION
@@ -15,9 +24,6 @@ addons:
   apt:
     packages:
     - ncbi-blast+
-env:
-    - SAMTOOLSVERSION="1.3"
-    - SAMTOOLSVERSION="1.2"
 before_install:
   - git clone git://github.com/travis-perl/helpers ~/travis-perl-helpers
   - source ~/travis-perl-helpers/init
